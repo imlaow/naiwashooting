@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Naiwa Island Showdown</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="overlay">
+    <div id="loading" class="panel">
+      <h2>Naiwa Island</h2>
+      <div class="bar"><div id="load-bar"></div></div>
+      <p id="load-text">Starting…</p>
+    </div>
+
+    <div id="title" class="panel hidden">
+      <img class="hero" src="assets/hero_1.png" alt="Naiwa, the hero" />
+      <h1>NAIWA<span>Island Showdown</span></h1>
+      <p class="tag">Rival Naiwas have invaded your tropical island. Grab a weapon and defend the beach!</p>
+      <button id="play">PLAY</button>
+      <p id="best-score" class="best"></p>
+      <div class="controls">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</div>
+        <div><kbd>Mouse</kbd> aim &amp; shoot</div>
+        <div><kbd>Space</kbd> dash</div>
+        <div><kbd>R</kbd> reload</div>
+        <div><kbd>1</kbd>–<kbd>4</kbd> / wheel weapons</div>
+        <div><kbd>P</kbd> pause · <kbd>M</kbd> mute</div>
+      </div>
+      <p class="touch-note">Touch: left thumb moves (tap to dash), right thumb aims &amp; fires.</p>
+    </div>
+
+    <div id="pause" class="panel hidden">
+      <h2>Paused</h2>
+      <button id="resume">RESUME</button>
+      <button id="quit" class="ghost">QUIT TO TITLE</button>
+    </div>
+
+    <div id="over" class="panel hidden">
+      <h2>Washed Ashore</h2>
+      <div class="stats">
+        <div><span>Score</span><b id="go-score">0</b></div>
+        <div><span>Wave</span><b id="go-wave">0</b></div>
+        <div><span>Kills</span><b id="go-kills">0</b></div>
+        <div><span>Best</span><b id="go-best">0</b></div>
+      </div>
+      <button id="again">PLAY AGAIN</button>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
