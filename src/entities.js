@@ -122,7 +122,8 @@ export class Player {
     sfx.play('reload');
   }
 
-  // Naiwa laughs his head off: frozen and untouchable until the clip ends.
+  // Naiwa laughs his head off: frozen, untouchable and ignored by enemies until the
+  // clip ends, then back to full health.
   laugh() {
     if (!this.game.skins.laugh || this.laughT >= 0 || this.dead) return false;
     this.laughT = 0;
@@ -157,6 +158,12 @@ export class Player {
       }
       this.laughT = -1;
       this.gun.visible = true;
+      const heal = Math.ceil(this.maxHp - this.hp);
+      if (heal > 0) {
+        this.hp = this.maxHp;
+        game.fx.text(this.x, this.y - 100, `+${heal}`, 0x4ade80, 1.2);
+        sfx.play('heal');
+      }
     }
     // ----- Aim -----
     let firing = false;
@@ -393,7 +400,13 @@ export class Enemy {
     let wx = 0, wy = 0, speed = this.T.speed * this.speedMul;
     const T = this.T;
 
-    if (this.type === 'crab') {
+    if (P.laughT >= 0) {
+      // Enemies lose track of a laughing Naiwa and mill around until he stops.
+      this.wanderT -= dt;
+      if (!(this.wanderT > 0)) { this.wanderT = 1.2 + Math.random() * 1.8; this.wanderA = Math.random() * Math.PI * 2; }
+      wx = Math.cos(this.wanderA); wy = Math.sin(this.wanderA); speed *= 0.35;
+      this.aim = this.wanderA;
+    } else if (this.type === 'crab') {
       const wob = Math.sin(game.time * 7 + this.animT) * 0.7;
       wx = tx - ty * wob; wy = ty + tx * wob;
       this.biteCd -= dt;
