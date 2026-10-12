@@ -10,7 +10,9 @@ export function paint(w, h, anchor, draw) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(w * RES);
   canvas.height = Math.ceil(h * RES);
-  const ctx = canvas.getContext('2d');
+  // Keep every painted canvas in CPU memory: on Android a GPU reset (fullscreen, rotation, app switch)
+  // wipes GPU-backed canvases, and Pixi re-uploads textures from these canvases when WebGL comes back.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.scale(RES, RES);
   draw(ctx, w, h);
   const tex = new Texture({ source: new CanvasSource({ resource: canvas, resolution: RES }) });
@@ -613,7 +615,7 @@ function oceanTexture() {
   const S = 256;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = S;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const img = ctx.createImageData(S, S);
   for (let y = 0, p = 0; y < S; y++) for (let x = 0; x < S; x++, p += 4) {
     const u = x / S * TAU, v = y / S * TAU;

@@ -162,7 +162,7 @@ export class Island {
     const S = Math.round(WORLD * scale);
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = S;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.createImageData(S, S);
     const px = img.data;
     const detailNoise = makeNoise(this.seed + 9);
@@ -416,7 +416,7 @@ export class Island {
     const S = Math.round(WORLD * scale);
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = S;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.createImageData(S, S);
     const px = img.data;
     const noise = makeNoise(this.seed + 31 + offset * 100);
@@ -440,7 +440,7 @@ export class Island {
   paintMinimap(size) {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = size;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.createImageData(size, size);
     const k = WORLD / size;
     for (let y = 0, p = 0; y < size; y++) for (let x = 0; x < size; x++, p += 4) {

@@ -40,7 +40,7 @@ export async function loadLaugh() {
 function findHeadX(img) {
   const c = document.createElement('canvas');
   c.width = img.width; c.height = img.height;
-  const ctx = c.getContext('2d');
+  const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
   const d = ctx.getImageData(0, 0, c.width, c.height).data;
   for (let y = 0; y < c.height; y++) {
@@ -54,7 +54,7 @@ function findHeadX(img) {
 function recolor(img, { hue, sat, light }) {
   const c = document.createElement('canvas');
   c.width = img.width; c.height = img.height;
-  const ctx = c.getContext('2d');
+  const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
   const id = ctx.getImageData(0, 0, c.width, c.height);
   const d = id.data;
