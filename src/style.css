@@ -18,6 +18,15 @@ html, body {
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
 }
+#app { position: fixed; inset: 0; overflow: hidden; }
+/* Upright phone: lay the game out landscape and turn it a quarter turn clockwise. Fixed children
+   (#overlay, #touch-hud) are positioned against #app because it is transformed. */
+body.rotated #app {
+  inset: auto; top: 0; left: 0;
+  width: var(--gw); height: var(--gh);
+  transform-origin: 0 0;
+  transform: translateX(var(--gh)) rotate(90deg);
+}
 #stage canvas { display: block; }
 body.playing #stage canvas { cursor: none; }
 
@@ -167,19 +176,17 @@ body.touch .touch-note { font-size: 15px; opacity: 0.85; line-height: 1.45; }
 body.touch button:hover { transform: none; }
 
 /* Phones in landscape: squeeze the menus to fit the short screen. */
-@media (max-height: 520px) {
-  .panel { padding: 16px 20px 14px; }
-  .hero { height: 84px; margin: -4px 0 0; }
-  h1 { font-size: 44px; }
-  h2 { font-size: 30px; }
-  .tag { margin-bottom: 10px; font-size: 14px; }
-  button { font-size: 22px; padding: 9px 36px; }
-  .touch-note { margin-top: 8px; }
-  .stats { margin: 8px 0 12px; }
-  .stats b { font-size: 24px; }
-}
-@media (max-width: 420px) {
-  .panel { padding: 24px 18px 18px; }
-  .hero { height: 120px; }
-  .tag { font-size: 15px; }
+/* A class rather than a media query, since the rotated view's height is the screen's width. */
+body.compact .panel { padding: 16px 20px 14px; }
+body.compact .hero { height: 84px; margin: -4px 0 0; }
+body.compact h1 { font-size: 44px; }
+body.compact h2 { font-size: 30px; }
+body.compact .tag { margin-bottom: 10px; font-size: 14px; }
+body.compact .panel > button { font-size: 22px; padding: 9px 36px; }
+body.compact .touch-note { margin-top: 8px; }
+body.compact .stats { margin: 8px 0 12px; }
+body.compact .stats b { font-size: 24px; }
+body.rotated #touch-hud { top: calc(env(safe-area-inset-right) + 10px); right: calc(env(safe-area-inset-bottom) + 10px); }
+body.rotated #overlay {
+  padding: max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-top));
 }

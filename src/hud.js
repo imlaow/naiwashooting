@@ -24,9 +24,10 @@ function safeInsets() {
   el.style.cssText = 'position:fixed;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
   document.body.appendChild(el);
   const cs = getComputedStyle(el);
-  const r = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
+  const [top, right, bottom, left] = ['Top', 'Right', 'Bottom', 'Left'].map((k) => parseFloat(cs[`padding${k}`]) || 0);
   el.remove();
-  return r;
+  // In the rotated view the physical right edge is the game's top.
+  return document.body.classList.contains('rotated') ? { top: right, right: bottom, bottom: left, left: top } : { top, right, bottom, left };
 }
 
 // Shrinks a text so it fits within maxW.
@@ -129,7 +130,7 @@ export class Hud {
     this.stickHints = [label(15, '#e8f6ff'), label(15, '#e8f6ff')];
     this.stickHints[0].text = t('hud.touchMove');
     this.stickHints[1].text = t('hud.touchAim');
-    for (const h of this.stickHints) h.anchor.set(0.5, 0);
+    for (const h of this.stickHints) h.anchor.set(0.5, 1);
     ui.addChild(this.cross, this.reloadArc, this.sticks, ...this.stickHints);
   }
 
@@ -160,7 +161,11 @@ export class Hud {
     this.hpPanel.scale.set(s);
     this.hpPanel.position.set(L, T);
     this.wpPanel.scale.set(s);
-    this.wpPanel.position.set(R - 270 * s, B - 118 * s);
+    // Touch play keeps both bottom corners for the sticks, so the weapon panel sits between them.
+    this.wpPanel.position.set(touch ? Math.round(w / 2 - 135 * s) : R - 270 * s, B - 118 * s);
+    const input = this.game.input, sr = input.stickR;
+    input.stickCenters[0] = { x: L + sr + 46, y: B - sr - 36 };
+    input.stickCenters[1] = { x: R - sr - 46, y: B - sr - 36 };
     // Small labels shrink less so they stay readable.
     for (const txt of [this.waveText, this.scoreText]) txt.scale.set(s);
     for (const txt of [this.enemyText, this.comboText, this.bossName]) txt.scale.set(Math.max(0.85, s));
@@ -184,9 +189,11 @@ export class Hud {
     fit(this.toastText, w - 32);
     this.hint.position.set(w / 2, h - 16);
     this.hint.visible = !touch && w >= 700;
-    this.stickHints[0].position.set(w * 0.2, h * 0.72 + 70);
-    this.stickHints[1].position.set(w * 0.8, h * 0.56 + 70);
-    for (const hnt of this.stickHints) fit(hnt, w * 0.38);
+    this.stickHints.forEach((hnt, i) => {
+      const c = input.stickCenters[i];
+      hnt.position.set(c.x, c.y - sr - 10);
+      fit(hnt, w * 0.3);
+    });
     this.drawStatic();
   }
 
@@ -333,22 +340,24 @@ export class Hud {
         r.arc(mx, my, 24, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2).stroke({ width: 4, color: 0x7dd3fc });
       }
     }
-    // Touch sticks, with faint placeholders and labels until the player has used them for a while
+    // Fixed touch sticks; labels fade out once the player has had time to learn them
     const s = this.sticks.clear();
-    const used = [false, false];
-    for (const st2 of input.sticks.values()) used[st2.left ? 0 : 1] = true;
-    const ghostA = input.touch && !P.dead ? Math.max(0, Math.min(1, this.hintT * 0.4)) : 0;
-    [[this.w * 0.2, this.h * 0.72], [this.w * 0.8, this.h * 0.56]].forEach(([x, y], i) => {
-      const a = used[i] ? 0 : ghostA;
-      this.stickHints[i].alpha = a * 0.9;
-      if (!a) return;
-      s.circle(x, y, 60).fill({ color: 0xffffff, alpha: 0.06 * a }).stroke({ width: 2, color: 0xffffff, alpha: 0.25 * a });
-      s.circle(x, y, 26).fill({ color: i ? 0xff6b6b : 0x7dd3fc, alpha: 0.3 * a });
-    });
-    for (const st2 of input.sticks.values()) {
-      s.circle(st2.ox, st2.oy, 60).fill({ color: 0xffffff, alpha: 0.08 }).stroke({ width: 2, color: 0xffffff, alpha: 0.3 });
-      const dx = st2.x - st2.ox, dy = st2.y - st2.oy, l = Math.hypot(dx, dy), m = Math.min(l, 60) / (l || 1);
-      s.circle(st2.ox + dx * m, st2.oy + dy * m, 26).fill({ color: st2.left ? 0x7dd3fc : 0xff6b6b, alpha: 0.45 });
+    const show = input.touch && !P.dead;
+    const hintA = show ? Math.max(0, Math.min(1, this.hintT * 0.4)) : 0;
+    this.stickHints.forEach((hnt) => { hnt.alpha = hintA * 0.9; });
+    if (show) {
+      const R = input.stickR;
+      const knobs = input.stickCenters.map((c) => ({ x: c.x, y: c.y, on: false }));
+      for (const st2 of input.sticks.values()) {
+        const k = knobs[st2.left ? 0 : 1], { dx, dy } = input.stickVec(st2);
+        const l = Math.hypot(dx, dy), m = Math.min(l, R) / (l || 1);
+        k.x += dx * m; k.y += dy * m; k.on = true;
+      }
+      input.stickCenters.forEach((c, i) => {
+        const k = knobs[i];
+        s.circle(c.x, c.y, R).fill({ color: 0x0b1e2a, alpha: 0.22 }).stroke({ width: 2, color: 0xffffff, alpha: k.on ? 0.4 : 0.22 });
+        s.circle(k.x, k.y, 26).fill({ color: i ? 0xff6b6b : 0x7dd3fc, alpha: k.on ? 0.6 : 0.3 });
+      });
     }
   }
 

@@ -13,14 +13,16 @@ npm run build    # static build in dist/
 
 Add `?seed=1234` to the URL to generate a different island.
 
+Phones always play in landscape: Android locks the orientation in fullscreen, and an upright iPhone gets the page rotated a quarter turn.
+
 The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (remembered per browser) or add `?lang=en`.
 
 ## Controls
 
 | Action | Keyboard / mouse | Touch |
 | --- | --- | --- |
-| Move | WASD / arrows | left thumb |
-| Aim & shoot | mouse, hold left button | right thumb |
+| Move | WASD / arrows | left stick (bottom-left) |
+| Aim & shoot | mouse, hold left button | right stick (bottom-right) |
 | Dash (i-frames) | Space / Shift | tap left side |
 | Reload | R | automatic, or tap the ammo count |
 | Switch weapon | 1–4, wheel, Q (last) | tap a weapon slot |

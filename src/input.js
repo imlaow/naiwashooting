@@ -1,5 +1,10 @@
 // Keyboard, mouse and twin-stick touch input.
 
+// Phones held upright get the game rotated a quarter turn (see main.js), so map screen points into game space.
+export function toGame(cx, cy) {
+  return document.body.classList.contains('rotated') ? { x: cy, y: innerWidth - cx } : { x: cx, y: cy };
+}
+
 export class Input {
   constructor(canvas) {
     this.keys = new Set();
@@ -15,6 +20,8 @@ export class Input {
     this.lastMoveT = -Infinity;
     this.aimStick = { x: 0, y: 0, active: false };
     this.sticks = new Map(); // pointerId -> stick
+    this.stickR = 60;
+    this.stickCenters = [{ x: 0, y: 0 }, { x: 0, y: 0 }]; // fixed move / aim stick centres, set by the HUD
     this.dashTap = false;
 
     addEventListener('keydown', (e) => {
@@ -30,12 +37,12 @@ export class Input {
       if (e.pointerType === 'touch') return this.touchStart(e);
       this.setTouch(false);
       this.mouse.down = true;
-      this.mouse.x = e.clientX; this.mouse.y = e.clientY;
+      Object.assign(this.mouse, toGame(e.clientX, e.clientY));
     });
     addEventListener('pointermove', (e) => {
       if (e.pointerType === 'touch') return this.touchMove(e);
       if (e.pointerType === 'mouse') this.setTouch(false);
-      this.mouse.x = e.clientX; this.mouse.y = e.clientY;
+      Object.assign(this.mouse, toGame(e.clientX, e.clientY));
     });
     addEventListener('pointerup', (e) => {
       if (e.pointerType === 'touch') return this.touchEnd(e);
@@ -54,24 +61,34 @@ export class Input {
 
   touchStart(e) {
     this.setTouch(true);
-    if (this.uiTap && this.uiTap(e.clientX, e.clientY)) return;
-    const left = e.clientX < innerWidth / 2;
-    const stick = { id: e.pointerId, left, ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY, t: performance.now() };
+    const p = toGame(e.clientX, e.clientY);
+    if (this.uiTap && this.uiTap(p.x, p.y)) return;
+    // Each half of the screen drives the stick fixed on that side, measured from the stick's centre.
+    const c = this.stickCenters;
+    const left = p.x < (c[0].x + c[1].x) / 2;
+    const stick = { id: e.pointerId, left, ox: p.x, oy: p.y, x: p.x, y: p.y, t: performance.now() };
     this.sticks.set(e.pointerId, stick);
   }
 
   touchMove(e) {
     const s = this.sticks.get(e.pointerId);
     if (!s) return;
-    s.x = e.clientX; s.y = e.clientY;
+    const p = toGame(e.clientX, e.clientY);
+    s.x = p.x; s.y = p.y;
   }
 
   touchEnd(e) {
     const s = this.sticks.get(e.pointerId);
     if (!s) return;
-    // A quick tap on the left side triggers a dash.
+    // A quick tap on the left side dashes, towards the tap from the stick centre (via recentMove).
     if (s.left && performance.now() - s.t < 180 && Math.hypot(s.x - s.ox, s.y - s.oy) < 12) this.dashTap = true;
     this.sticks.delete(e.pointerId);
+  }
+
+  // Thumb offset from the fixed centre of its stick.
+  stickVec(s) {
+    const c = this.stickCenters[s.left ? 0 : 1];
+    return { dx: s.x - c.x, dy: s.y - c.y };
   }
 
   // Called once per frame before game logic.
@@ -84,12 +101,12 @@ export class Input {
     if (k.has('s') || k.has('arrowdown')) my += 1;
     this.aimStick.active = false;
     for (const s of this.sticks.values()) {
-      const dx = s.x - s.ox, dy = s.y - s.oy;
+      const { dx, dy } = this.stickVec(s);
       const d = Math.hypot(dx, dy);
-      const R = 60;
+      const R = this.stickR;
       if (s.left) {
-        if (d > 6) { mx = dx / Math.max(R, d) ; my = dy / Math.max(R, d); }
-      } else if (d > 10) {
+        if (d > 8) { mx = dx / Math.max(R, d); my = dy / Math.max(R, d); }
+      } else if (d > 12) {
         this.aimStick = { x: dx / d, y: dy / d, active: true };
       }
     }
@@ -99,7 +116,7 @@ export class Input {
     if (mx || my) { this.lastMove.x = mx; this.lastMove.y = my; this.lastMoveT = performance.now(); }
   }
 
-  // Tap-to-dash lifts the move thumb first, so the dash goes the way it was just moving.
+  // Tap-to-dash lifts the thumb before the dash fires, so the dash goes the way it was just moving.
   get recentMove() {
     return performance.now() - this.lastMoveT < 500 ? this.lastMove : null;
   }

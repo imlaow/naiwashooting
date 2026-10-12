@@ -33,12 +33,35 @@ function writeBest(v) {
   try { localStorage.setItem('naiwa-best', String(v)); } catch { /* storage unavailable */ }
 }
 
+// Phones always play in landscape. Android locks the orientation once fullscreen; where that
+// isn't possible (iPhone) and the phone is held upright, #app is turned a quarter turn instead.
+const isPhone = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600;
+function layout() {
+  const rotated = isPhone && innerHeight > innerWidth;
+  const gw = rotated ? innerHeight : innerWidth, gh = rotated ? innerWidth : innerHeight;
+  document.body.classList.toggle('rotated', rotated);
+  document.body.classList.toggle('compact', gh < 520);
+  const st = document.documentElement.style;
+  st.setProperty('--gw', `${gw}px`);
+  st.setProperty('--gh', `${gh}px`);
+}
+
+function lockLandscape() {
+  if (!isPhone) return;
+  const lock = () => screen.orientation?.lock?.('landscape').catch(() => {});
+  if (document.fullscreenElement || !document.documentElement.requestFullscreen) return lock();
+  document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(lock, () => {});
+}
+
 async function boot() {
   applyDom();
+  // Runs before Pixi's own resize handler, which waits a frame and then measures #app.
+  layout();
+  addEventListener('resize', layout);
   show('loading');
   const app = new Application();
   await app.init({
-    resizeTo: window,
+    resizeTo: $('app'),
     background: 0x0e3b52,
     antialias: true,
     autoDensity: true,
@@ -108,8 +131,7 @@ async function boot() {
 
   const start = () => {
     sfx.unlock();
-    // Fullscreen hides the browser bars on phones (Android; iPhone Safari has no element fullscreen).
-    if (input.touch && !document.fullscreenElement) document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }).catch(() => {});
+    lockLandscape();
     newGame(false);
     show(null);
   };
