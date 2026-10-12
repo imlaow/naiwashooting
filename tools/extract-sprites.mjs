@@ -4,7 +4,7 @@ import sharp from 'sharp';
 
 const SRC = process.argv[2] ?? 'mmexport1791681378822.jpg';
 const OUT = 'public/assets';
-const TARGET_H = 220;
+const TARGET_H = 660; // 3x; loaded at resolution 3 in src/skins.js
 
 const { data, info } = await sharp(SRC).removeAlpha().raw().toBuffer({ resolveWithObject: true });
 const W = info.width, H = info.height;

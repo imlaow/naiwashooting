@@ -2,9 +2,12 @@
 import { Assets, Texture, CanvasSource } from 'pixi.js';
 
 const FRAME_URLS = [0, 1, 2, 3].map((i) => `${import.meta.env.BASE_URL}assets/hero_${i}.png`);
+// Frames are stored at 3x (660px tall) but keep their original 220px logical size.
+// Mipmaps keep the big frames from shimmering when drawn small.
+const FRAME_OPTS = { resolution: 3, autoGenerateMipmaps: true };
 
 export async function loadSkins() {
-  const textures = await Promise.all(FRAME_URLS.map((u) => Assets.load(u)));
+  const textures = await Promise.all(FRAME_URLS.map((src) => Assets.load({ src, data: FRAME_OPTS })));
   const images = textures.map((t) => t.source.resource);
   const headX = images.map(findHeadX);
   return {
@@ -52,7 +55,7 @@ function recolor(img, { hue, sat, light }) {
     d[i] = r; d[i + 1] = g; d[i + 2] = b;
   }
   ctx.putImageData(id, 0, 0);
-  return new Texture({ source: new CanvasSource({ resource: c }) });
+  return new Texture({ source: new CanvasSource({ resource: c, ...FRAME_OPTS }) });
 }
 
 function rgbToHsl(r, g, b) {
