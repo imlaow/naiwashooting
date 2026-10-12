@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "naiwa-shootout",
+  "compatibility_date": "2026-10-12",
+  // Static-only Worker: serves the Vite build output, no server code.
+  "assets": {
+    "directory": "./dist"
+  }
+}
