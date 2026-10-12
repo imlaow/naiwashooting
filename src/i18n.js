@@ -29,7 +29,7 @@ const STRINGS = {
     'pause.title': '已暂停',
     'pause.resume': '继续',
     'pause.quit': '返回标题',
-    'over.title': '被冲上岸了',
+    'over.title': '奶蛙阵亡',
     'over.score': '得分',
     'over.wave': '波次',
     'over.kills': '击杀',
