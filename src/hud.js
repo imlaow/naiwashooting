@@ -18,6 +18,23 @@ function label(size, color = '#ffffff', extra = {}) {
   });
 }
 
+// Notch / home-indicator insets in CSS pixels (needs viewport-fit=cover).
+function safeInsets() {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+  document.body.appendChild(el);
+  const cs = getComputedStyle(el);
+  const r = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
+  el.remove();
+  return r;
+}
+
+// Shrinks a text so it fits within maxW.
+function fit(text, maxW, base = 1) {
+  text.scale.set(1);
+  text.scale.set(Math.min(base, maxW / Math.max(1, text.width)));
+}
+
 export class Hud {
   constructor(game, minimapTex) {
     this.game = game;
@@ -109,31 +126,74 @@ export class Hud {
     this.cross = new Graphics();
     this.reloadArc = new Graphics();
     this.sticks = new Graphics();
-    ui.addChild(this.cross, this.reloadArc, this.sticks);
+    this.stickHints = [label(15, '#e8f6ff'), label(15, '#e8f6ff')];
+    this.stickHints[0].text = t('hud.touchMove');
+    this.stickHints[1].text = t('hud.touchAim');
+    for (const h of this.stickHints) h.anchor.set(0.5, 0);
+    ui.addChild(this.cross, this.reloadArc, this.sticks, ...this.stickHints);
+  }
+
+  // A touch on the weapon panel switches weapon (slot row) or reloads (ammo area).
+  tap(x, y) {
+    if (!this.ui.visible || !this.w) return false;
+    const P = this.game.player, p = this.wpPanel, s = p.scale.x;
+    const lx = (x - p.x) / s, ly = (y - p.y) / s;
+    if (lx < 0 || lx > 270 || ly < 0 || ly > 118 || P.dead) return false;
+    if (ly >= 64) {
+      const k = WEAPON_ORDER[Math.max(0, Math.min(WEAPON_ORDER.length - 1, Math.floor((lx - 11) / 62)))];
+      P.switchTo(k);
+    } else {
+      P.startReload();
+    }
+    return true;
   }
 
   resize(w, h) {
     this.w = w; this.h = h;
-    const small = w < 700;
-    const s = small ? 0.8 : 1;
+    const touch = (this.touchLayout = this.game.input.touch);
+    const ins = safeInsets();
+    const L = 14 + ins.left, R = w - 14 - ins.right, T = 14 + ins.top, B = h - 14 - ins.bottom;
+    // Shrink everything on phones; narrow (portrait) screens also move the wave counter below the health panel.
+    const s = Math.max(0.68, Math.min(1, w / 860, h / 620));
+    const narrow = w - ins.left - ins.right < 600;
+    this.bs = Math.max(0.55, Math.min(1, w / 900));
     this.hpPanel.scale.set(s);
-    this.hpPanel.position.set(14, 14);
+    this.hpPanel.position.set(L, T);
     this.wpPanel.scale.set(s);
-    this.wpPanel.position.set(w - 270 * s - 14, h - 118 * s - 14);
-    this.waveText.position.set(w / 2, 12);
-    this.enemyText.position.set(w / 2, 48);
-    this.scoreText.position.set(w - 16, 10);
-    this.comboText.position.set(w - 16, 46);
-    const ms = small ? 0.65 : 1;
+    this.wpPanel.position.set(R - 270 * s, B - 118 * s);
+    // Small labels shrink less so they stay readable.
+    for (const txt of [this.waveText, this.scoreText]) txt.scale.set(s);
+    for (const txt of [this.enemyText, this.comboText, this.bossName]) txt.scale.set(Math.max(0.85, s));
+    const waveY = narrow ? T + 70 * s + 6 : T - 2;
+    this.waveText.position.set(w / 2, waveY);
+    this.enemyText.position.set(w / 2, waveY + 36 * s);
+    this.bossY = waveY + 80 * s + 4;
+    // The pause / mute buttons take the top-right corner in touch mode.
+    const scoreY = T - 4 + (touch ? 52 : 0);
+    this.scoreText.position.set(R + 2, scoreY);
+    this.comboText.position.set(R + 2, scoreY + 36 * s);
+    const ms = touch || s < 1 ? 0.62 : 1;
     this.mini.scale.set(ms);
-    this.mini.position.set(14, h - this.miniSize * ms - 14);
+    // Touch players use the bottom-left corner as the move stick, so the minimap goes up top.
+    if (touch) this.mini.position.set(L + 4, (narrow ? this.bossY + 30 : T + 70 * s + 14));
+    else this.mini.position.set(L, B - this.miniSize * ms);
     this.bannerTitle.position.set(w / 2, h * 0.32);
-    this.bannerSub.position.set(w / 2, h * 0.32 + 52);
-    this.bannerTitle.scale.set(small ? 0.65 : 1);
-    this.toastText.position.set(w / 2, h - 60);
+    this.bannerSub.position.set(w / 2, h * 0.32 + 52 * this.bs);
+    this.fitBanner();
+    this.toastText.position.set(w / 2, touch || narrow ? B - 118 * s - 22 : h - 60);
+    fit(this.toastText, w - 32);
     this.hint.position.set(w / 2, h - 16);
-    this.hint.visible = !small;
+    this.hint.visible = !touch && w >= 700;
+    this.stickHints[0].position.set(w * 0.2, h * 0.72 + 70);
+    this.stickHints[1].position.set(w * 0.8, h * 0.56 + 70);
+    for (const hnt of this.stickHints) fit(hnt, w * 0.38);
     this.drawStatic();
+  }
+
+  fitBanner() {
+    fit(this.bannerTitle, this.w - 32, this.bs);
+    this.bannerFit = this.bannerTitle.scale.x;
+    fit(this.bannerSub, this.w - 32, Math.max(0.8, this.bs));
   }
 
   drawStatic() {
@@ -152,11 +212,13 @@ export class Hud {
     this.bannerTitle.tint = color;
     this.bannerSub.text = sub;
     this.bannerT = this.bannerMax = dur;
+    if (this.w) this.fitBanner();
   }
 
   toast(msg) {
     this.toastText.text = msg;
     this.toastT = 2.4;
+    if (this.w) fit(this.toastText, this.w - 32);
   }
 
   setText(obj, key, value) {
@@ -167,6 +229,7 @@ export class Hud {
 
   update(dt, mouseWorld) {
     const g = this.game, P = g.player, input = g.input;
+    if (input.touch !== this.touchLayout) this.resize(this.w, this.h);
     // Health
     const hpFrac = Math.max(0, P.hp / P.maxHp);
     this.shownHp = this.shownHp == null ? hpFrac : this.shownHp + (hpFrac - this.shownHp) * Math.min(1, dt * 4);
@@ -217,7 +280,7 @@ export class Hud {
     this.bossBar.clear();
     this.bossName.visible = !!boss;
     if (boss) {
-      const w = Math.min(460, this.w - 60), x = (this.w - w) / 2, y = 92;
+      const w = Math.min(460, this.w - 60), x = (this.w - w) / 2, y = this.bossY;
       this.bossBar.roundRect(x - 3, y - 3, w + 6, 20, 8).fill({ color: 0x000000, alpha: 0.6 })
         .roundRect(x, y, w * Math.max(0, boss.hp / boss.maxHp), 14, 6).fill(0xe11d48)
         .roundRect(x, y, w * Math.max(0, boss.hp / boss.maxHp), 4, 2).fill({ color: 0xffffff, alpha: 0.3 });
@@ -244,8 +307,7 @@ export class Hud {
     const ba = Math.min(1, bt * 2, into * 4);
     this.bannerTitle.alpha = this.bannerSub.alpha = ba;
     const pop = into < 0.25 ? 1 + (0.25 - into) * 1.6 : 1;
-    const bs = this.w < 700 ? 0.65 : 1;
-    this.bannerTitle.scale.set(bs * pop);
+    this.bannerTitle.scale.set(this.bannerFit * pop);
     this.toastT -= dt;
     this.toastText.alpha = Math.max(0, Math.min(1, this.toastT * 2));
     this.hintT -= dt;
@@ -271,8 +333,18 @@ export class Hud {
         r.arc(mx, my, 24, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2).stroke({ width: 4, color: 0x7dd3fc });
       }
     }
-    // Touch sticks
+    // Touch sticks, with faint placeholders and labels until the player has used them for a while
     const s = this.sticks.clear();
+    const used = [false, false];
+    for (const st2 of input.sticks.values()) used[st2.left ? 0 : 1] = true;
+    const ghostA = input.touch && !P.dead ? Math.max(0, Math.min(1, this.hintT * 0.4)) : 0;
+    [[this.w * 0.2, this.h * 0.72], [this.w * 0.8, this.h * 0.56]].forEach(([x, y], i) => {
+      const a = used[i] ? 0 : ghostA;
+      this.stickHints[i].alpha = a * 0.9;
+      if (!a) return;
+      s.circle(x, y, 60).fill({ color: 0xffffff, alpha: 0.06 * a }).stroke({ width: 2, color: 0xffffff, alpha: 0.25 * a });
+      s.circle(x, y, 26).fill({ color: i ? 0xff6b6b : 0x7dd3fc, alpha: 0.3 * a });
+    });
     for (const st2 of input.sticks.values()) {
       s.circle(st2.ox, st2.oy, 60).fill({ color: 0xffffff, alpha: 0.08 }).stroke({ width: 2, color: 0xffffff, alpha: 0.3 });
       const dx = st2.x - st2.ox, dy = st2.y - st2.oy, l = Math.hypot(dx, dy), m = Math.min(l, 60) / (l || 1);

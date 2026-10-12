@@ -25,7 +25,7 @@ const STRINGS = {
     'ctl.weapons': '/ 滚轮 切换武器',
     'ctl.pause': '暂停',
     'ctl.mute': '静音',
-    'title.touch': '触屏：左手拇指移动（轻点冲刺），右手拇指瞄准射击。',
+    'title.touch': '触屏：左手拇指移动（轻点冲刺），右手拇指瞄准射击。点击右下角武器栏切换武器，点击弹药数换弹。',
     'pause.title': '已暂停',
     'pause.resume': '继续',
     'pause.quit': '返回主菜单',
@@ -38,6 +38,10 @@ const STRINGS = {
     'hud.boss': '奶蛙大王',
     'hud.hint': 'WASD 移动  ·  鼠标 瞄准射击  ·  空格 冲刺  ·  R 换弹  ·  1-4 / 滚轮 切换  ·  P 暂停  ·  M 静音',
     'hud.reloading': '换弹中',
+    'hud.touchMove': '拖动移动 · 轻点冲刺',
+    'hud.touchAim': '拖动瞄准射击',
+    'hud.pause': '暂停',
+    'hud.mute': '静音',
     'hud.wave': '第 {n} 波',
     'hud.getReady': '准备战斗',
     'hud.nextWave': '{n} 秒后下一波',
@@ -49,6 +53,7 @@ const STRINGS = {
     'game.ammo': '弹药',
     'game.weaponAmmo': '{w}弹药',
     'game.pickedUp': '获得{w}  —  按 {n} 切换',
+    'game.pickedUpTouch': '获得{w}  —  点击武器栏切换',
     'game.bossWave': '奶蛙大王来袭！',
     'game.firstWave': '敌人正在登陆海滩',
     'game.incoming': '{n} 个敌人来袭',
@@ -90,7 +95,7 @@ const STRINGS = {
     'ctl.weapons': '/ wheel weapons',
     'ctl.pause': 'pause',
     'ctl.mute': 'mute',
-    'title.touch': 'Touch: left thumb moves (tap to dash), right thumb aims & fires.',
+    'title.touch': 'Touch: left thumb moves (tap to dash), right thumb aims & fires. Tap a weapon slot to switch, tap the ammo count to reload.',
     'pause.title': 'Paused',
     'pause.resume': 'RESUME',
     'pause.quit': 'QUIT TO TITLE',
@@ -103,6 +108,10 @@ const STRINGS = {
     'hud.boss': 'KING NAIWA',
     'hud.hint': 'WASD move  ·  Mouse aim & shoot  ·  Space dash  ·  R reload  ·  1-4 / wheel switch  ·  P pause  ·  M mute',
     'hud.reloading': 'RELOADING',
+    'hud.touchMove': 'Drag to move · tap to dash',
+    'hud.touchAim': 'Drag to aim & fire',
+    'hud.pause': 'Pause',
+    'hud.mute': 'Mute',
     'hud.wave': 'WAVE {n}',
     'hud.getReady': 'GET READY',
     'hud.nextWave': 'Next wave in {n}',
@@ -114,6 +123,7 @@ const STRINGS = {
     'game.ammo': 'AMMO',
     'game.weaponAmmo': '{w} AMMO',
     'game.pickedUp': 'Picked up {w}  —  press {n}',
+    'game.pickedUpTouch': 'Picked up {w}  —  tap its slot',
     'game.bossWave': 'KING NAIWA approaches!',
     'game.firstWave': 'Rivals are landing on the beaches',
     'game.incoming': '{n} hostiles incoming',
@@ -167,5 +177,6 @@ export function applyDom() {
   document.title = t('doc.title');
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
   for (const el of document.querySelectorAll('[data-i18n-alt]')) el.alt = t(el.dataset.i18nAlt);
+  for (const el of document.querySelectorAll('[data-i18n-label]')) el.setAttribute('aria-label', t(el.dataset.i18nLabel));
   for (const el of document.querySelectorAll('[data-lang-btn]')) el.classList.toggle('on', el.dataset.langBtn === lang);
 }

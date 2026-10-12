@@ -192,6 +192,7 @@ export class Player {
     const wantDash = input.wasPressed(' ') || input.wasPressed('shift') || input.dashTap;
     if (wantDash && this.dashCd <= 0 && this.dashT <= 0) {
       let dx = input.move.x, dy = input.move.y;
+      if (!dx && !dy && input.recentMove) ({ x: dx, y: dy } = input.recentMove);
       if (!dx && !dy) { dx = Math.cos(this.aim); dy = Math.sin(this.aim); }
       const l = Math.hypot(dx, dy);
       this.dashDir = { x: dx / l, y: dy / l };

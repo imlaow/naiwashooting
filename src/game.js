@@ -13,10 +13,10 @@ import { t } from './i18n.js';
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class Game {
-  constructor({ app, art, skins, island, terrainTex, input, onGameOver, onPause, demo = false }) {
+  constructor({ app, art, skins, island, terrainTex, input, onGameOver, onPause, onMute, demo = false }) {
     this.demo = demo;
     this.app = app; this.art = art; this.skins = skins; this.island = island; this.input = input;
-    this.onGameOver = onGameOver; this.onPause = onPause;
+    this.onGameOver = onGameOver; this.onPause = onPause; this.onMute = onMute;
     this.time = 0;
     this.timeScale = 1;
     this.paused = false;
@@ -65,6 +65,7 @@ export class Game {
     this.stateT = 3;
 
     this.hud = new Hud(this, terrainTex.minimap);
+    input.uiTap = demo ? null : (x, y) => this.hud.tap(x, y);
     this.resize();
     if (demo) this.hud.ui.visible = false;
     else this.hud.banner(t('game.intro'), t('game.introSub'), 2.6);
@@ -210,7 +211,7 @@ export class Game {
           P.giveWeapon(p.weapon);
           const name = t(`weapon.${p.weapon}`);
           this.fx.text(P.x, P.y - 100, had ? t('game.weaponAmmo', { w: name }) : name.toUpperCase(), 0x7dd3fc, 1.1);
-          if (!had) this.hud.toast(t('game.pickedUp', { w: name, n: WEAPON_ORDER.indexOf(p.weapon) + 1 }));
+          if (!had) this.hud.toast(t(this.input.touch ? 'game.pickedUpTouch' : 'game.pickedUp', { w: name, n: WEAPON_ORDER.indexOf(p.weapon) + 1 }));
           sfx.play('pickup');
           take = true;
         }
@@ -456,19 +457,26 @@ export class Game {
     });
   }
 
+  togglePause() {
+    if (this.demo || this.state === 'dead') return;
+    this.paused = !this.paused;
+    this.onPause(this.paused);
+  }
+
+  toggleMute() {
+    const muted = sfx.toggleMute();
+    laugh.setMuted(muted);
+    this.onMute?.(muted);
+    this.hud.toast(muted ? t('game.soundOff') : t('game.soundOn'));
+  }
+
   // ---------- Main update ----------
   update(rawDt) {
     const input = this.input;
     input.update();
     if (this.demo) { this.updateDemo(rawDt); input.endFrame(); return; }
-    if (input.wasPressed('escape') || input.wasPressed('p')) {
-      if (this.state !== 'dead') { this.paused = !this.paused; this.onPause(this.paused); }
-    }
-    if (input.wasPressed('m')) {
-      const muted = sfx.toggleMute();
-      laugh.setMuted(muted);
-      this.hud.toast(muted ? t('game.soundOff') : t('game.soundOn'));
-    }
+    if (input.wasPressed('escape') || input.wasPressed('p')) this.togglePause();
+    if (input.wasPressed('m')) this.toggleMute();
     if (this.paused) { input.endFrame(); return; }
 
     if (this.timeScale < 1) this.timeScale = Math.min(1, this.timeScale + rawDt * 0.6);

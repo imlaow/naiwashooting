@@ -2,7 +2,11 @@
 <html lang="zh-CN" data-lang="zh">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0e3b52" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>奶蛙枪战</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,6 +14,14 @@
 </head>
 <body>
   <div id="stage"></div>
+  <div id="touch-hud">
+    <button id="btn-mute" class="icon" data-i18n-label="hud.mute" aria-label="静音">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path class="fill" d="M4 9h4l5-4v14l-5-4H4z" /><path class="on" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" /><path class="off" d="M16.5 9.5l5 5m0-5l-5 5" /></svg>
+    </button>
+    <button id="btn-pause" class="icon" data-i18n-label="hud.pause" aria-label="暂停">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg>
+    </button>
+  </div>
   <div id="overlay">
     <div id="loading" class="panel">
       <h2 data-i18n="loading.title">奶蛙枪战</h2>

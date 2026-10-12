@@ -22,9 +22,9 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | Move | WASD / arrows | left thumb |
 | Aim & shoot | mouse, hold left button | right thumb |
 | Dash (i-frames) | Space / Shift | tap left side |
-| Reload | R | automatic |
-| Switch weapon | 1–4, wheel, Q (last) | — |
-| Pause / mute | P or Esc / M | — |
+| Reload | R | automatic, or tap the ammo count |
+| Switch weapon | 1–4, wheel, Q (last) | tap a weapon slot |
+| Pause / mute | P or Esc / M | top-right buttons |
 
 ## Gameplay
 

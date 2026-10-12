@@ -85,6 +85,7 @@ async function boot() {
     game = new Game({
       app, art, skins, island, terrainTex, input, demo: isDemo,
       onPause: (p) => show(p ? 'pause' : null),
+      onMute: (m) => $('btn-mute').classList.toggle('muted', m),
       onGameOver: ({ score, wave, kills }) => {
         const best = Math.max(readBest(), score);
         writeBest(best);
@@ -105,11 +106,23 @@ async function boot() {
     btn.addEventListener('click', () => { setLang(btn.dataset.langBtn); showBest(); });
   }
 
-  const start = () => { sfx.unlock(); newGame(false); show(null); };
+  const start = () => {
+    sfx.unlock();
+    // Fullscreen hides the browser bars on phones (Android; iPhone Safari has no element fullscreen).
+    if (input.touch && !document.fullscreenElement) document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }).catch(() => {});
+    newGame(false);
+    show(null);
+  };
   $('play').addEventListener('click', start);
   $('again').addEventListener('click', start);
   $('resume').addEventListener('click', () => { game.paused = false; show(null); });
   $('quit').addEventListener('click', () => { newGame(true); show('title'); });
+  $('btn-pause').addEventListener('click', () => game.togglePause());
+  $('btn-mute').addEventListener('click', () => game.toggleMute());
+  // Pause when the tab or app goes to the background (phone call, app switch, screen lock).
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && !demo && !game.paused) game.togglePause();
+  });
   addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (!$('title').classList.contains('hidden') || !$('over').classList.contains('hidden'))) start();
   });
