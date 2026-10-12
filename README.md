@@ -31,6 +31,7 @@ Add `?seed=1234` to the URL to generate a different island.
 - Weapons are hidden around the island: a shotgun by a village hut, an SMG at the hilltop lookout tower, and a rifle on a remote beach. Enemies and crates also drop weapons, ammo and medkits.
 - Shooting a red barrel makes it explode, and nearby barrels go off too.
 - Shallow water slows you down. Kill enemies in quick succession to build a combo multiplier.
+- Every 5th kill, Naiwa stops and laughs his head off for 12 seconds. He can't move or shoot while laughing, but nothing can hurt him.
 
 ## Code map
 
@@ -43,6 +44,11 @@ Add `?seed=1234` to the URL to generate a different island.
 | `src/entities.js` | Player, enemies, weapon stats |
 | `src/game.js` | Game loop, camera, bullets, waves, pickups, scoring |
 | `src/hud.js` | HUD, minimap, banners, crosshair |
+| `src/laugh.js` | Laugh sound for the 5th-kill laugh; the animation follows its playback position |
 | `src/fx.js` | Particles, decals, damage numbers |
 | `src/audio.js` | WebAudio-synthesised sound effects |
 | `tools/extract-sprites.mjs` | Cuts the 2×2 character sheet into transparent PNG frames (`npm run sprites`) |
+| `tools/extract-laugh-frames.mjs` | Cuts Naiwa out of every frame of the laughing clip into `laugh-frames/` (see the file header for the ffmpeg step); `--masks` uses BiRefNet alpha masks, `--cropped` takes upscaled crops, `--grade` matches the fur colour to `public/assets/hero_*.png` |
+| `tools/build-laugh-sheets.mjs` | Packs `laugh-frames/` into the 15 fps hero-sized sprite sheets in `public/assets/laugh/` |
+| `tools/realesrgan-kaggle/` | Kaggle GPU job: Real-ESRGAN 2× (x4plus / animevideov3) of the frames plus BiRefNet masks of the result (`kaggle kernels push -p tools/realesrgan-kaggle`) |
+| `tools/birefnet-kaggle/` | Kaggle GPU job that runs BiRefNet on the frames and outputs `masks_general.zip` / `masks_matting.zip` (`kaggle kernels push -p tools/birefnet-kaggle`) |

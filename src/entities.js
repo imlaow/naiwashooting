@@ -2,6 +2,7 @@
 import { Container, Sprite, Graphics } from 'pixi.js';
 import { makeSprite } from './world.js';
 import { sfx } from './audio.js';
+import { laugh } from './laugh.js';
 import { H_GRASS } from './island.js';
 
 export const WEAPONS = {
@@ -14,6 +15,7 @@ export const WEAPON_ORDER = ['pistol', 'smg', 'shotgun', 'rifle'];
 
 const GUN_H = 36; // height bullets fly at above the ground
 const HERO_SCALE = 0.42;
+const HERO_ANCHOR = { x: 0.5, y: 0.96 };
 
 // Shared movement: axis-separated so characters slide along shorelines,
 // then pushed out of obstacles.
@@ -50,6 +52,7 @@ export class Player {
   constructor(game, x, y) {
     this.game = game;
     this.x = x; this.y = y; this.r = 17;
+    this.fadePad = 60; // trees fade once he's this close to walking behind them
     this.vx = 0; this.vy = 0;
     this.hp = this.maxHp = 100;
     this.aim = -Math.PI / 2;
@@ -60,11 +63,12 @@ export class Player {
     this.dashT = 0; this.dashCd = 0; this.ghostT = 0;
     this.invuln = 0; this.flash = 0;
     this.animT = 0; this.stepT = 0; this.recoil = 0;
+    this.laughT = -1; // seconds into the laugh, -1 when not laughing
     this.dead = false;
 
     this.root = new Container();
     this.body = new Sprite(game.skins.hero[0]);
-    this.body.anchor.set(0.5, 0.96);
+    this.body.anchor.copyFrom(HERO_ANCHOR);
     this.body.scale.set(HERO_SCALE);
     this.gun = makeSprite(game.art.guns.pistol);
     this.root.addChild(this.body, this.gun);
@@ -118,9 +122,42 @@ export class Player {
     sfx.play('reload');
   }
 
+  // Naiwa laughs his head off: frozen and untouchable until the clip ends.
+  laugh() {
+    if (!this.game.skins.laugh || this.laughT >= 0 || this.dead) return false;
+    this.laughT = 0;
+    this.vx = this.vy = 0;
+    this.dashT = 0;
+    this.gun.visible = false;
+    return true;
+  }
+
+  // While laughing he can't step out from behind a tree, so trees in front fade for
+  // his whole body (arms out) instead of only his feet.
+  get focusBox() {
+    if (this.laughT < 0) return null;
+    const b = this.body, w = Math.abs(b.width), h = b.height;
+    const ax = b.scale.x < 0 ? 1 - b.anchor.x : b.anchor.x;
+    const x0 = this.x - ax * w, y0 = this.y + b.y - b.anchor.y * h;
+    return { x0, x1: x0 + w, y0, y1: y0 + h };
+  }
+
   update(dt, input, mouseWorld) {
     if (this.dead) return;
     const game = this.game;
+    if (this.laughT >= 0) {
+      const L = game.skins.laugh;
+      this.laughT = laugh.time() ?? this.laughT + dt;
+      if (this.laughT < L.frames.length / L.fps) {
+        this.invuln -= dt;
+        this.flash -= dt;
+        this.moving = false;
+        this.sync();
+        return;
+      }
+      this.laughT = -1;
+      this.gun.visible = true;
+    }
     // ----- Aim -----
     let firing = false;
     if (input.touch) {
@@ -231,7 +268,7 @@ export class Player {
   }
 
   hurt(dmg, fromX, fromY) {
-    if (this.invuln > 0 || this.dead) return false;
+    if (this.invuln > 0 || this.dead || this.laughT >= 0) return false;
     this.hp -= dmg;
     this.invuln = 0.45; this.flash = 0.15;
     const a = Math.atan2(this.y - fromY, this.x - fromX);
@@ -246,10 +283,17 @@ export class Player {
 
   sync() {
     const facing = Math.cos(this.aim) >= 0 ? 1 : -1;
-    const frame = Math.floor(this.animT) % 4;
-    this.body.texture = this.game.skins.hero[frame];
+    const L = this.laughT >= 0 && this.game.skins.laugh;
+    if (L) {
+      const tex = L.frames[Math.min(L.frames.length - 1, Math.floor(this.laughT * L.fps))];
+      this.body.texture = tex;
+      this.body.anchor.copyFrom(tex.defaultAnchor);
+    } else {
+      this.body.texture = this.game.skins.hero[Math.floor(this.animT) % 4];
+      this.body.anchor.copyFrom(HERO_ANCHOR);
+    }
     const bob = this.moving ? -Math.abs(Math.sin(this.animT * Math.PI)) * 6 : 0;
-    const breathe = this.moving ? 1 : 1 + Math.sin(this.game.time * 3) * 0.018;
+    const breathe = this.moving || L ? 1 : 1 + Math.sin(this.game.time * 3) * 0.018;
     const wading = this.game.island.isWading(this.x, this.y);
     this.body.y = bob + (wading ? 8 : 0);
     this.body.scale.set(HERO_SCALE * facing, HERO_SCALE * breathe);

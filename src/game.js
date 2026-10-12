@@ -7,6 +7,7 @@ import { Environment, makeSprite } from './world.js';
 import { Player, Enemy, ENEMY_TYPES, WEAPONS, WEAPON_ORDER } from './entities.js';
 import { Hud } from './hud.js';
 import { sfx } from './audio.js';
+import { laugh } from './laugh.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 
@@ -401,6 +402,11 @@ export class Game {
     const pts = Math.round(e.T.score * mult);
     this.score += pts;
     this.fx.text(e.x, e.y - e.height() - 30, `+${pts}`, 0xffd23f, 0.75);
+    if (this.kills % 5 === 0 && this.player.laugh()) {
+      laugh.play(sfx.muted);
+      this.fx.text(this.player.x, this.player.y - 120, 'HA HA HA!', 0xffd23f, 1.4);
+      this.hud.toast('Naiwa is laughing his head off  —  invincible!');
+    }
     this.fx.burst(e.x, e.y - e.height() * 0.4, e.T.color, e.type === 'boss' ? 40 : 14);
     if (e.type !== 'crab') {
       this.fx.spawn({ tex: e.body.texture, x: e.x, y: e.y, ay: 0.96, life: 0.35, s0: e.T.scale, s1: e.T.scale * 0.2, flip: Math.sign(e.body.scale.x), a0: 1, a1: 0, tint: 0xffffff, sy: 1 });
@@ -441,6 +447,7 @@ export class Game {
     this.fx.burst(P.x, P.y - 40, 0xffd23f, 30);
     this.shake(20);
     sfx.play('gameover');
+    laugh.stop();
     this.hud.banner('YOU FELL', '', 2, 0xff6b6b);
     this.after(0.6, () => {
       this.onGameOver({ score: this.score, wave: this.wave, kills: this.kills });
@@ -455,7 +462,11 @@ export class Game {
     if (input.wasPressed('escape') || input.wasPressed('p')) {
       if (this.state !== 'dead') { this.paused = !this.paused; this.onPause(this.paused); }
     }
-    if (input.wasPressed('m')) this.hud.toast(sfx.toggleMute() ? 'Sound off' : 'Sound on');
+    if (input.wasPressed('m')) {
+      const muted = sfx.toggleMute();
+      laugh.setMuted(muted);
+      this.hud.toast(muted ? 'Sound off' : 'Sound on');
+    }
     if (this.paused) { input.endFrame(); return; }
 
     if (this.timeScale < 1) this.timeScale = Math.min(1, this.timeScale + rawDt * 0.6);
@@ -531,6 +542,7 @@ export class Game {
   }
 
   destroy() {
+    laugh.stop();
     this.hud.destroy();
     this.root.destroy({ children: true });
   }

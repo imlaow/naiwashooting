@@ -370,8 +370,14 @@ export class Environment {
       if (w.s.visible) w.s.skew.x = Math.sin(t * 1.7 + w.ph) * w.amp + Math.sin(t * 0.6 + w.ph * 0.3) * w.amp * 0.5;
     }
     for (const o of this.tall) {
-      const behind = focus.some((f) => f.x > o.x0 && f.x < o.x1 && f.y > o.y0 && f.y < o.y1);
-      const target = behind ? 0.42 : 1;
+      // A focus with a body box (the laughing hero) fades trees further so he stays visible.
+      // fadePad widens the zone sideways and upward (not downward: standing in front needs no fade).
+      let target = 1;
+      for (const f of focus) {
+        const b = f.focusBox, p = f.fadePad ?? 0;
+        if (b) { if (f.y < o.y && b.x1 + p > o.x0 && b.x0 - p < o.x1 && b.y1 > o.y0 && b.y0 - p < o.y1) target = Math.min(target, 0.2); }
+        else if (f.x > o.x0 - p && f.x < o.x1 + p && f.y > o.y0 - p && f.y < o.y1) target = Math.min(target, 0.42);
+      }
       o.alpha += (target - o.alpha) * Math.min(1, dt * 8);
       o.s.alpha = o.alpha;
     }

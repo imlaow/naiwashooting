@@ -1,11 +1,12 @@
 import { Application } from 'pixi.js';
 import { Island } from './island.js';
 import { buildArt } from './art.js';
-import { loadSkins } from './skins.js';
+import { loadSkins, loadLaugh } from './skins.js';
 import { buildTerrainTextures } from './world.js';
 import { Input } from './input.js';
 import { Game } from './game.js';
 import { sfx } from './audio.js';
+import { laugh } from './laugh.js';
 import './style.css';
 
 const $ = (id) => document.getElementById(id);
@@ -15,6 +16,8 @@ function show(id) {
   for (const el of document.querySelectorAll('.panel')) el.classList.toggle('hidden', el.id !== id);
   $('overlay').classList.toggle('hidden', !id);
   document.body.classList.toggle('playing', !id);
+  if (id) laugh.pause();
+  else laugh.resume();
 }
 
 function setLoading(text, pct) {
@@ -45,6 +48,9 @@ async function boot() {
   setLoading('Loading fonts & hero…', 8);
   await Promise.race([document.fonts?.load('32px "Lilita One"'), new Promise((r) => setTimeout(r, 2500))]).catch(() => {});
   const skins = await loadSkins();
+  // The laugh animation isn't needed until the 5th kill; fetch it in the background.
+  skins.laugh = null;
+  loadLaugh().then((l) => { skins.laugh = l; }).catch((err) => console.error('laugh frames', err));
   await nextFrame();
 
   setLoading('Painting palm trees…', 20);

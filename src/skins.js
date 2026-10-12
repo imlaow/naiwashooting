@@ -1,5 +1,5 @@
 // Loads the hero frames and builds recoloured enemy variants from them.
-import { Assets, Texture, CanvasSource } from 'pixi.js';
+import { Assets, Texture, CanvasSource, Spritesheet } from 'pixi.js';
 
 const FRAME_URLS = [0, 1, 2, 3].map((i) => `${import.meta.env.BASE_URL}assets/hero_${i}.png`);
 // Frames are stored at 3x (660px tall) but keep their original 220px logical size.
@@ -18,6 +18,22 @@ export async function loadSkins() {
     heavy: images.map((img) => recolor(img, { hue: 215, sat: 0.9, light: 0.85 })),
     boss: images.map((img) => recolor(img, { hue: 160, sat: 0.35, light: 0.55 })),
   };
+}
+
+// Laugh animation frames (sprite sheets from tools/build-laugh-sheets.mjs), in play order.
+export async function loadLaugh() {
+  const base = `${import.meta.env.BASE_URL}assets/laugh/`;
+  const index = await (await fetch(`${base}index.json`)).json();
+  const frames = [];
+  for (const name of index.sheets) {
+    const data = await (await fetch(`${base}${name}.json`)).json();
+    const src = `${base}${data.meta.image}`;
+    const tex = await Assets.load({ src, data: { resolution: parseFloat(data.meta.scale), autoGenerateMipmaps: true } });
+    const sheet = new Spritesheet(tex, data);
+    await sheet.parse();
+    frames.push(...Object.keys(data.frames).map((k) => sheet.textures[k]));
+  }
+  return { fps: index.fps, frames };
 }
 
 // Horizontal position (0..1) of the top of the head, for hats/crowns.
