@@ -2,8 +2,9 @@
 import { Container, Graphics, Sprite, Text } from 'pixi.js';
 import { WORLD } from './island.js';
 import { WEAPONS, WEAPON_ORDER } from './entities.js';
+import { t } from './i18n.js';
 
-export const FONT = '"Lilita One", "Arial Black", sans-serif';
+export const FONT = '"Lilita One", "ZCOOL KuaiLe", "Arial Black", sans-serif';
 
 function label(size, color = '#ffffff', extra = {}) {
   return new Text({
@@ -74,7 +75,7 @@ export class Hud {
     this.bossBar = new Graphics();
     this.bossName = label(16, '#ffd6d6');
     this.bossName.anchor.set(0.5, 1);
-    this.bossName.text = 'KING NAIWA';
+    this.bossName.text = t('hud.boss');
     ui.addChild(this.bossBar, this.bossName);
 
     // Minimap
@@ -100,7 +101,7 @@ export class Hud {
     this.toastT = 0;
     this.hint = label(15, '#e8f6ff');
     this.hint.anchor.set(0.5, 1);
-    this.hint.text = 'WASD move  ·  Mouse aim & shoot  ·  Space dash  ·  R reload  ·  1-4 / wheel switch  ·  P pause  ·  M mute';
+    this.hint.text = t('hud.hint');
     this.hintT = 12;
     ui.addChild(this.bannerTitle, this.bannerSub, this.toastText, this.hint);
 
@@ -184,9 +185,9 @@ export class Hud {
     // Weapon
     const W = WEAPONS[P.weapon], slot = P.slot;
     this.gunIcon.texture = g.art.guns[P.weapon];
-    this.setText(this.wpName, 'wn', W.name.toUpperCase());
+    this.setText(this.wpName, 'wn', t(`weapon.${P.weapon}`).toUpperCase());
     const reserve = slot.reserve === Infinity ? '∞' : String(slot.reserve);
-    this.setText(this.ammoText, 'ammo', P.reloading > 0 ? 'RELOADING' : `${slot.mag} / ${reserve}`);
+    this.setText(this.ammoText, 'ammo', P.reloading > 0 ? t('hud.reloading') : `${slot.mag} / ${reserve}`);
     const fs = P.reloading > 0 ? 22 : 34;
     if (this.cache.fs !== fs) { this.cache.fs = fs; this.ammoText.style.fontSize = fs; }
     this.ammoText.tint = slot.mag === 0 && P.reloading <= 0 ? 0xff6b6b : 0xffffff;
@@ -204,12 +205,12 @@ export class Hud {
 
     // Wave & score
     const st = g.state;
-    this.setText(this.waveText, 'wave', g.wave ? `WAVE ${g.wave}` : 'GET READY');
+    this.setText(this.waveText, 'wave', g.wave ? t('hud.wave', { n: g.wave }) : t('hud.getReady'));
     const remaining = g.queue.length + g.enemies.filter((e) => !e.dead).length;
-    this.setText(this.enemyText, 'enemies', st === 'break' ? `Next wave in ${Math.ceil(g.stateT)}` : st === 'intro' ? `Starting in ${Math.ceil(g.stateT)}` : `${remaining} hostiles left`);
+    this.setText(this.enemyText, 'enemies', st === 'break' ? t('hud.nextWave', { n: Math.ceil(g.stateT) }) : st === 'intro' ? t('hud.starting', { n: Math.ceil(g.stateT) }) : t('hud.left', { n: remaining }));
     this.setText(this.scoreText, 'score', g.score.toLocaleString());
     const mult = 1 + Math.min(3, Math.floor(g.combo / 3) * 0.5);
-    this.setText(this.comboText, 'combo', g.comboT > 0 && g.combo > 1 ? `${g.combo} combo  x${mult}` : '');
+    this.setText(this.comboText, 'combo', g.comboT > 0 && g.combo > 1 ? t('hud.combo', { n: g.combo, m: mult }) : '');
 
     // Boss bar
     const boss = g.boss && !g.boss.dead ? g.boss : null;

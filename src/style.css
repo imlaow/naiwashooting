@@ -10,7 +10,7 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: #0e3b52;
-  font-family: Nunito, system-ui, sans-serif;
+  font-family: Nunito, 'ZCOOL KuaiLe', system-ui, sans-serif;
   color: #fff;
   user-select: none;
   -webkit-user-select: none;
@@ -41,11 +41,12 @@ body.playing #stage canvas { cursor: none; }
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(6px);
   animation: pop 0.35s ease-out;
+  position: relative;
 }
 @keyframes pop { from { transform: scale(0.92); opacity: 0; } }
 
 h1, h2 {
-  font-family: 'Lilita One', 'Arial Black', sans-serif;
+  font-family: 'Lilita One', 'ZCOOL KuaiLe', 'Arial Black', sans-serif;
   font-weight: 400;
   margin: 0 0 10px;
   letter-spacing: 1px;
@@ -53,6 +54,7 @@ h1, h2 {
   text-shadow: 0 4px 0 var(--ink), 0 6px 18px rgba(0, 0, 0, 0.4);
 }
 h1 { font-size: clamp(48px, 12vw, 84px); line-height: 0.95; }
+h1 b { font-weight: inherit; }
 h1 span { display: block; font-size: 0.42em; color: #7dd3fc; margin-top: 6px; }
 h2 { font-size: 40px; }
 
@@ -67,7 +69,7 @@ h2 { font-size: 40px; }
 .tag { margin: 0 auto 18px; max-width: 420px; opacity: 0.9; line-height: 1.4; }
 
 button {
-  font-family: 'Lilita One', 'Arial Black', sans-serif;
+  font-family: 'Lilita One', 'ZCOOL KuaiLe', 'Arial Black', sans-serif;
   font-size: 26px;
   letter-spacing: 1px;
   color: var(--ink);
@@ -115,4 +117,19 @@ kbd {
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 14px 0 20px; }
 .stats div { background: rgba(255, 255, 255, 0.07); border-radius: 14px; padding: 10px; }
 .stats span { display: block; font-size: 13px; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; }
-.stats b { font-family: 'Lilita One', 'Arial Black', sans-serif; font-weight: 400; font-size: 30px; color: var(--sun); }
+.stats b { font-family: 'Lilita One', 'ZCOOL KuaiLe', 'Arial Black', sans-serif; font-weight: 400; font-size: 30px; color: var(--sun); }
+
+/* Chinese headings and buttons read better with wider letter spacing. */
+html[data-lang="zh"] h1 { letter-spacing: 4px; }
+html[data-lang="zh"] h1 span { letter-spacing: 6px; }
+html[data-lang="zh"] .panel > button { letter-spacing: 3px; }
+html[data-lang="zh"] .stats span { letter-spacing: 3px; }
+
+.lang-switch { position: absolute; top: 14px; right: 14px; display: flex; border-radius: 10px; overflow: hidden; background: rgba(255, 255, 255, 0.1); }
+.lang-switch button {
+  margin: 0; padding: 4px 10px; border-radius: 0; box-shadow: none;
+  font-family: Nunito, 'ZCOOL KuaiLe', system-ui, sans-serif; font-weight: 800; font-size: 13px; letter-spacing: 0;
+  background: transparent; color: rgba(255, 255, 255, 0.7);
+}
+.lang-switch button:hover, .lang-switch button:active { transform: none; box-shadow: none; }
+.lang-switch button.on { background: var(--sun); color: var(--ink); }

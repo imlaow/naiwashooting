@@ -7,6 +7,7 @@ import { Input } from './input.js';
 import { Game } from './game.js';
 import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
+import { t, setLang, applyDom, CJK_TEXT } from './i18n.js';
 import './style.css';
 
 const $ = (id) => document.getElementById(id);
@@ -33,6 +34,7 @@ function writeBest(v) {
 }
 
 async function boot() {
+  applyDom();
   show('loading');
   const app = new Application();
   await app.init({
@@ -45,30 +47,32 @@ async function boot() {
   });
   $('stage').appendChild(app.canvas);
 
-  setLoading('Loading fonts & hero…', 8);
-  await Promise.race([document.fonts?.load('32px "Lilita One"'), new Promise((r) => setTimeout(r, 2500))]).catch(() => {});
+  setLoading(t('loading.fonts'), 8);
+  // HUD text is drawn to canvas, so fetch the CJK glyph subsets before anything renders.
+  const fonts = document.fonts ? Promise.all([document.fonts.load('32px "Lilita One"'), document.fonts.load('32px "ZCOOL KuaiLe"', CJK_TEXT)]) : null;
+  await Promise.race([fonts, new Promise((r) => setTimeout(r, 2500))]).catch(() => {});
   const skins = await loadSkins();
   // The laugh animation isn't needed until the 5th kill; fetch it in the background.
   skins.laugh = null;
   loadLaugh().then((l) => { skins.laugh = l; }).catch((err) => console.error('laugh frames', err));
   await nextFrame();
 
-  setLoading('Painting palm trees…', 20);
+  setLoading(t('loading.palms'), 20);
   await nextFrame();
   const art = buildArt();
 
-  setLoading('Raising the island…', 38);
+  setLoading(t('loading.island'), 38);
   await nextFrame();
   const seed = Number(new URLSearchParams(location.search).get('seed')) || 20261012;
   const island = new Island(seed);
 
-  setLoading('Painting beaches & lagoons…', 55);
+  setLoading(t('loading.beaches'), 55);
   await nextFrame();
   const gl = app.renderer.gl;
   const maxTex = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 4096;
   const terrainTex = buildTerrainTextures(island, maxTex);
 
-  setLoading('Ready!', 100);
+  setLoading(t('loading.ready'), 100);
   await nextFrame();
 
   const input = new Input(app.canvas);
@@ -93,9 +97,13 @@ async function boot() {
     });
   };
 
+  const showBest = () => { $('best-score').textContent = readBest() ? t('title.best', { n: readBest().toLocaleString() }) : ''; };
   newGame(true);
-  $('best-score').textContent = readBest() ? `Best: ${readBest().toLocaleString()}` : '';
+  showBest();
   show('title');
+  for (const btn of document.querySelectorAll('[data-lang-btn]')) {
+    btn.addEventListener('click', () => { setLang(btn.dataset.langBtn); showBest(); });
+  }
 
   const start = () => { sfx.unlock(); newGame(false); show(null); };
   $('play').addEventListener('click', start);
@@ -113,5 +121,5 @@ async function boot() {
 
 boot().catch((err) => {
   console.error(err);
-  setLoading(`Failed to start: ${err.message}`, 100);
+  setLoading(t('loading.failed', { msg: err.message }), 100);
 });

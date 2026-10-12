@@ -1,4 +1,4 @@
-# Naiwa Island Showdown
+# 奶蛙枪战 (Naiwa Shootout)
 
 A top-down 2D island shooter built with [PixiJS](https://pixijs.com) v8 and Vite.
 The hero is Naiwa, whose sprite frames are cut from `mmexport1791681378822.jpg`.
@@ -12,6 +12,8 @@ npm run build    # static build in dist/
 ```
 
 Add `?seed=1234` to the URL to generate a different island.
+
+The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (remembered per browser) or add `?lang=en`.
 
 ## Controls
 

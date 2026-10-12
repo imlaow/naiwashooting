@@ -4,10 +4,11 @@ import { WORLD } from './island.js';
 import { StaticWorld } from './physics.js';
 import { Fx } from './fx.js';
 import { Environment, makeSprite } from './world.js';
-import { Player, Enemy, ENEMY_TYPES, WEAPONS, WEAPON_ORDER } from './entities.js';
+import { Player, Enemy, ENEMY_TYPES, WEAPON_ORDER } from './entities.js';
 import { Hud } from './hud.js';
 import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
+import { t } from './i18n.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 
@@ -66,7 +67,7 @@ export class Game {
     this.hud = new Hud(this, terrainTex.minimap);
     this.resize();
     if (demo) this.hud.ui.visible = false;
-    else this.hud.banner('NAIWA ISLAND', 'Survive the rival invasion!', 2.6);
+    else this.hud.banner(t('game.intro'), t('game.introSub'), 2.6);
   }
 
   // ---------- Scene helpers ----------
@@ -201,14 +202,15 @@ export class Game {
           take = true;
         } else if (p.kind === 'ammo') {
           P.giveAmmo();
-          this.fx.text(P.x, P.y - 100, 'AMMO', 0xffd23f, 0.9);
+          this.fx.text(P.x, P.y - 100, t('game.ammo'), 0xffd23f, 0.9);
           sfx.play('pickup');
           take = true;
         } else if (p.kind === 'weapon') {
           const had = !!P.arsenal[p.weapon];
           P.giveWeapon(p.weapon);
-          this.fx.text(P.x, P.y - 100, had ? `${WEAPONS[p.weapon].name} AMMO` : WEAPONS[p.weapon].name.toUpperCase(), 0x7dd3fc, 1.1);
-          if (!had) this.hud.toast(`Picked up ${WEAPONS[p.weapon].name}  —  press ${WEAPON_ORDER.indexOf(p.weapon) + 1}`);
+          const name = t(`weapon.${p.weapon}`);
+          this.fx.text(P.x, P.y - 100, had ? t('game.weaponAmmo', { w: name }) : name.toUpperCase(), 0x7dd3fc, 1.1);
+          if (!had) this.hud.toast(t('game.pickedUp', { w: name, n: WEAPON_ORDER.indexOf(p.weapon) + 1 }));
           sfx.play('pickup');
           take = true;
         }
@@ -348,10 +350,10 @@ export class Game {
     this.waveTotal = q.length;
     this.state = 'fight';
     if (boss) {
-      this.hud.banner(`WAVE ${n}`, 'KING NAIWA approaches!', 2.6, 0xff6b6b);
+      this.hud.banner(t('hud.wave', { n }), t('game.bossWave'), 2.6, 0xff6b6b);
       sfx.play('boss');
     } else {
-      this.hud.banner(`WAVE ${n}`, n === 1 ? 'Rivals are landing on the beaches' : `${q.length} hostiles incoming`, 2.2);
+      this.hud.banner(t('hud.wave', { n }), n === 1 ? t('game.firstWave') : t('game.incoming', { n: q.length }), 2.2);
       sfx.play('wave');
     }
   }
@@ -383,7 +385,7 @@ export class Game {
       const P = this.player;
       const heal = Math.min(20, P.maxHp - P.hp);
       if (heal > 0) { P.hp += heal; this.fx.text(P.x, P.y - 100, `+${heal}`, 0x4ade80, 1); }
-      this.hud.banner('WAVE CLEARED', `+${bonus} bonus`, 2.4, 0x4ade80);
+      this.hud.banner(t('game.cleared'), t('game.bonus', { n: bonus }), 2.4, 0x4ade80);
       sfx.play('pickup');
       // Restock: a supply crate lands near the player every couple of waves.
       if (this.wave % 2 === 0) {
@@ -404,8 +406,8 @@ export class Game {
     this.fx.text(e.x, e.y - e.height() - 30, `+${pts}`, 0xffd23f, 0.75);
     if (this.kills % 5 === 0 && this.player.laugh()) {
       laugh.play(sfx.muted);
-      this.fx.text(this.player.x, this.player.y - 120, 'HA HA HA!', 0xffd23f, 1.4);
-      this.hud.toast('Naiwa is laughing his head off  —  invincible!');
+      this.fx.text(this.player.x, this.player.y - 120, t('game.laugh'), 0xffd23f, 1.4);
+      this.hud.toast(t('game.laughToast'));
     }
     this.fx.burst(e.x, e.y - e.height() * 0.4, e.T.color, e.type === 'boss' ? 40 : 14);
     if (e.type !== 'crab') {
@@ -419,7 +421,7 @@ export class Game {
       this.shake(22);
       this.fx.explosion(e.x, e.y, 160);
       sfx.play('explosion');
-      this.hud.banner('KING NAIWA DEFEATED', `+${pts}`, 3, 0xffd23f);
+      this.hud.banner(t('game.bossDown'), `+${pts}`, 3, 0xffd23f);
       for (let i = 0; i < 4; i++) this.spawnPickup(i % 2 ? 'health' : 'ammo', e.x + rnd(-60, 60), e.y + rnd(-40, 40));
       this.dropWeapon(e.x, e.y);
       this.boss = null;
@@ -448,7 +450,7 @@ export class Game {
     this.shake(20);
     sfx.play('gameover');
     laugh.stop();
-    this.hud.banner('YOU FELL', '', 2, 0xff6b6b);
+    this.hud.banner(t('game.fell'), '', 2, 0xff6b6b);
     this.after(0.6, () => {
       this.onGameOver({ score: this.score, wave: this.wave, kills: this.kills });
     });
@@ -465,7 +467,7 @@ export class Game {
     if (input.wasPressed('m')) {
       const muted = sfx.toggleMute();
       laugh.setMuted(muted);
-      this.hud.toast(muted ? 'Sound off' : 'Sound on');
+      this.hud.toast(muted ? t('game.soundOff') : t('game.soundOn'));
     }
     if (this.paused) { input.endFrame(); return; }
 
