@@ -21,7 +21,7 @@ export class Fx {
     let s = this.pool.pop();
     if (!s) s = new Sprite();
     s.texture = o.tex;
-    s.anchor.set(0.5, o.ay ?? 0.5);
+    s.anchor.set(o.ax ?? 0.5, o.ay ?? 0.5);
     s.blendMode = o.add ? 'add' : 'normal';
     s.tint = o.tint ?? 0xffffff;
     s.rotation = o.rot ?? 0;

@@ -263,7 +263,7 @@ export class Player {
 
   ghost() {
     this.game.fx.spawn({
-      tex: this.body.texture, x: this.x, y: this.y + this.body.y, ay: 0.96, life: 0.22, s0: HERO_SCALE,
+      tex: this.body.texture, x: this.x, y: this.y + this.body.y, ax: this.body.anchor.x, ay: this.body.anchor.y, life: 0.22, s0: HERO_SCALE,
       flip: Math.cos(this.aim) < 0 ? -1 : 1, a0: 0.45, a1: 0, tint: 0x9fe8ff, add: true,
     });
   }
@@ -293,12 +293,14 @@ export class Player {
       this.body.texture = this.game.skins.hero[Math.floor(this.animT) % 4];
       this.body.anchor.copyFrom(HERO_ANCHOR);
     }
-    const bob = this.moving ? -Math.abs(Math.sin(this.animT * Math.PI)) * 6 : 0;
+    // The walk bob and lean are for the walk cycle; the laugh clip plays upright.
+    const walk = this.moving && !L;
+    const bob = walk ? -Math.abs(Math.sin(this.animT * Math.PI)) * 6 : 0;
     const breathe = this.moving || L ? 1 : 1 + Math.sin(this.game.time * 3) * 0.018;
     const wading = this.game.island.isWading(this.x, this.y);
     this.body.y = bob + (wading ? 8 : 0);
     this.body.scale.set(HERO_SCALE * facing, HERO_SCALE * breathe);
-    this.body.rotation = this.moving ? (this.vx / 265) * 0.07 : 0;
+    this.body.rotation = walk ? (this.vx / 265) * 0.07 : 0;
     this.body.tint = this.flash > 0 ? 0xff6b6b : 0xffffff;
     this.root.alpha = this.invuln > 0 && this.dashT <= 0 ? (Math.floor(this.game.time * 20) % 2 ? 0.45 : 1) : 1;
     const cos = Math.cos(this.aim), sin = Math.sin(this.aim);

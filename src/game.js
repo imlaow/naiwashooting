@@ -195,7 +195,8 @@ export class Game {
       p.root.visible = p.life > 4 || Math.floor(p.t * 8) % 2 === 0;
       let take = false;
       if (p.delay <= 0 && !P.dead && Math.hypot(P.x - p.x, P.y - p.y) < 36) {
-        if (p.kind === 'health' && P.hp < P.maxHp) {
+        // A laughing Naiwa leaves health packs alone: the laugh ends with a full heal anyway.
+        if (p.kind === 'health' && P.hp < P.maxHp && P.laughT < 0) {
           const heal = Math.min(35, P.maxHp - P.hp);
           P.hp += heal;
           this.fx.text(P.x, P.y - 100, `+${Math.round(heal)}`, 0x4ade80, 1);
