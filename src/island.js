@@ -179,7 +179,8 @@ export class Island {
   }
 
   // ---------- Painting ----------
-  paintTerrain(scale = 1) {
+  // `images` holds the sprite bitmaps (see skins.js) that the decals paste in.
+  paintTerrain(scale = 1, images = null) {
     const S = Math.round(WORLD * scale);
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = S;
@@ -262,14 +263,14 @@ export class Island {
     ctx.putImageData(img, 0, 0);
     ctx.save();
     ctx.scale(scale, scale);
-    this.paintDecals(ctx);
+    this.paintDecals(ctx, images);
     ctx.restore();
     return canvas;
   }
 
   // Flat details painted straight into the terrain: grass blades, flowers,
   // shells, pebbles, footprints, the dock and the campfire ring.
-  paintDecals(ctx) {
+  paintDecals(ctx, images) {
     const rand = mulberry32(this.seed + 77);
     const R = (a, b) => a + rand() * (b - a);
 
@@ -289,13 +290,15 @@ export class Island {
       }
       ctx.stroke();
     }
-    // Tiny eggs with faces, where the flowers used to be
-    for (let i = 0; i < 1600; i++) {
-      const x = R(0, WORLD), y = R(0, WORLD);
-      const h = this.heightAt(x, y);
-      if (h < H_GRASS + 0.03 || h > H_ROCK - 0.05 || this.pathAt(x, y) > 0.2) continue;
-      const cluster = 1 + (rand() * 4 | 0);
-      for (let k = 0; k < cluster; k++) drawMiniEgg(ctx, x + R(-14, 14), y + R(-10, 10), R(3, 5), rand() < 0.6);
+    // Tiny eggs (the real one, pasted small) where the flowers used to be
+    if (images?.egg) {
+      for (let i = 0; i < 1600; i++) {
+        const x = R(0, WORLD), y = R(0, WORLD);
+        const h = this.heightAt(x, y);
+        if (h < H_GRASS + 0.03 || h > H_ROCK - 0.05 || this.pathAt(x, y) > 0.2) continue;
+        const cluster = 1 + (rand() * 4 | 0);
+        for (let k = 0; k < cluster; k++) drawMiniEgg(ctx, images.egg, x + R(-14, 14), y + R(-10, 10), R(7, 11), R(-0.4, 0.4));
+      }
     }
     // Pores on paths and eyeballs on the beaches
     for (let i = 0; i < 5000; i++) {
@@ -500,19 +503,15 @@ function sampleGrid(arr, w, cell, x, y) {
   return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
 }
 
-// A tiny egg, optionally with the egg's face.
-function drawMiniEgg(ctx, x, y, r, withFace) {
+// The egg sprite pasted small, standing on (x, y).
+function drawMiniEgg(ctx, img, x, y, w, rot) {
+  const h = w * img.height / img.width;
   ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  ctx.beginPath(); ctx.ellipse(x + 1, y + 1.5, r * 0.8, r, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#fbf3e4';
-  ctx.beginPath(); ctx.ellipse(x, y, r * 0.8, r, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.beginPath(); ctx.ellipse(x - r * 0.3, y - r * 0.4, r * 0.25, r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
-  if (!withFace) return;
-  ctx.fillStyle = '#3f8f3a';
-  for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(x + s * r * 0.33, y - r * 0.1, r * 0.17, r * 0.2, 0, 0, Math.PI * 2); ctx.fill(); }
-  ctx.strokeStyle = '#7a4a10'; ctx.lineWidth = Math.max(0.8, r * 0.14);
-  ctx.beginPath(); ctx.moveTo(x - r * 0.2, y + r * 0.35); ctx.lineTo(x + r * 0.2, y + r * 0.35); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(x + 1, y + 1, w * 0.5, w * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot);
+  ctx.drawImage(img, -w / 2, -h, w, h);
+  ctx.restore();
 }
 
 function drawEyeball(ctx, x, y, r, look) {

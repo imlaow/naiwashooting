@@ -1,8 +1,9 @@
 // Procedurally painted textures (canvas 2D -> Pixi textures).
 //
-// The look is the "milk & egg" world of the hero sprites in public/assets: everything that was a
-// plant, rock or building is now an egg, a belly, a frog leg or a pair of bunny ears. Texture
-// sizes and anchors are unchanged so the colliders in world.js still fit.
+// The look is the "milk & egg" world of the sprites in public/assets, and the sprites themselves
+// are pasted into the textures: the egg is every egg, the bunny gunner's ears are every leaf and
+// wing, and Naiwa himself is the huts. Nothing with a face is drawn by hand. Texture sizes and
+// anchors are unchanged so the colliders in world.js still fit.
 import { Texture, CanvasSource } from 'pixi.js';
 import { mulberry32 } from './noise.js';
 
@@ -50,235 +51,167 @@ export const C = {
   milk: '#fff3d6',
 };
 
-// ---------- Shape helpers ----------
-// An egg: wider at the bottom. (x, y) is the centre, rx/ry the half extents.
-function eggPath(ctx, x, y, rx, ry) {
-  ctx.beginPath();
-  ctx.moveTo(x, y - ry);
-  ctx.bezierCurveTo(x + rx * 0.75, y - ry, x + rx, y - ry * 0.1, x + rx, y + ry * 0.2);
-  ctx.bezierCurveTo(x + rx, y + ry * 0.75, x + rx * 0.55, y + ry, x, y + ry);
-  ctx.bezierCurveTo(x - rx * 0.55, y + ry, x - rx, y + ry * 0.75, x - rx, y + ry * 0.2);
-  ctx.bezierCurveTo(x - rx, y - ry * 0.1, x - rx * 0.75, y - ry, x, y - ry);
-  ctx.closePath();
-}
+// ---------- Sprite pasting ----------
+// Bitmaps from skins.js, set by buildArt().
+let IMG = null;
+// The pair of ears, cut from the gunner sprite.
+const EARS = { sx: 285, sy: 0, sw: 265, sh: 200 };
 
-function shadedEgg(ctx, x, y, rx, ry, base = C.shell, dark = C.shellDark) {
-  ctx.fillStyle = radial(ctx, x - rx * 0.35, y - ry * 0.35, rx * 0.1, Math.max(rx, ry) * 1.3, [[0, '#ffffff'], [0.3, base], [1, dark]]);
-  eggPath(ctx, x, y, rx, ry); ctx.fill();
-}
-
-// The egg's face from public/assets/egg.png: two green eyes and a flat little mouth.
-function face(ctx, x, y, s, mood = 'blank') {
-  for (const side of [-1, 1]) {
-    const ex = x + side * s * 0.55, ey = y;
-    ctx.fillStyle = '#ffffff'; ellipse(ctx, ex, ey, s * 0.3, s * 0.32); ctx.fill();
-    ctx.fillStyle = C.iris; ellipse(ctx, ex, ey + s * 0.02, s * 0.21, s * 0.23); ctx.fill();
-    ctx.fillStyle = C.pupil; ellipse(ctx, ex, ey + s * 0.03, s * 0.11, s * 0.12); ctx.fill();
-    ctx.fillStyle = '#ffffff'; ellipse(ctx, ex - s * 0.07, ey - s * 0.09, s * 0.05, s * 0.05); ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = s * 0.05; ellipse(ctx, ex, ey, s * 0.3, s * 0.32); ctx.stroke();
-  }
-  ctx.strokeStyle = '#7a4a10'; ctx.lineWidth = Math.max(1, s * 0.07); ctx.lineCap = 'round';
-  ctx.beginPath();
-  if (mood === 'grin') { ctx.arc(x, y + s * 0.35, s * 0.35, 0.15, Math.PI - 0.15); }
-  else if (mood === 'o') { ctx.ellipse(x, y + s * 0.5, s * 0.14, s * 0.2, 0, 0, TAU); }
-  else { ctx.moveTo(x - s * 0.22, y + s * 0.48); ctx.quadraticCurveTo(x, y + s * 0.56, x + s * 0.22, y + s * 0.48); }
-  ctx.stroke();
-  if (mood === 'grin') { ctx.fillStyle = C.tongue; ellipse(ctx, x, y + s * 0.55, s * 0.16, s * 0.1); ctx.fill(); }
-  ctx.lineCap = 'butt';
-}
-
-// A bunny ear from the gunner sprite: a long yellow leaf with a pink inside.
-function ear(ctx, x, y, len, w, ang, outer = C.skin, inner = C.pink) {
+// The egg sprite standing on (x, y), `w` wide, turned by `rot`.
+function pasteEgg(ctx, x, y, w, rot = 0) {
+  const h = w * IMG.egg.height / IMG.egg.width;
   ctx.save();
-  ctx.translate(x, y); ctx.rotate(ang);
-  ctx.fillStyle = outer;
-  ctx.beginPath(); ctx.moveTo(-w / 2, 0); ctx.quadraticCurveTo(-w * 0.7, -len * 0.6, 0, -len); ctx.quadraticCurveTo(w * 0.7, -len * 0.6, w / 2, 0); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = C.skinDark; ctx.lineWidth = 1.2; ctx.stroke();
-  ctx.fillStyle = inner;
-  ctx.beginPath(); ctx.moveTo(-w * 0.22, -len * 0.08); ctx.quadraticCurveTo(-w * 0.4, -len * 0.55, 0, -len * 0.85); ctx.quadraticCurveTo(w * 0.4, -len * 0.55, w * 0.22, -len * 0.08); ctx.closePath(); ctx.fill();
+  ctx.translate(x, y); ctx.rotate(rot);
+  ctx.drawImage(IMG.egg, -w / 2, -h, w, h);
   ctx.restore();
 }
 
-// A fat yellow frog leg with three toes, standing on (x, y) and reaching up to (x + lean, y - h).
-function leg(ctx, x, y, h, lean, w) {
+// The egg sprite with a colour laid over its body (the bomb egg); drawn via a scratch canvas so
+// the tint stays inside the egg's outline.
+function pasteTintedEgg(ctx, x, y, w, color, alpha, rot = 0) {
+  const h = w * IMG.egg.height / IMG.egg.width;
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(w * RES); c.height = Math.ceil(h * RES);
+  const cx = c.getContext('2d');
+  cx.drawImage(IMG.egg, 0, 0, c.width, c.height);
+  cx.globalCompositeOperation = 'source-atop';
+  cx.globalAlpha = alpha;
+  cx.fillStyle = color;
+  cx.fillRect(0, 0, c.width, c.height);
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot);
+  ctx.drawImage(c, -w / 2, -h, w, h);
+  ctx.restore();
+}
+
+// The gunner's ears, their base at (x, y), `w` wide, turned by `rot`.
+function pasteEars(ctx, x, y, w, rot = 0, flip = false) {
+  const h = w * EARS.sh / EARS.sw;
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot);
+  if (flip) ctx.scale(-1, 1);
+  ctx.drawImage(IMG.gunner, EARS.sx, EARS.sy, EARS.sw, EARS.sh, -w / 2, -h, w, h);
+  ctx.restore();
+}
+
+// A Naiwa walk frame standing on (x, y) at height `h`, stretched `wide` times sideways.
+function pasteHero(ctx, frame, x, y, h, wide = 1, rot = 0) {
+  const img = IMG.hero[frame % IMG.hero.length];
+  const w = h * img.width / img.height * wide;
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot);
+  ctx.drawImage(img, -w / 2, -h, w, h);
+  ctx.restore();
+}
+
+// The gunner standing on (x, y) at height `h`.
+function pasteGunner(ctx, x, y, h) {
+  const img = IMG.gunner;
+  const w = h * img.width / img.height;
+  ctx.drawImage(img, x - w / 2, y - h, w, h);
+}
+
+// A plain yellow stalk from (x, y) up to (x + lean, y - h): the one thing still drawn, since the
+// sprites have nothing to stand an egg on.
+function stalk(ctx, x, y, h, lean, w) {
   ctx.fillStyle = linear(ctx, x - w, 0, x + w, 0, [[0, C.skinLight], [0.5, C.skin], [1, C.skinDark]]);
   ctx.beginPath();
   ctx.moveTo(x - w, y);
-  ctx.quadraticCurveTo(x - w * 1.3 + lean * 0.3, y - h * 0.5, x + lean - w * 0.7, y - h);
-  ctx.lineTo(x + lean + w * 0.7, y - h);
-  ctx.quadraticCurveTo(x + w * 1.3 + lean * 0.3, y - h * 0.5, x + w, y);
+  ctx.quadraticCurveTo(x - w * 1.1 + lean * 0.3, y - h * 0.5, x + lean - w * 0.75, y - h);
+  ctx.lineTo(x + lean + w * 0.75, y - h);
+  ctx.quadraticCurveTo(x + w * 1.1 + lean * 0.3, y - h * 0.5, x + w, y);
   ctx.closePath(); ctx.fill();
-  // knee
-  ctx.fillStyle = 'rgba(0,0,0,0.08)'; ellipse(ctx, x + lean * 0.5, y - h * 0.5, w * 1.1, w * 0.6); ctx.fill();
-  // toes
-  ctx.fillStyle = C.skinDark;
-  for (const t of [-1, 0, 1]) { ellipse(ctx, x + t * w * 0.9, y + 1, w * 0.45, w * 0.3); ctx.fill(); }
 }
 
 function groundShadow(ctx, x, y, rx, ry, a = 0.28) {
   ctx.fillStyle = `rgba(90,40,0,${a})`; ellipse(ctx, x, y, rx, ry); ctx.fill();
 }
 
-// ---------- "Vegetation" ----------
-// Egg tree: a frog leg with an egg on top that has a face and sprouts a crown of bunny ears.
+// ---------- Vegetation ----------
+// Egg tree: a stalk with the egg on top; every other one wears the gunner's ears.
 function palmTree(seed) {
   const rand = mulberry32(seed);
   return paint(240, 280, [0.5, 265 / 280], (ctx) => {
     const bx = 120, by = 265;
     const lean = (rand() - 0.5) * 70;
-    const tx = bx + lean, ty = 118;
+    const tx = bx + lean, ty = 150;
     groundShadow(ctx, bx + 6, by - 2, 34, 9);
-    leg(ctx, bx, by, by - ty - 20, lean, 11);
-    const n = 5 + (rand() * 3 | 0);
-    const ears = [];
-    for (let i = 0; i < n; i++) ears.push({ a: (i / n - 0.5) * 2.6 + (rand() - 0.5) * 0.3, L: 60 + rand() * 30 });
-    ears.sort((p, q) => Math.abs(q.a) - Math.abs(p.a));
-    for (const e of ears) ear(ctx, tx, ty - 30, e.L, 18, e.a, rand() < 0.3 ? C.skinLight : C.skin, rand() < 0.5 ? C.pink : C.pinkLight);
-    shadedEgg(ctx, tx, ty, 40, 52);
-    ctx.strokeStyle = C.shellLine; ctx.lineWidth = 1.5; eggPath(ctx, tx, ty, 40, 52); ctx.stroke();
-    face(ctx, tx, ty - 4, 22, ['blank', 'grin', 'o'][seed % 3]);
+    stalk(ctx, bx, by, by - ty + 10, lean, 11);
+    if (seed % 2) pasteEars(ctx, tx, ty - 70, 150, (rand() - 0.5) * 0.4, rand() < 0.5);
+    pasteEgg(ctx, tx, ty + 10, 96, (rand() - 0.5) * 0.3);
   });
 }
 
-// Ear tree: a thick yellow trunk that ends in a huge pair of bunny ears.
+// Ear tree: a thick stalk that ends in a huge pair of the gunner's ears, with an egg for a head.
 function jungleTree(seed) {
   const rand = mulberry32(seed);
-  const inner = [C.pink, C.pinkLight, C.tongue][seed % 3];
   return paint(210, 240, [0.5, 228 / 240], (ctx) => {
     const bx = 105, by = 228;
     groundShadow(ctx, bx + 4, by - 1, 40, 10, 0.3);
-    // buttress toes flaring out along the ground
-    ctx.fillStyle = C.skinDark;
-    for (const s of [-1, -0.45, 0.4, 1]) {
-      const tip = bx + s * (26 + rand() * 8);
-      ctx.beginPath(); ctx.moveTo(bx + s * 6 - 6, by - 18); ctx.quadraticCurveTo(bx + s * 14, by - 6, tip, by + 1); ctx.quadraticCurveTo(bx + s * 12, by + 1, bx + s * 6 + 6, by - 4); ctx.closePath(); ctx.fill();
-    }
-    ctx.fillStyle = linear(ctx, bx - 18, 0, bx + 18, 0, [[0, C.skinLight], [0.5, C.skin], [1, C.skinDark]]);
-    ctx.beginPath();
-    ctx.moveTo(bx - 17, by); ctx.quadraticCurveTo(bx - 9, by - 22, bx - 10, 120); ctx.lineTo(bx + 10, 120); ctx.quadraticCurveTo(bx + 9, by - 22, bx + 18, by); ctx.closePath(); ctx.fill();
-    // belly stripe on the trunk
-    ctx.fillStyle = C.belly; ellipse(ctx, bx, 175, 6, 30); ctx.fill();
-    const spread = 0.28 + rand() * 0.2;
-    ear(ctx, bx - 8, 126, 118 + rand() * 10, 44, -spread, C.skin, inner);
-    ear(ctx, bx + 8, 126, 112 + rand() * 10, 44, spread, C.skinLight, inner);
-    // a head between the ears
-    shadedEgg(ctx, bx, 118, 24, 22, C.skin, C.skinDark);
-    face(ctx, bx, 116, 11, seed % 2 ? 'blank' : 'grin');
+    stalk(ctx, bx, by, 120, 0, 16);
+    pasteEars(ctx, bx, 112, 190, (rand() - 0.5) * 0.3, seed % 2 === 0);
+    pasteEgg(ctx, bx, 128, 62, (rand() - 0.5) * 0.2);
   });
 }
 
-// A clutch of small eggs with faces.
+// A clutch of small eggs.
 function bush(seed) {
   const rand = mulberry32(seed);
   return paint(90, 66, [0.5, 0.9], (ctx) => {
-    const cx = 45, cy = 44;
-    groundShadow(ctx, cx + 3, cy + 14, 36, 8, 0.25);
+    const cx = 45, cy = 56;
+    groundShadow(ctx, cx + 3, cy + 2, 36, 8, 0.25);
     const eggs = [];
-    for (let i = 0; i < 4 + (seed % 3); i++) eggs.push({ x: cx + (rand() - 0.5) * 50, y: cy + (rand() - 0.5) * 14, r: 9 + rand() * 6 });
+    for (let i = 0; i < 3 + (seed % 3); i++) eggs.push({ x: cx + (rand() - 0.5) * 50, y: cy + (rand() - 0.5) * 12, w: 20 + rand() * 12, r: (rand() - 0.5) * 0.5 });
     eggs.sort((a, b) => a.y - b.y);
-    for (const e of eggs) {
-      shadedEgg(ctx, e.x, e.y - e.r * 0.3, e.r, e.r * 1.25, rand() < 0.3 ? C.skinLight : C.shell, rand() < 0.3 ? C.skinDark : C.shellDark);
-      if (rand() < 0.7) face(ctx, e.x, e.y - e.r * 0.35, e.r * 0.5, rand() < 0.5 ? 'blank' : 'o');
-    }
+    for (const e of eggs) pasteEgg(ctx, e.x, e.y, e.w, e.r);
   });
 }
 
-// A tuft of tiny ears.
+// A tuft of small ears.
 function fern(seed) {
   const rand = mulberry32(seed);
   return paint(60, 48, [0.5, 0.95], (ctx) => {
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 6 - 0.5) * 2.2 + (rand() - 0.5) * 0.2;
-      ear(ctx, 30, 46, 22 + rand() * 16, 7, a, i % 2 ? C.skin : C.skinLight, rand() < 0.5 ? C.pink : C.pinkLight);
+    for (let i = 0; i < 2 + (seed % 2); i++) {
+      pasteEars(ctx, 30 + (rand() - 0.5) * 20, 46, 26 + rand() * 12, (rand() - 0.5) * 1.2, rand() < 0.5);
     }
   });
 }
 
-// Rocks are eggs: some cracked open with the yolk showing, some with a face.
+// Rocks are eggs: upright, tilted, or toppled onto their side.
 function rock(seed, size) {
   const rand = mulberry32(seed);
   const w = size * 2.4, h = size * 1.9;
   return paint(w, h, [0.5, 0.86], (ctx) => {
-    const cx = w / 2, cy = h * 0.5;
-    const rx = size * 0.95, ry = size * 0.8;
-    groundShadow(ctx, cx + size * 0.1, h * 0.86, rx * 1.05, ry * 0.3);
-    const cracked = seed % 3 === 0;
-    if (cracked) {
-      // bottom half of the shell with the yolk sitting in it
-      ctx.save();
-      ctx.beginPath(); ctx.rect(0, cy - ry * 0.15, w, h); ctx.clip();
-      shadedEgg(ctx, cx, cy, rx, ry);
-      ctx.restore();
-      ctx.fillStyle = C.shell;
-      ctx.beginPath(); ctx.moveTo(cx - rx * 0.98, cy - ry * 0.1);
-      for (let i = 0; i <= 8; i++) ctx.lineTo(cx - rx + (i / 8) * rx * 2, cy - ry * (0.1 + (i % 2 ? 0.32 : 0.05)));
-      ctx.lineTo(cx + rx * 0.98, cy - ry * 0.1); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = radial(ctx, cx - rx * 0.2, cy - ry * 0.4, 1, rx * 0.5, [[0, '#ffd54f'], [1, C.yolkDark]]);
-      ellipse(ctx, cx, cy - ry * 0.22, rx * 0.5, ry * 0.36); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ellipse(ctx, cx - rx * 0.18, cy - ry * 0.38, rx * 0.14, ry * 0.08); ctx.fill();
-    } else {
-      shadedEgg(ctx, cx, cy, rx, ry);
-      ctx.strokeStyle = C.shellLine; ctx.lineWidth = 1.2;
-      for (let i = 0; i < 2 + (seed % 2); i++) {
-        let x = cx + (rand() - 0.5) * rx, y = cy + (rand() - 0.5) * ry * 0.6;
-        ctx.beginPath(); ctx.moveTo(x, y);
-        for (let k = 0; k < 4; k++) { x += (rand() - 0.5) * size * 0.4; y += (rand() - 0.3) * size * 0.25; ctx.lineTo(x, y); }
-        ctx.stroke();
-      }
-      if (seed % 2) face(ctx, cx, cy - ry * 0.05, size * 0.42, 'blank');
-      // speckles
-      ctx.fillStyle = 'rgba(160,120,60,0.35)';
-      for (let i = 0; i < 7; i++) { ellipse(ctx, cx + (rand() - 0.5) * rx * 1.5, cy + (rand() - 0.5) * ry * 1.4, 1.5, 1); ctx.fill(); }
-    }
+    const cx = w / 2, by = h * 0.86;
+    groundShadow(ctx, cx + size * 0.1, by, size * 1.05, size * 0.3);
+    const toppled = seed % 3 === 0;
+    if (toppled) pasteEgg(ctx, cx, by - size * 0.55, size * 1.55, (rand() < 0.5 ? 1 : -1) * (Math.PI / 2 - 0.15));
+    else pasteEgg(ctx, cx, by, size * 1.65, (rand() - 0.5) * 0.35);
   });
 }
 
-// A frog leg lying on the beach, toes and all.
+// A Naiwa lying on the beach where the driftwood used to be.
 function driftwood(seed) {
-  const rand = mulberry32(seed);
-  return paint(110, 34, [0.5, 0.7], (ctx) => {
-    groundShadow(ctx, 57, 26, 50, 7, 0.22);
-    ctx.fillStyle = linear(ctx, 0, 6, 0, 26, [[0, C.skinLight], [0.5, C.skin], [1, C.skinDark]]);
-    ctx.beginPath(); ctx.moveTo(10, 16); ctx.quadraticCurveTo(30, 4, 60, 9); ctx.quadraticCurveTo(85, 12, 100, 10); ctx.lineTo(100, 22); ctx.quadraticCurveTo(80, 26, 55, 24); ctx.quadraticCurveTo(28, 26, 10, 16); ctx.closePath(); ctx.fill();
-    // thigh end
-    ctx.fillStyle = C.belly; ellipse(ctx, 12, 16, 7, 9); ctx.fill();
-    ctx.fillStyle = C.tongue; ellipse(ctx, 12, 16, 4, 6); ctx.fill();
-    // toes
-    ctx.fillStyle = C.skinDark;
-    for (const [dx, dy] of [[9, -5], [11, 0], [9, 6]]) { ellipse(ctx, 100 + dx * 0.9, 16 + dy, 6, 3, Math.atan2(dy, dx * 0.9)); ctx.fill(); }
-    ctx.strokeStyle = 'rgba(120,70,0,0.35)'; ctx.lineWidth = 1;
-    for (let i = 0; i < 4; i++) { const y = 10 + rand() * 12; ctx.beginPath(); ctx.moveTo(25 + rand() * 20, y); ctx.lineTo(55 + rand() * 35, y + (rand() - 0.5) * 3); ctx.stroke(); }
+  return paint(110, 60, [0.5, 0.8], (ctx) => {
+    groundShadow(ctx, 57, 50, 50, 7, 0.22);
+    pasteHero(ctx, seed + 1, 55, 70, 100, 1, seed % 2 ? Math.PI / 2 : -Math.PI / 2);
   });
 }
 
 // ---------- Props ----------
-// A milk carton.
+// The breakable crate is an egg.
 function crate() {
   return paint(52, 56, [0.5, 0.93], (ctx) => {
     groundShadow(ctx, 29, 51, 25, 6, 0.3);
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.moveTo(4, 16); ctx.lineTo(26, 4); ctx.lineTo(48, 16); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#e9e2d2'; ctx.beginPath(); ctx.moveTo(4, 16); ctx.lineTo(48, 16); ctx.lineTo(26, 10); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = linear(ctx, 0, 16, 0, 52, [[0, '#ffffff'], [1, '#e6ddc8']]);
-    ctx.fillRect(4, 16, 44, 36);
-    ctx.fillStyle = '#3b7dd8'; ctx.fillRect(4, 16, 44, 8); ctx.fillRect(4, 44, 44, 8);
-    ctx.strokeStyle = '#8c8070'; ctx.lineWidth = 1.5; ctx.strokeRect(4, 16, 44, 36);
-    ctx.fillStyle = C.pinkDark; ctx.font = 'bold 15px "ZCOOL KuaiLe", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('奶', 26, 38);
-    ctx.textAlign = 'left';
-    ctx.fillStyle = C.yolk; ctx.fillRect(22, 5, 8, 4);
+    pasteEgg(ctx, 27, 53, 44);
   });
 }
 
-// A bomb egg: black shell, red face, lit fuse.
+// The bomb egg: the egg dyed dark, with a lit fuse.
 function barrel() {
   return paint(38, 52, [0.5, 0.92], (ctx) => {
     groundShadow(ctx, 21, 47, 17, 5, 0.3);
-    shadedEgg(ctx, 19, 28, 16, 20, '#3a3a3a', '#0d0d0d');
-    ctx.strokeStyle = '#ff2e2e'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(10, 36); ctx.lineTo(28, 36); ctx.stroke();
-    face(ctx, 19, 25, 8, 'o');
-    ctx.fillStyle = '#ff2e2e'; ellipse(ctx, 19, 25 + 4, 1.4, 2.2); ctx.fill();
-    // fuse
+    pasteTintedEgg(ctx, 19, 48, 34, '#2a0a12', 0.8);
     ctx.strokeStyle = '#d7b98a'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(19, 9); ctx.quadraticCurveTo(24, 2, 29, 5); ctx.stroke();
     ctx.lineCap = 'butt';
@@ -287,141 +220,68 @@ function barrel() {
   });
 }
 
-// A hut is a Naiwa belly: a yellow dome with the cream belly as the front wall, a door cut into it,
-// and the face peeking over the top.
+// A hut is Naiwa himself, stretched wide, with a door cut into his belly.
 function hut(seed) {
-  const rand = mulberry32(seed);
   return paint(240, 220, [0.5, 208 / 220], (ctx) => {
     groundShadow(ctx, 128, 205, 105, 14, 0.3);
-    // the two feet sticking out
-    ctx.fillStyle = C.skinDark;
-    for (const x of [60, 180]) for (const t of [-1, 0, 1]) { ellipse(ctx, x + t * 14, 203, 9, 5); ctx.fill(); }
-    // body
-    ctx.fillStyle = radial(ctx, 90, 70, 10, 190, [[0, C.skinLight], [0.5, C.skin], [1, C.skinDark]]);
-    eggPath(ctx, 120, 118, 104, 92); ctx.fill();
-    // belly
-    ctx.fillStyle = radial(ctx, 100, 120, 10, 110, [[0, '#fff3dc'], [0.6, C.belly], [1, C.bellyDark]]);
-    ellipse(ctx, 120, 138, 76, 66); ctx.fill();
-    // navel window
-    ctx.fillStyle = '#4a2a10'; ellipse(ctx, 120, 112, 7, 5); ctx.fill();
-    // door
-    ctx.fillStyle = '#2a1a0e'; ctx.beginPath(); ctx.roundRect(100, 140, 40, 66, [20, 20, 0, 0]); ctx.fill();
-    ctx.strokeStyle = C.pinkDark; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(100, 140, 40, 66, [20, 20, 0, 0]); ctx.stroke();
-    ctx.fillStyle = C.yolk; ellipse(ctx, 132, 176, 3, 3); ctx.fill();
-    // windows: two eyes on the belly
-    for (const x of [62, 178]) {
-      ctx.fillStyle = '#1e140c'; ellipse(ctx, x, 150, 14, 11); ctx.fill();
-      ctx.fillStyle = 'rgba(255,190,90,0.5)'; ellipse(ctx, x, 150, 11, 8); ctx.fill();
-      ctx.strokeStyle = C.pinkDark; ctx.lineWidth = 3; ellipse(ctx, x, 150, 14, 11); ctx.stroke();
-    }
-    // face up top
-    face(ctx, 120, 56, 24, ['grin', 'blank', 'o'][seed % 3]);
-    // arms hugging the belly
-    ctx.strokeStyle = C.skinDark; ctx.lineWidth = 14; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(30, 120); ctx.quadraticCurveTo(50, 170, 90, 165); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(210, 120); ctx.quadraticCurveTo(190, 170, 150, 165); ctx.stroke();
-    ctx.strokeStyle = C.skin; ctx.lineWidth = 10;
-    ctx.beginPath(); ctx.moveTo(30, 118); ctx.quadraticCurveTo(50, 166, 88, 162); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(210, 118); ctx.quadraticCurveTo(190, 166, 152, 162); ctx.stroke();
-    ctx.lineCap = 'butt';
-    // a few random ear sprouts on the roof
-    for (let i = 0; i < 2 + (seed % 2); i++) ear(ctx, 120 + (rand() - 0.5) * 80, 36, 28 + rand() * 14, 12, (rand() - 0.5) * 1.2);
+    pasteHero(ctx, seed, 120, 208, 206, 1.9);
+    ctx.fillStyle = '#2a1a0e'; ctx.beginPath(); ctx.roundRect(102, 150, 36, 58, [18, 18, 0, 0]); ctx.fill();
+    ctx.strokeStyle = C.pinkDark; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(102, 150, 36, 58, [18, 18, 0, 0]); ctx.stroke();
+    ctx.fillStyle = C.yolk; ellipse(ctx, 131, 182, 3, 3); ctx.fill();
   });
 }
 
-// Half an eggshell floating on the milk, with the yolk for a seat.
+// The boat is an egg, pulled long, floating on its back.
 function boat() {
   return paint(70, 170, [0.5, 0.5], (ctx) => {
     ctx.fillStyle = 'rgba(200,140,0,0.3)'; ellipse(ctx, 40, 92, 30, 76); ctx.fill();
-    const hull = (inset) => {
-      ctx.beginPath();
-      ctx.moveTo(35, 6 + inset);
-      ctx.bezierCurveTo(62 - inset, 40, 62 - inset, 120, 50 - inset, 160 - inset);
-      ctx.lineTo(20 + inset, 160 - inset);
-      ctx.bezierCurveTo(8 + inset, 120, 8 + inset, 40, 35, 6 + inset);
-      ctx.closePath();
-    };
-    ctx.fillStyle = C.shellDark; hull(0); ctx.fill();
-    ctx.fillStyle = linear(ctx, 0, 0, 70, 0, [[0, '#ffffff'], [0.5, C.shell], [1, C.shellDark]]); hull(4); ctx.fill();
-    // jagged broken rim
-    ctx.fillStyle = C.shellDark;
-    for (let i = 0; i < 9; i++) { const y = 14 + i * 16; ctx.beginPath(); ctx.moveTo(13 + (i % 2) * 2, y); ctx.lineTo(24, y + 5); ctx.lineTo(13 + (i % 2) * 2, y + 10); ctx.closePath(); ctx.fill(); }
-    for (let i = 0; i < 9; i++) { const y = 20 + i * 16; ctx.beginPath(); ctx.moveTo(57 - (i % 2) * 2, y); ctx.lineTo(46, y + 5); ctx.lineTo(57 - (i % 2) * 2, y + 10); ctx.closePath(); ctx.fill(); }
-    // inside: egg white with the yolk
-    ctx.fillStyle = 'rgba(255,255,255,0.8)'; ellipse(ctx, 35, 86, 14, 52); ctx.fill();
-    ctx.fillStyle = radial(ctx, 31, 82, 1, 16, [[0, '#ffd54f'], [1, C.yolkDark]]); ellipse(ctx, 35, 90, 13, 16); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ellipse(ctx, 30, 84, 4, 2.5); ctx.fill();
-    // a paddle: a frog leg
-    ctx.strokeStyle = C.skin; ctx.lineWidth = 4; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(20, 120); ctx.lineTo(50, 146); ctx.stroke();
-    ctx.fillStyle = C.skinDark; for (const t of [-1, 0, 1]) { ellipse(ctx, 52 + t * 1.5, 148 + t * 4, 4, 2.5); ctx.fill(); }
-    ctx.lineCap = 'butt';
+    ctx.drawImage(IMG.egg, 2, 4, 66, 160);
   });
 }
 
-// An egg on a stick with its top blown off: the flame emitter sits in the hole.
+// An egg on a stalk; the flame emitter sits above it.
 function tikiTorch() {
   return paint(26, 80, [0.5, 0.96], (ctx) => {
     groundShadow(ctx, 15, 76, 8, 3, 0.25);
-    ctx.fillStyle = linear(ctx, 9, 0, 17, 0, [[0, C.skinLight], [1, C.skinDark]]);
-    ctx.fillRect(10, 22, 6, 55);
-    ctx.fillStyle = C.skinDark; for (const t of [-1, 0, 1]) { ellipse(ctx, 13 + t * 4, 77, 2.5, 1.5); ctx.fill(); }
-    ctx.save(); ctx.beginPath(); ctx.rect(0, 10, 26, 24); ctx.clip();
-    shadedEgg(ctx, 13, 18, 10, 13);
-    ctx.restore();
-    ctx.fillStyle = '#2a1a0e'; ellipse(ctx, 13, 10, 8, 2.6); ctx.fill();
-    face(ctx, 13, 19, 4.5, 'o');
+    stalk(ctx, 13, 77, 52, 0, 3);
+    pasteEgg(ctx, 13, 30, 22);
   });
 }
 
-// Three eggs stacked up, the top one wearing ears, with a belly-skin platform between.
+// Two eggs stacked, with the gunner kicking on top.
 function tower() {
   return paint(150, 250, [0.5, 240 / 250], (ctx) => {
     groundShadow(ctx, 80, 238, 62, 12, 0.3);
-    shadedEgg(ctx, 75, 192, 54, 50);
-    shadedEgg(ctx, 75, 118, 44, 42);
-    face(ctx, 75, 196, 20, 'blank');
-    face(ctx, 75, 120, 16, 'grin');
-    // platform
-    ctx.fillStyle = C.belly; ctx.beginPath(); ctx.roundRect(20, 86, 110, 16, 8); ctx.fill();
-    ctx.fillStyle = C.bellyDark; ctx.fillRect(20, 98, 110, 4);
-    // rails: small ears
-    for (let x = 24; x <= 126; x += 17) ear(ctx, x, 88, 26, 7, 0, C.skin, C.pinkLight);
-    shadedEgg(ctx, 75, 54, 30, 34, C.skin, C.skinDark);
-    face(ctx, 75, 54, 13, 'o');
-    ear(ctx, 62, 26, 34, 14, -0.35);
-    ear(ctx, 88, 26, 34, 14, 0.35, C.skinLight);
+    pasteEgg(ctx, 75, 240, 118);
+    pasteEgg(ctx, 75, 120, 92, 0.08);
+    pasteGunner(ctx, 75, 30, 112);
   });
 }
 
-// A floppy pink ear for a flag.
+// The flag is a pair of ears.
 function flag() {
   return paint(40, 24, [0, 0.5], (ctx) => {
-    ctx.fillStyle = C.pink;
-    ctx.beginPath(); ctx.moveTo(0, 4); ctx.quadraticCurveTo(20, -4, 40, 8); ctx.quadraticCurveTo(28, 14, 40, 20); ctx.quadraticCurveTo(20, 24, 0, 20); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = C.tongue; ctx.beginPath(); ctx.moveTo(6, 8); ctx.quadraticCurveTo(20, 2, 32, 10); ctx.quadraticCurveTo(20, 16, 6, 16); ctx.closePath(); ctx.fill();
+    pasteEars(ctx, 16, 24, 32, 0.6);
   });
 }
 
 // ---------- Creatures ----------
-// A flying egg with bunny ears for wings.
+// A flying egg with the gunner's ears for wings.
 function seagull(phase) {
   return paint(48, 26, [0.5, 0.5], (ctx) => {
     const up = phase === 0;
-    for (const side of [-1, 1]) ear(ctx, 24 + side * 6, 14, 20, 9, side * (up ? 1.25 : 1.75), C.skin, C.pink);
-    shadedEgg(ctx, 24, 14, 7, 9);
-    face(ctx, 24, 13, 3.4, 'o');
+    pasteEars(ctx, 14, 16, 26, up ? -1.2 : -1.7);
+    pasteEars(ctx, 34, 16, 26, up ? 1.2 : 1.7, true);
+    pasteEgg(ctx, 24, 24, 16);
   });
 }
 
 // A pair of ears flapping like wings.
-function butterfly(phase, color) {
+function butterfly(phase, size) {
   return paint(16, 12, [0.5, 0.5], (ctx) => {
-    const spread = phase ? 0.4 : 1.3;
-    ear(ctx, 7, 10, 9, 4, -spread, color, C.pinkLight);
-    ear(ctx, 9, 10, 9, 4, spread, color, C.pinkLight);
-    ctx.fillStyle = '#ffffff'; ellipse(ctx, 8, 9, 2, 2.4); ctx.fill();
-    ctx.fillStyle = C.iris; ellipse(ctx, 8, 9, 1, 1.2); ctx.fill();
+    const spread = phase ? 0.35 : 1.2;
+    pasteEars(ctx, 7, 12, 12 * size, -spread);
+    pasteEars(ctx, 9, 12, 12 * size, spread, true);
   });
 }
 
@@ -459,13 +319,12 @@ function gun(kind) {
       ctx.fillStyle = C.iris; ctx.fillRect(46, 1, 2, 3);
       ctx.fillStyle = '#ffffff'; ctx.fillRect(24, 5, 50, 1.2);
     }
-    // a googly eye on every gun
-    ctx.fillStyle = '#ffffff'; ellipse(ctx, w * 0.55, h * 0.4, 3, 3); ctx.fill();
-    ctx.fillStyle = C.pupil; ellipse(ctx, w * 0.55 + 1, h * 0.4, 1.4, 1.4); ctx.fill();
   });
 }
 
-export function buildArt() {
+// `images` are the sprite bitmaps from skins.js.
+export function buildArt(images) {
+  IMG = images;
   const art = {};
   art.palms = [11, 22, 33, 44, 55, 66].map(palmTree);
   art.trees = [1, 2, 3, 4, 5, 6].map(jungleTree);
@@ -481,7 +340,7 @@ export function buildArt() {
   art.tower = tower();
   art.flag = flag();
   art.gull = [seagull(0), seagull(1)];
-  art.butterflies = [C.skin, C.skinLight, C.shell, C.pink].map((c) => [butterfly(0, c), butterfly(1, c)]);
+  art.butterflies = [0.8, 1, 1.2, 1.4].map((k) => [butterfly(0, k), butterfly(1, k)]);
   art.guns = { pistol: gun('pistol'), smg: gun('smg'), shotgun: gun('shotgun'), rifle: gun('rifle') };
 
   art.shadow = paint(64, 24, [0.5, 0.5], (ctx) => {
@@ -551,9 +410,7 @@ export function buildArt() {
   art.ammo = paint(32, 26, [0.5, 0.8], (ctx) => {
     ctx.fillStyle = '#a7b8c8'; ctx.beginPath(); ctx.roundRect(2, 10, 28, 14, 3); ctx.fill();
     ctx.fillStyle = '#8a9bab'; ctx.fillRect(2, 10, 28, 3);
-    for (let i = 0; i < 4; i++) {
-      shadedEgg(ctx, 7 + i * 6, 11, 2.8, 4);
-    }
+    for (let i = 0; i < 4; i++) pasteEgg(ctx, 7 + i * 6, 15, 5.6);
     ctx.fillStyle = C.pinkDark; ctx.font = 'bold 7px sans-serif'; ctx.fillText('蛋×4', 7, 22);
   });
   // Cloud shadows shaped like fried eggs drifting over the island.

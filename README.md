@@ -3,11 +3,12 @@
 A top-down 2D island shooter built with [PixiJS](https://pixijs.com) v8 and Vite.
 The hero is Naiwa, whose sprite frames are cut from `mmexport1791681378822.jpg`.
 
-The world is drawn to match the sprites in `public/assets`: a yolk island with Naiwa-skin
-hills and tongue paths, afloat in a sea of milk. Trees are eggs on frog legs or giant bunny
-ears, rocks are eggs, huts are Naiwa bellies, crates are milk cartons, barrels are bomb eggs,
-and the beaches are scattered with eyeballs and teeth. All of it is still painted procedurally
-in `src/art.js` and `src/island.js`. The menus and the lobby are built from the same sprites:
+The world is built from the sprites in `public/assets`, pasted straight into the procedural
+textures (`src/art.js`, `src/island.js`): the egg is every egg (trees, rocks, bushes, crates,
+the boat, the torches, the tiny eggs in the grass), the bunny gunner's ears are every leaf,
+wing and flag, Naiwa himself is the huts and the gunner stands on the egg tower. Only the
+terrain (yolk beaches, Naiwa-skin hills, tongue paths, a sea of milk with yolks in it, eyeballs
+and teeth on the sand) and the stalks the eggs stand on are drawn by hand. The menus and the lobby are built from the same sprites:
 the egg is every main button and holds every number, the bunny gunner is every secondary
 button, the loading bar is a row of eggs, the laughing Naiwa leans into the pause screen and
 the island previews sit inside eggs (`public/assets/egg_cursor.png` and `laugh_pose.png` are

@@ -14,10 +14,10 @@ function canvasTexture(canvas, resolution = 1) {
 }
 
 // Paints the big terrain/foam canvases. Heavy (runs once per page load).
-export function buildTerrainTextures(island, maxTextureSize) {
+export function buildTerrainTextures(island, maxTextureSize, images) {
   const scale = maxTextureSize >= WORLD ? 1 : 0.5;
   return {
-    terrain: canvasTexture(island.paintTerrain(scale), scale),
+    terrain: canvasTexture(island.paintTerrain(scale, images), scale),
     foamA: canvasTexture(island.paintFoam(0.5, 0), 0.5),
     foamB: canvasTexture(island.paintFoam(0.5, 1), 0.5),
     minimap: canvasTexture(island.paintMinimap(180)),

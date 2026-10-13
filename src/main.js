@@ -88,7 +88,7 @@ async function boot() {
 
   setLoading(t('loading.palms'), 20);
   await nextFrame();
-  const art = buildArt();
+  const art = buildArt(skins.images);
 
   const gl = app.renderer.gl;
   const maxTex = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 4096;
@@ -105,7 +105,7 @@ async function boot() {
 
   setLoading(t('loading.beaches'), 55);
   await nextFrame();
-  const terrainTex = buildTerrainTextures(island, maxTex);
+  const terrainTex = buildTerrainTextures(island, maxTex, skins.images);
 
   setLoading(t('loading.ready'), 100);
   await nextFrame();
