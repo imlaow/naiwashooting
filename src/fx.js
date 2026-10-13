@@ -139,7 +139,7 @@ export class Fx {
     }
   }
 
-  dust(x, y, n = 3, color = 0xffd36a) {
+  dust(x, y, n = 3, color = 0xd9c49a) {
     for (let i = 0; i < n; i++) {
       this.spawn({ tex: this.art.soft, x: x + rnd(-6, 6), y: y + rnd(-3, 3), vx: rnd(-30, 30), vy: rnd(-25, 0), life: rnd(0.35, 0.6), s0: 0.25, s1: rnd(0.6, 0.9), a0: 0.45, a1: 0, tint: color, drag: 3 });
     }
@@ -148,13 +148,13 @@ export class Fx {
   splash(x, y, n = 6) {
     for (let i = 0; i < n; i++) {
       const a = rnd(0, Math.PI * 2), sp = rnd(30, 90);
-      this.spawn({ tex: this.art.square, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.5, z: 2, vz: rnd(80, 180), grav: 600, life: rnd(0.3, 0.5), s0: rnd(0.4, 0.8), a0: 0.9, a1: 0.2, tint: 0xffffff });
+      this.spawn({ tex: this.art.square, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.5, z: 2, vz: rnd(80, 180), grav: 600, life: rnd(0.3, 0.5), s0: rnd(0.4, 0.8), a0: 0.9, a1: 0.2, tint: 0xe0fbff });
     }
     this.ripple(x, y);
   }
 
   ripple(x, y, size = 1) {
-    this.spawn({ tex: this.art.ring, x, y, life: 0.7, s0: 0.15 * size, s1: 0.9 * size, sy: 0.5, a0: 0.6, a1: 0, tint: 0xffe9a8 });
+    this.spawn({ tex: this.art.ring, x, y, life: 0.7, s0: 0.15 * size, s1: 0.9 * size, sy: 0.5, a0: 0.6, a1: 0, tint: 0xe6fcff });
   }
 
   splinters(x, y, color = 0xb8803f, n = 10) {
@@ -162,7 +162,7 @@ export class Fx {
       const a = rnd(0, Math.PI * 2), sp = rnd(60, 220);
       this.spawn({ tex: this.art.splinter, x, y, z: rnd(5, 25), vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(100, 260), grav: 800, life: rnd(0.6, 1.1), s0: rnd(0.6, 1.2), a0: 1, a1: 0.7, tint: color, vr: rnd(-15, 15), bounce: true });
     }
-    this.dust(x, y, 4, 0xfff0c0);
+    this.dust(x, y, 4, 0xc8a878);
   }
 
   burst(x, y, color, n = 14) {

@@ -22,8 +22,6 @@ export async function loadSkins() {
     hero: textures,
     headX,
     egg,
-    // The raw bitmaps, for art.js and the terrain decals to paste into their canvases.
-    images: { egg: egg.source.resource, hero: images, gunner: gunner.source.resource },
     // One still pose; the walk cycle is just the bob and lean in Enemy.sync.
     gunner: [gunner, gunner, gunner, gunner],
     // Hue-shifted rivals. Yellow (~50deg) rotated to the target hue.

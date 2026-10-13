@@ -8,13 +8,10 @@
 // `thumbnail(world, size)` that paints a preview canvas, and name strings under `theme.<id>`
 // in i18n.js.
 import { Island } from './island.js';
-import { t } from './i18n.js';
 
 export const THEMES = [
   {
     id: 'island',
-    // Shown on the theme's tab in the lobby.
-    icon: 'assets/hero_1.png',
     // A card that rolls a fresh seed every time it is picked.
     random: true,
     variants: [
@@ -53,32 +50,6 @@ export function makeChoice(theme, id, seed) {
   if (id === RANDOM_ID && th.random) return { theme: th.id, id: RANDOM_ID, seed: seed || randomSeed(), shape: {} };
   const v = th.variants.find((m) => m.id === id) ?? th.variants[0];
   return { theme: th.id, id: v.id, seed: v.seed, shape: v.shape };
-}
-
-// Display name of a choice, e.g. "椰林湾" or "随机海岛 #4242".
-export function mapName(choice) {
-  const base = t(`theme.${choice.theme}.${choice.id}.name`);
-  return choice.id === RANDOM_ID ? `${base} #${choice.seed}` : base;
-}
-
-// The game page's URL for a choice; the lobby links here and the game parses it back.
-export function playUrl(choice) {
-  const q = new URLSearchParams({ map: mapKey(choice) });
-  if (choice.id === RANDOM_ID) q.set('seed', String(choice.seed));
-  return `play.html?${q}`;
-}
-
-// Parses ?map=theme/id (&seed=N for a random map) or the legacy ?seed=N; null if neither is set.
-export function choiceFromQuery(search) {
-  const q = new URLSearchParams(search);
-  const seed = Number(q.get('seed')) || 0;
-  const m = q.get('map');
-  if (m) {
-    const [theme, id] = m.includes('/') ? m.split('/') : ['island', m];
-    return makeChoice(theme, id, seed);
-  }
-  if (seed) return makeChoice('island', RANDOM_ID, seed);
-  return null;
 }
 
 // Identifies a map for its records: presets by name, every random roll under one key.

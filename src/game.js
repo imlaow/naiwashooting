@@ -34,8 +34,7 @@ export class Game {
     }
     this.layers.objects.sortableChildren = true;
     this.vignette = new Sprite(art.vignette);
-    this.vignette.tint = 0xd8006a;
-    this.vignette.alpha = 0.3;
+    this.vignette.alpha = 0.35;
     this.root.addChild(this.vignette);
     this.hurtVignette = new Sprite(art.vignette);
     this.hurtVignette.tint = 0xff1a1a;
@@ -120,7 +119,7 @@ export class Game {
     if (p.dead) return;
     p.hp -= dmg;
     p.shakeT = 0.15;
-    if (p.kind === 'crate') { this.fx.splinters(p.x, p.y - 24, 0xfbf3e4, 3); sfx.play('wood', this.volumeAt(p.x, p.y)); }
+    if (p.kind === 'crate') { this.fx.splinters(p.x, p.y - 24, 0xb8803f, 3); sfx.play('wood', this.volumeAt(p.x, p.y)); }
     if (p.hp <= 0) this.destroyProp(p);
   }
 
@@ -130,7 +129,7 @@ export class Game {
     p.sprite.destroy();
     this.props.splice(this.props.indexOf(p), 1);
     if (p.kind === 'crate') {
-      this.fx.splinters(p.x, p.y - 20, 0xfbf3e4, 20);
+      this.fx.splinters(p.x, p.y - 20, 0xb8803f, 20);
       sfx.play('crateBreak', this.volumeAt(p.x, p.y));
       this.shake(3);
       const r = Math.random();
@@ -259,7 +258,7 @@ export class Game {
         const c = this.statics.pointHit(b.x, b.y);
         if (c) {
           if (c.owner) this.damageProp(c.owner, b.dmg);
-          this.fx.sparks(b.x, b.y - b.h, b.ang, c.owner?.kind === 'crate' ? 0xffffff : 0xffb300, 5);
+          this.fx.sparks(b.x, b.y - b.h, b.ang, c.owner?.kind === 'crate' ? 0xd9a866 : 0xffe2a0, 5);
           if (!c.owner) sfx.play('impact', this.volumeAt(b.x, b.y) * 0.6);
           alive = false;
           break;
