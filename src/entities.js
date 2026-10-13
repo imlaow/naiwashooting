@@ -124,19 +124,16 @@ export class Player {
     sfx.play('reload');
   }
 
-  // Naiwa laughs his head off: frozen, untouchable and ignored by enemies until the
-  // clip ends, then back to full health.
+  // Naiwa laughs his head off: untouchable and ignored by enemies until the clip ends
+  // (he can still move and shoot), then back to full health.
   laugh() {
     if (!this.game.skins.laugh || this.laughT >= 0 || this.dead) return false;
     this.laughT = 0;
-    this.vx = this.vy = 0;
-    this.dashT = 0;
-    this.gun.visible = false;
     return true;
   }
 
-  // While laughing he can't step out from behind a tree, so trees in front fade for
-  // his whole body (arms out) instead of only his feet.
+  // While laughing his arms stick out wide, so trees in front fade for his whole body
+  // instead of only his feet.
   get focusBox() {
     if (this.laughT < 0) return null;
     const b = this.body, w = Math.abs(b.width), h = b.height;
@@ -151,20 +148,14 @@ export class Player {
     if (this.laughT >= 0) {
       const L = game.skins.laugh;
       this.laughT = laugh.time() ?? this.laughT + dt;
-      if (this.laughT < L.frames.length / L.fps) {
-        this.invuln -= dt;
-        this.flash -= dt;
-        this.moving = false;
-        this.sync();
-        return;
-      }
-      this.laughT = -1;
-      this.gun.visible = true;
-      const heal = Math.ceil(this.maxHp - this.hp);
-      if (heal > 0) {
-        this.hp = this.maxHp;
-        game.fx.text(this.x, this.y - 100, `+${heal}`, 0x4ade80, 1.2);
-        sfx.play('heal');
+      if (this.laughT >= L.frames.length / L.fps) {
+        this.laughT = -1;
+        const heal = Math.ceil(this.maxHp - this.hp);
+        if (heal > 0) {
+          this.hp = this.maxHp;
+          game.fx.text(this.x, this.y - 100, `+${heal}`, 0x4ade80, 1.2);
+          sfx.play('heal');
+        }
       }
     }
     // ----- Aim -----
