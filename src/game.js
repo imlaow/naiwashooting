@@ -166,7 +166,8 @@ export class Game {
     this.spawnPickup('weapon', x, y, pool[(Math.random() * pool.length) | 0]);
   }
 
-  spawnPickup(kind, x, y, weapon = null, life = 22) {
+  // Health and ammo stay on the ground until picked up; dropped weapons fade after a while.
+  spawnPickup(kind, x, y, weapon = null, life = kind === 'weapon' ? 22 : Infinity) {
     const root = new Container();
     const glow = new Sprite(this.art.glow);
     glow.anchor.set(0.5);
