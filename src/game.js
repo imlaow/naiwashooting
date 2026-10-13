@@ -4,7 +4,7 @@ import { WORLD } from './island.js';
 import { StaticWorld } from './physics.js';
 import { Fx } from './fx.js';
 import { Environment, makeSprite } from './world.js';
-import { Player, Enemy, ENEMY_TYPES, WEAPON_ORDER } from './entities.js';
+import { Player, Enemy, ENEMY_TYPES, WEAPON_ORDER, EGG_FOOT } from './entities.js';
 import { Hud } from './hud.js';
 import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
@@ -310,7 +310,7 @@ export class Game {
         const x = P.x + Math.cos(a) * d, y = P.y + Math.sin(a) * d;
         if (!isl.isWalkable(x, y) || isl.inDock(x, y)) continue;
         const h = isl.heightAt(x, y);
-        if (pass === 0 && type === 'crab' && (h > 0.05 || h < -0.09)) continue;
+        if (pass === 0 && type === 'egg' && (h > 0.05 || h < -0.09)) continue;
         if (this.statics.overlaps(x, y, 26)) continue;
         return { x, y };
       }
@@ -346,12 +346,12 @@ export class Game {
   startWave(n) {
     this.wave = n;
     const boss = n % 5 === 0;
-    let crabs = Math.min(3 + n * 2, 18);
+    let eggs = Math.min(3 + n * 2, 18);
     let gunners = Math.min(n, 10);
     let heavies = Math.min(Math.floor((n - 1) / 2), 6);
-    if (boss) { crabs = Math.floor(crabs / 2); gunners = Math.floor(gunners / 2); heavies = Math.floor(heavies / 2); }
+    if (boss) { eggs = Math.floor(eggs / 2); gunners = Math.floor(gunners / 2); heavies = Math.floor(heavies / 2); }
     const q = [];
-    for (let i = 0; i < crabs; i++) q.push('crab');
+    for (let i = 0; i < eggs; i++) q.push('egg');
     for (let i = 0; i < gunners; i++) q.splice(Math.floor(Math.random() * (q.length + 1)), 0, 'gunner');
     for (let i = 0; i < heavies; i++) q.splice(Math.floor(q.length * 0.4 + Math.random() * q.length * 0.6), 0, 'heavy');
     if (boss) q.splice(Math.min(3, q.length), 0, 'boss');
@@ -421,13 +421,13 @@ export class Game {
       this.hud.toast(t('game.laughToast'));
     }
     this.fx.burst(e.x, e.y - e.height() * 0.4, e.T.color, e.type === 'boss' ? 40 : 14);
-    if (e.type !== 'crab') {
+    if (e.type !== 'egg') {
       this.fx.spawn({ tex: e.body.texture, x: e.x, y: e.y, ay: 0.96, life: 0.35, s0: e.T.scale, s1: e.T.scale * 0.2, flip: Math.sign(e.body.scale.x), a0: 1, a1: 0, tint: 0xffffff, sy: 1 });
       this.fx.spawn({ tex: this.art.guns[e.T.gun], x: e.x, y: e.y - 20, z: 20, vz: 200, grav: 700, vx: rnd(-80, 80), life: 1.2, s0: 1, a0: 1, a1: 0.8, vr: rnd(-12, 12), bounce: true });
     } else {
-      this.fx.spawn({ tex: e.body.texture, x: e.x, y: e.y, ay: 0.82, life: 0.6, s0: 1, s1: 0.9, sy: 1, a0: 1, a1: 0, z: 0, vz: 260, grav: 900, vr: 10 });
+      this.fx.spawn({ tex: e.body.texture, x: e.x, y: e.y, ay: EGG_FOOT, life: 0.6, s0: 1, s1: 0.9, sy: 1, a0: 1, a1: 0, z: 0, vz: 260, grav: 900, vr: 10 });
     }
-    sfx.play(e.type === 'crab' ? 'crab' : 'die', this.volumeAt(e.x, e.y));
+    sfx.play(e.type === 'egg' ? 'egg' : 'die', this.volumeAt(e.x, e.y));
     if (e.type === 'boss') {
       this.shake(22);
       this.fx.explosion(e.x, e.y, 160);

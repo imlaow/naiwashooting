@@ -112,9 +112,9 @@ class Sfx {
         this.tone({ dur: 0.3, f0: 600, f1: 90, vol: 0.2 * v, type: 'triangle' });
         this.noiseBurst({ dur: 0.15, freq: 800, q: 1, vol: 0.2 * v });
         break;
-      case 'crab':
-        this.tone({ dur: 0.12, f0: 1200, f1: 500, vol: 0.12 * v, type: 'square' });
-        this.tone({ dur: 0.12, f0: 900, f1: 300, vol: 0.12 * v, type: 'square', delay: 0.06 });
+      case 'egg':
+        this.tone({ dur: 0.16, f0: 420, f1: 160, vol: 0.22 * v, type: 'sine' });
+        this.tone({ dur: 0.12, f0: 700, f1: 300, vol: 0.08 * v, type: 'triangle', delay: 0.05 });
         break;
       case 'explosion':
         this.noiseBurst({ dur: 1.1, freq: 700, q: 0.5, vol: 1 * v, sweep: 0.08, type: 'lowpass' });

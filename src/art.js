@@ -451,45 +451,6 @@ function flag() {
 }
 
 // ---------- Creatures ----------
-function crabFrame(phase) {
-  return paint(76, 56, [0.5, 0.82], (ctx) => {
-    const cx = 38, cy = 32;
-    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ellipse(ctx, cx + 2, cy + 14, 28, 7); ctx.fill();
-    ctx.strokeStyle = '#a3261a'; ctx.lineWidth = 3.2; ctx.lineCap = 'round';
-    for (let i = 0; i < 3; i++) {
-      const off = (i + phase) % 2 ? 4 : -3;
-      for (const s of [-1, 1]) {
-        ctx.beginPath();
-        ctx.moveTo(cx + s * 12, cy + 2 + i * 3);
-        ctx.lineTo(cx + s * 24, cy - 4 + i * 5 + off);
-        ctx.lineTo(cx + s * 30, cy + 10 + i * 4 + off);
-        ctx.stroke();
-      }
-    }
-    // claws
-    for (const s of [-1, 1]) {
-      ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(cx + s * 10, cy - 6); ctx.lineTo(cx + s * 22, cy - 16 + phase * 2); ctx.stroke();
-      ctx.fillStyle = '#e74c3c';
-      ellipse(ctx, cx + s * 25, cy - 22 + phase * 2, 8, 7, s * 0.4); ctx.fill();
-      ctx.fillStyle = '#7b1d14';
-      ctx.beginPath(); ctx.moveTo(cx + s * 25, cy - 22 + phase * 2); ctx.lineTo(cx + s * 33, cy - 28 + phase * 2); ctx.lineTo(cx + s * 30, cy - 20 + phase * 2); ctx.closePath(); ctx.fill();
-    }
-    ctx.lineCap = 'butt';
-    ctx.fillStyle = radial(ctx, cx - 5, cy - 6, 2, 22, [[0, '#ff8a65'], [0.6, '#e74c3c'], [1, '#922b21']]);
-    ellipse(ctx, cx, cy, 18, 13); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ellipse(ctx, cx - 6, cy - 6, 6, 3); ctx.fill();
-    for (const s of [-1, 1]) {
-      ctx.strokeStyle = '#922b21'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(cx + s * 5, cy - 10); ctx.lineTo(cx + s * 7, cy - 18); ctx.stroke();
-      ctx.fillStyle = '#fff'; ellipse(ctx, cx + s * 7, cy - 20, 4, 4); ctx.fill();
-      ctx.fillStyle = '#111'; ellipse(ctx, cx + s * 7.5, cy - 20, 2, 2.4); ctx.fill();
-    }
-    ctx.strokeStyle = '#5a1510'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(cx, cy - 2, 6, 0.3, Math.PI - 0.3); ctx.stroke();
-  });
-}
-
 function seagull(phase) {
   return paint(48, 26, [0.5, 0.5], (ctx) => {
     const up = phase === 0;
@@ -570,7 +531,6 @@ export function buildArt() {
   art.torch = tikiTorch();
   art.tower = tower();
   art.flag = flag();
-  art.crab = [crabFrame(0), crabFrame(1)];
   art.gull = [seagull(0), seagull(1)];
   art.butterflies = ['#f472b6', '#facc15', '#60a5fa', '#fb923c'].map((c) => [butterfly(0, c), butterfly(1, c)]);
   art.guns = { pistol: gun('pistol'), smg: gun('smg'), shotgun: gun('shotgun'), rifle: gun('rifle') };

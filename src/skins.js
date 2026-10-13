@@ -5,14 +5,20 @@ const FRAME_URLS = [0, 1, 2, 3].map((i) => `${import.meta.env.BASE_URL}assets/he
 // Frames are stored at 3x (660px tall) but keep their original 220px logical size.
 // Mipmaps keep the big frames from shimmering when drawn small.
 const FRAME_OPTS = { resolution: 3, autoGenerateMipmaps: true };
+// The egg enemy, cut out with BiRefNet; stored at 5x of its 46px logical height.
+const EGG_URL = `${import.meta.env.BASE_URL}assets/egg.png`;
 
 export async function loadSkins() {
-  const textures = await Promise.all(FRAME_URLS.map((src) => Assets.load({ src, data: FRAME_OPTS })));
+  const [egg, ...textures] = await Promise.all([
+    Assets.load({ src: EGG_URL, data: { resolution: 5, autoGenerateMipmaps: true } }),
+    ...FRAME_URLS.map((src) => Assets.load({ src, data: FRAME_OPTS })),
+  ]);
   const images = textures.map((t) => t.source.resource);
   const headX = images.map(findHeadX);
   return {
     hero: textures,
     headX,
+    egg,
     // Hue-shifted rivals. Yellow (~50deg) rotated to the target hue.
     gunner: images.map((img) => recolor(img, { hue: -55, sat: 1.1, light: 0.95 })),
     heavy: images.map((img) => recolor(img, { hue: 215, sat: 0.9, light: 0.85 })),

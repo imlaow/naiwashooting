@@ -327,8 +327,11 @@ export class Player {
 
 // ---------------- Enemies ----------------
 
+// Where the egg touches the ground, as a fraction of egg.png's height.
+export const EGG_FOOT = 0.99;
+
 export const ENEMY_TYPES = {
-  crab: { hp: 36, speed: 150, r: 16, bite: 12, score: 50, color: 0xe74c3c },
+  egg: { hp: 36, speed: 150, r: 16, bite: 12, score: 50, color: 0xe0a030 },
   gunner: { hp: 60, speed: 100, r: 17, skin: 'gunner', gun: 'pistol', rate: 1.25, bulletSpeed: 430, dmg: 9, pellets: 1, spread: 0.06, range: [230, 400], score: 100, scale: 0.38, color: 0xff6b8a },
   heavy: { hp: 160, speed: 70, r: 21, skin: 'heavy', gun: 'shotgun', rate: 1.9, bulletSpeed: 360, dmg: 8, pellets: 5, spread: 0.42, range: [120, 250], score: 220, scale: 0.48, color: 0xa78bfa },
   boss: { hp: 1600, speed: 90, r: 32, skin: 'boss', gun: 'smg', rate: 0.1, bulletSpeed: 400, dmg: 8, pellets: 1, spread: 0.12, range: [200, 420], score: 2500, scale: 0.78, color: 0x9ca3af },
@@ -350,8 +353,9 @@ export class Enemy {
     this.phase = 'chase'; this.phaseT = 3; this.sweep = 0;
 
     this.root = new Container();
-    if (type === 'crab') {
-      this.body = makeSprite(game.art.crab[0]);
+    if (type === 'egg') {
+      this.body = new Sprite(game.skins.egg);
+      this.body.anchor.set(0.5, EGG_FOOT);
     } else {
       this.body = new Sprite(game.skins[T.skin][0]);
       this.body.anchor.set(0.5, 0.96);
@@ -402,12 +406,12 @@ export class Enemy {
       if (!(this.wanderT > 0)) { this.wanderT = 1.2 + Math.random() * 1.8; this.wanderA = Math.random() * Math.PI * 2; }
       wx = Math.cos(this.wanderA); wy = Math.sin(this.wanderA); speed *= 0.35;
       this.aim = this.wanderA;
-    } else if (this.type === 'crab') {
+    } else if (this.type === 'egg') {
       const wob = Math.sin(game.time * 7 + this.animT) * 0.7;
       wx = tx - ty * wob; wy = ty + tx * wob;
       this.biteCd -= dt;
       if (dist < this.r + P.r + 8 && this.biteCd <= 0 && !P.dead) {
-        if (P.hurt(T.bite, this.x, this.y)) sfx.play('crab');
+        if (P.hurt(T.bite, this.x, this.y)) sfx.play('egg');
         this.biteCd = 0.9;
         this.kx -= tx * 220; this.ky -= ty * 220;
       }
@@ -477,7 +481,7 @@ export class Enemy {
     } else this.strandedT = 0;
     this.moving = Math.hypot(this.vx, this.vy) > 30;
     stepFx(this, dt, this.moving);
-    this.animT += dt * (this.moving ? (this.type === 'crab' ? 12 : 8) : 2);
+    this.animT += dt * (this.moving ? (this.type === 'egg' ? 12 : 8) : 2);
     this.sync();
   }
 
@@ -521,7 +525,7 @@ export class Enemy {
       move[2] = 0;
       if (this.phaseT <= 0.1 && !this.summoned) {
         this.summoned = true;
-        for (let i = 0; i < (enraged ? 4 : 3); i++) game.spawnNear('crab', this.x, this.y, 120);
+        for (let i = 0; i < (enraged ? 4 : 3); i++) game.spawnNear('egg', this.x, this.y, 120);
       }
     }
     if (this.phase !== 'chase' && this.phaseT <= 0) {
@@ -566,17 +570,17 @@ export class Enemy {
   }
 
   height() {
-    if (this.type === 'crab') return 40;
+    if (this.type === 'egg') return 46;
     return 220 * this.T.scale;
   }
 
   sync() {
     const game = this.game;
     const moving = this.moving;
-    if (this.type === 'crab') {
-      this.body.texture = game.art.crab[Math.floor(this.animT) % 2];
-      this.body.rotation = moving ? Math.sin(this.animT * 2) * 0.12 : 0;
-      this.body.y = 0;
+    if (this.type === 'egg') {
+      // Waddle: rock side to side on its base with a little hop each step.
+      this.body.rotation = moving ? Math.sin(this.animT) * 0.16 : 0;
+      this.body.y = moving ? -Math.abs(Math.sin(this.animT)) * 3 : 0;
     } else {
       const sc = this.T.scale;
       const facing = Math.cos(this.aim) >= 0 ? 1 : -1;

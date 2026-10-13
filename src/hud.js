@@ -300,7 +300,7 @@ export class Hud {
     for (const p of g.pickups) d.circle(p.x * k, p.y * k, 2.5).fill(p.kind === 'weapon' ? 0x7dd3fc : p.kind === 'health' ? 0xff5a7a : 0xffd23f);
     for (const e of g.enemies) {
       if (e.dead) continue;
-      d.circle(e.x * k, e.y * k, e.type === 'boss' ? 5 : 2.6).fill(e.type === 'crab' ? 0xff5a3d : e.T.color).stroke({ width: 1, color: 0x000000, alpha: 0.6 });
+      d.circle(e.x * k, e.y * k, e.type === 'boss' ? 5 : 2.6).fill(e.type === 'egg' ? 0xff5a3d : e.T.color).stroke({ width: 1, color: 0x000000, alpha: 0.6 });
     }
     const hw = this.w / 2 / g.zoom, hh = this.h / 2 / g.zoom;
     d.rect((g.cam.x - hw) * k, (g.cam.y - hh) * k, hw * 2 * k, hh * 2 * k).stroke({ width: 1, color: 0xffffff, alpha: 0.5 });
