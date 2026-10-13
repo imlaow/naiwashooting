@@ -108,13 +108,55 @@ function jungleTree(seed) {
   ][seed % 3];
   return paint(210, 240, [0.5, 228 / 240], (ctx) => {
     const bx = 105, by = 228;
-    ctx.fillStyle = linear(ctx, bx - 14, 0, bx + 14, 0, [[0, '#7a5a3a'], [1, '#3e2a18']]);
-    ctx.beginPath();
-    ctx.moveTo(bx - 20, by); ctx.quadraticCurveTo(bx - 10, by - 10, bx - 9, by - 70);
-    ctx.lineTo(bx + 9, by - 70); ctx.quadraticCurveTo(bx + 10, by - 10, bx + 22, by);
-    ctx.closePath(); ctx.fill();
     const cx = 105, cy = 98;
-    const blobs = [];
+    const bark = linear(ctx, bx - 16, 0, bx + 16, 0, [[0, '#8a6844'], [0.4, '#6b4c2e'], [1, '#3a2716']]);
+    // contact shadow so the tree sits on the ground
+    ctx.fillStyle = radial(ctx, bx + 4, by - 1, 4, 38, [[0, 'rgba(0,0,0,0.32)'], [1, 'rgba(0,0,0,0)']]);
+    ellipse(ctx, bx + 4, by - 1, 38, 10); ctx.fill();
+    // buttress roots flaring out along the ground
+    ctx.fillStyle = bark;
+    for (const s of [-1, -0.45, 0.4, 1]) {
+      const tip = bx + s * (24 + rand() * 8);
+      ctx.beginPath();
+      ctx.moveTo(bx + s * 6 - 6, by - 18);
+      ctx.quadraticCurveTo(bx + s * 14, by - 6, tip, by + 1);
+      ctx.quadraticCurveTo(bx + s * 12, by + 1, bx + s * 6 + 6, by - 4);
+      ctx.closePath(); ctx.fill();
+    }
+    // the trunk runs up into the canopy and forks into limbs, so no cut-off top ever shows
+    const trunk = new Path2D();
+    trunk.moveTo(bx - 17, by);
+    trunk.quadraticCurveTo(bx - 9, by - 22, bx - 8, by - 60);
+    trunk.lineTo(bx - 6, 118); trunk.lineTo(bx + 6, 118);
+    trunk.lineTo(bx + 8, by - 60);
+    trunk.quadraticCurveTo(bx + 9, by - 22, bx + 18, by);
+    trunk.closePath();
+    ctx.fillStyle = bark; ctx.fill(trunk);
+    ctx.strokeStyle = '#4a3220'; ctx.lineCap = 'round';
+    for (const s of [-1, 1]) {
+      const ex = bx + s * (26 + rand() * 8), ey = 120 + rand() * 6;
+      ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(bx + s * 2, 168); ctx.quadraticCurveTo(bx + s * 6, 140, ex, ey); ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    ctx.save();
+    ctx.clip(trunk);
+    // bark grain and a sunlit edge
+    ctx.strokeStyle = 'rgba(40,25,12,0.45)'; ctx.lineWidth = 1.2;
+    for (let i = 0; i < 6; i++) {
+      const x = bx - 10 + i * 4 + rand() * 2, y0 = 150 + rand() * 20;
+      ctx.beginPath(); ctx.moveTo(x, y0); ctx.quadraticCurveTo(x + (rand() - 0.5) * 4, y0 + 30, x + (x - bx) * 0.4, by); ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,225,170,0.22)'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(bx - 5, 150); ctx.quadraticCurveTo(bx - 7, by - 30, bx - 12, by); ctx.stroke();
+    // shade cast by the canopy onto the upper trunk
+    ctx.fillStyle = linear(ctx, 0, 150, 0, 195, [[0, 'rgba(10,25,10,0.55)'], [1, 'rgba(10,25,10,0)']]);
+    ctx.fillRect(bx - 20, 110, 40, 85);
+    ctx.restore();
+    const blobs = [
+      // fixed lower blobs: the canopy always closes over the trunk top and limb tips
+      { x: cx - 30, y: 136, r: 28 }, { x: cx + 30, y: 136, r: 28 }, { x: cx, y: 146, r: 26 },
+    ];
     for (let i = 0; i < 26; i++) {
       const a = rand() * TAU, r = Math.sqrt(rand()) * 62;
       blobs.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r * 0.8, r: 22 + rand() * 18 });
