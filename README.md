@@ -30,7 +30,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 
 ## Gameplay
 
-- You start on the beach by the dock. Waves of rivals land on the shores: yellow eggs that waddle up and bump into you, pink gunners, and purple shotgun heavies.
+- You start on the beach by the dock. Waves of rivals land on the shores: yellow eggs that waddle up and bump into you, long-eared bunny gunners, and purple shotgun heavies.
 - Every 5th wave, **King Naiwa** shows up. He sprays bullets, fires rings of orbs, and summons eggs.
 - Weapons are hidden around the island: a shotgun by a village hut, an SMG at the hilltop lookout tower, and a rifle on a remote beach. Enemies and crates also drop weapons, ammo and medkits.
 - Shooting a red barrel makes it explode, and nearby barrels go off too.
@@ -43,7 +43,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | --- | --- |
 | `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX) |
-| `src/skins.js` | Loads hero frames and the egg enemy (`public/assets/egg.png`), builds recoloured rival skins |
+| `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), builds recoloured rival skins |
 | `src/world.js` | Scene building: water, vegetation, props, ambient life |
 | `src/entities.js` | Player, enemies, weapon stats |
 | `src/game.js` | Game loop, camera, bullets, waves, pickups, scoring |

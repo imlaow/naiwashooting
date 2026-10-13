@@ -7,10 +7,13 @@ const FRAME_URLS = [0, 1, 2, 3].map((i) => `${import.meta.env.BASE_URL}assets/he
 const FRAME_OPTS = { resolution: 3, autoGenerateMipmaps: true };
 // The egg enemy, cut out with BiRefNet; stored at 5x of its 46px logical height.
 const EGG_URL = `${import.meta.env.BASE_URL}assets/egg.png`;
+// The gunner's single pose, cut out the same way; 660px tall like the hero frames.
+const GUNNER_URL = `${import.meta.env.BASE_URL}assets/gunner.png`;
 
 export async function loadSkins() {
-  const [egg, ...textures] = await Promise.all([
+  const [egg, gunner, ...textures] = await Promise.all([
     Assets.load({ src: EGG_URL, data: { resolution: 5, autoGenerateMipmaps: true } }),
+    Assets.load({ src: GUNNER_URL, data: FRAME_OPTS }),
     ...FRAME_URLS.map((src) => Assets.load({ src, data: FRAME_OPTS })),
   ]);
   const images = textures.map((t) => t.source.resource);
@@ -19,8 +22,9 @@ export async function loadSkins() {
     hero: textures,
     headX,
     egg,
+    // One still pose; the walk cycle is just the bob and lean in Enemy.sync.
+    gunner: [gunner, gunner, gunner, gunner],
     // Hue-shifted rivals. Yellow (~50deg) rotated to the target hue.
-    gunner: images.map((img) => recolor(img, { hue: -55, sat: 1.1, light: 0.95 })),
     heavy: images.map((img) => recolor(img, { hue: 215, sat: 0.9, light: 0.85 })),
     boss: images.map((img) => recolor(img, { hue: 160, sat: 0.35, light: 0.55 })),
   };
