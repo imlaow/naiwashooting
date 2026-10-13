@@ -13,6 +13,8 @@ import { t } from './i18n.js';
 export const THEMES = [
   {
     id: 'island',
+    // Shown on the theme's tab in the lobby.
+    icon: 'assets/hero_1.png',
     // A card that rolls a fresh seed every time it is picked.
     random: true,
     variants: [

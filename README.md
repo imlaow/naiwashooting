@@ -7,7 +7,11 @@ The world is drawn to match the sprites in `public/assets`: a yolk island with N
 hills and tongue paths, afloat in a sea of milk. Trees are eggs on frog legs or giant bunny
 ears, rocks are eggs, huts are Naiwa bellies, crates are milk cartons, barrels are bomb eggs,
 and the beaches are scattered with eyeballs and teeth. All of it is still painted procedurally
-in `src/art.js` and `src/island.js`.
+in `src/art.js` and `src/island.js`. The menus and the lobby are built from the same sprites:
+the egg is every main button and holds every number, the bunny gunner is every secondary
+button, the loading bar is a row of eggs, the laughing Naiwa leans into the pause screen and
+the island previews sit inside eggs (`public/assets/egg_cursor.png` and `laugh_pose.png` are
+cut from `egg.png` and the laugh sheet for the cursor and the pause screen).
 
 ## Run
 

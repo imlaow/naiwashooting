@@ -68,6 +68,11 @@ function preview(choice, size, cls) {
     // key is checked: a box never changes its choice, and painting a detached box is harmless.
     if (box.dataset.key !== choiceKey(choice)) return;
     box.replaceChildren(cloneCanvas(canvas));
+    // The island sits inside the egg, and the egg's face shows through it.
+    const faceImg = el('img', 'egg-face');
+    faceImg.src = 'assets/egg.png';
+    faceImg.alt = '';
+    box.append(faceImg);
     const world = worldFor(choice);
     for (const [kind, p] of [['spawn', world.spawn], ['village', world.village], ['lookout', world.lookout]]) {
       if (!p) continue;
@@ -123,7 +128,7 @@ function renderStats() {
     ['lobby.fav', o.fav ? nameOfKey(o.fav) : t('lobby.none')],
   ];
   $('stats').replaceChildren(...tiles.map(([k, v]) => {
-    const tile = el('div', 'tile');
+    const tile = el('div', 'tile egg');
     tile.append(el('span', 'k', t(k)), el('b', 'v', String(v)));
     return tile;
   }));
@@ -137,6 +142,12 @@ function renderTabs() {
     b.role = 'tab';
     b.setAttribute('aria-selected', String(theme.id === state.theme));
     const n = theme.variants.length + (theme.random ? 1 : 0);
+    if (theme.icon) {
+      const icon = el('img', 'face');
+      icon.src = theme.icon;
+      icon.alt = '';
+      b.append(icon);
+    }
     b.append(el('span', 'name', t(`theme.${theme.id}.name`)), el('span', 'n', String(n)));
     b.addEventListener('click', () => { state.theme = theme.id; renderTabs(); renderGrid(); });
     return b;
@@ -207,12 +218,14 @@ function renderDetail() {
   const s = readStats()[mapKey(c)] ?? { best: 0, wave: 0, plays: 0, kills: 0 };
   const recs = el('div', 'records');
   for (const [k, v] of [['best', s.best.toLocaleString()], ['wave', s.wave], ['plays', s.plays], ['kills', s.kills.toLocaleString()]]) {
-    const tile = el('div');
+    const tile = el('div', 'egg');
     tile.append(el('span', '', t(`lobby.record.${k}`)), el('b', '', String(v)));
     recs.append(tile);
   }
   d.append(recs);
-  const go = el('a', 'play', t('lobby.play'));
+  // The gunner carries the PLAY button on his belly.
+  const go = el('a', 'play');
+  go.append(el('span', '', t('lobby.play')));
   go.href = playUrl(c);
   go.addEventListener('click', () => writeSelected(c));
   d.append(go);

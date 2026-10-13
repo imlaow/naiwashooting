@@ -38,8 +38,10 @@
       <img class="hero" src="assets/hero_1.png" alt="主角奶蛙" data-i18n-alt="title.heroAlt" />
       <h1><b data-i18n="title.name">奶蛙枪战</b><span data-i18n="title.sub">海岛大作战</span></h1>
       <p class="tag" data-i18n="title.tag">敌对奶蛙入侵了你的热带小岛。拿起武器，守卫海滩！</p>
-      <button id="play" data-i18n="title.play">开始游戏</button>
-      <button id="open-maps" class="ghost" data-i18n="title.maps">选择地图</button>
+      <div class="actions">
+        <button id="play" class="egg-btn"><span data-i18n="title.play">开始游戏</span></button>
+        <button id="open-maps" class="gunner-btn"><span data-i18n="title.maps">选择地图</span></button>
+      </div>
       <p id="current-map" class="current-map"></p>
       <p id="best-score" class="best"></p>
       <div class="controls">
@@ -54,9 +56,12 @@
     </div>
 
     <div id="pause" class="panel hidden">
+      <img class="laugher" src="assets/laugh_pose.png" alt="" />
       <h2 data-i18n="pause.title">已暂停</h2>
-      <button id="resume" data-i18n="pause.resume">继续</button>
-      <button id="quit" class="ghost" data-i18n="pause.quit">返回主菜单</button>
+      <div class="actions">
+        <button id="resume" class="egg-btn"><span data-i18n="pause.resume">继续</span></button>
+        <button id="quit" class="gunner-btn"><span data-i18n="pause.quit">返回主菜单</span></button>
+      </div>
     </div>
 
     <div id="over" class="panel hidden">
@@ -68,8 +73,10 @@
         <div><span data-i18n="over.best">最高分</span><b id="go-best">0</b></div>
       </div>
       <p id="go-map" class="current-map"></p>
-      <button id="again" data-i18n="over.again">再来一局</button>
-      <button id="over-maps" class="ghost" data-i18n="over.maps">换张地图</button>
+      <div class="actions">
+        <button id="again" class="egg-btn"><span data-i18n="over.again">再来一局</span></button>
+        <button id="over-maps" class="gunner-btn"><span data-i18n="over.maps">换张地图</span></button>
+      </div>
     </div>
   </div>
   </div>
