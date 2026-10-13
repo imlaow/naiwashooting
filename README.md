@@ -11,11 +11,12 @@ npm run dev      # http://localhost:5173
 npm run build    # static build in dist/
 ```
 
-Pick a map on the title screen's **选择地图 / MAPS** dashboard. Maps are grouped by theme; the
-island theme has six hand-tuned islands plus a random card that rolls a fresh seed. Each card
-shows a painted preview and that map's best score, best wave and run count (kept in the
-browser). `?map=island/twins` opens a map directly and `?seed=1234` plays a random island with
-that seed.
+The site opens on the **map lobby** (`index.html`): overall records up top, one tab per map
+theme, a card per map with a painted preview and that map's best score, best wave and run count
+(kept in the browser), and a detail panel whose PLAY button opens the game (`play.html`) on that
+map. The island theme has six hand-tuned islands plus a random card that rerolls its seed.
+`play.html?map=island/twins` opens a map directly, `play.html?map=island/random&seed=1234` a
+random island with that seed, and the old `?seed=1234` link still works.
 
 Phones always play in landscape: Android locks the orientation in fullscreen, and an upright iPhone gets the page rotated a quarter turn.
 
@@ -46,7 +47,8 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | File | Purpose |
 | --- | --- |
 | `src/maps.js` | Map catalogue: themes, their variants (seed + terrain knobs for islands) and per-map records. A new theme is one more entry here, see the file header |
-| `src/dashboard.js` | The map dashboard: a section per theme, preview cards, random-seed card |
+| `src/lobby.js` | The map lobby page (`index.html`): records, theme tabs, map cards, detail panel |
+| `src/main.js` | Game page (`play.html`) boot: reads the map from the URL, loads art, runs the title / pause / game-over screens |
 | `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting; `DEFAULT_SHAPE` lists the knobs a map can turn |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX) |
 | `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), builds recoloured rival skins |
