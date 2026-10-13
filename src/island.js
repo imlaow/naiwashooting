@@ -15,9 +15,23 @@ export const H_SAND = 0.025;
 export const H_GRASS = 0.15;
 export const H_ROCK = 0.55;
 
+// Terrain knobs a map preset can turn (see maps.js). The defaults are the original island.
+export const DEFAULT_SHAPE = {
+  size: 0.46,    // base height at the centre: bigger means more land
+  rough: 0.5,    // amplitude of the height noise: more inlets, lagoons and hummocks
+  warp: 0.4,     // how much the coastline is bent out of a circle
+  hill: 0.26,    // height of the lookout hill
+  hillX: -0.16,  // hill centre, in [-1, 1] across the world
+  hillY: -0.2,
+  wet: 0,        // moisture bias: wetter grows jungle trees, drier bleaches the grass
+  strait: 0,     // depth of a channel cut through the island (0 = none)
+  straitAngle: 0, // direction of that channel, radians
+};
+
 export class Island {
-  constructor(seed) {
+  constructor(seed, shape = {}) {
     this.seed = seed;
+    this.shape = { ...DEFAULT_SHAPE, ...shape };
     this.rand = mulberry32(seed);
     this.height = new Float32Array(GW * GW);
     this.moist = new Float32Array(GW * GW);
@@ -29,23 +43,30 @@ export class Island {
   // ---------- Height field ----------
   buildHeight() {
     const n1 = makeNoise(this.seed + 1), n2 = makeNoise(this.seed + 2), n3 = makeNoise(this.seed + 3);
+    const { size, rough, warp, hill, hillX, hillY, wet, strait, straitAngle } = this.shape;
+    const sa = Math.cos(straitAngle), sb = Math.sin(straitAngle);
     const c = WORLD / 2;
     for (let gy = 0; gy < GW; gy++) {
       for (let gx = 0; gx < GW; gx++) {
         const x = gx * GRID, y = gy * GRID;
         const dx = (x - c) / c, dy = (y - c) / c;
-        const wx = dx + (fbm(n2, x / 700, y / 700, 3) - 0.5) * 0.4;
-        const wy = dy + (fbm(n2, x / 700 + 40, y / 700 + 40, 3) - 0.5) * 0.4;
+        const wx = dx + (fbm(n2, x / 700, y / 700, 3) - 0.5) * warp;
+        const wy = dy + (fbm(n2, x / 700 + 40, y / 700 + 40, 3) - 0.5) * warp;
         const d2 = wx * wx + wy * wy;
-        let h = 0.46 - 1.15 * d2 + (fbm(n1, x / 520, y / 520, 5) - 0.5) * 0.5;
-        // A hill north-west of centre for a rocky lookout.
-        const hx = dx + 0.16, hy = dy + 0.2;
-        h += 0.26 * Math.exp(-(hx * hx + hy * hy) / 0.03);
+        let h = size - 1.15 * d2 + (fbm(n1, x / 520, y / 520, 5) - 0.5) * rough;
+        // A hill (north-west of centre by default) for a rocky lookout.
+        const hx = dx - hillX, hy = dy - hillY;
+        h += hill * Math.exp(-(hx * hx + hy * hy) / 0.03);
+        if (strait > 0) {
+          // A wobbly channel through the middle, shallow enough to wade in most places.
+          const along = wx * sa + wy * sb;
+          h -= strait * Math.exp(-(along * along) / 0.012);
+        }
         const r = Math.sqrt(dx * dx + dy * dy);
         if (r > 0.78) h -= (r - 0.78) * 3;
         const i = gy * GW + gx;
         this.height[i] = h;
-        this.moist[i] = fbm(n3, x / 420, y / 420, 4);
+        this.moist[i] = clamp(fbm(n3, x / 420, y / 420, 4) + wet, 0, 1);
       }
     }
   }

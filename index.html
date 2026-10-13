@@ -38,6 +38,8 @@
       <h1><b data-i18n="title.name">奶蛙枪战</b><span data-i18n="title.sub">海岛大作战</span></h1>
       <p class="tag" data-i18n="title.tag">敌对奶蛙入侵了你的热带小岛。拿起武器，守卫海滩！</p>
       <button id="play" data-i18n="title.play">开始游戏</button>
+      <button id="open-maps" class="ghost" data-i18n="title.maps">选择地图</button>
+      <p id="current-map" class="current-map"></p>
       <p id="best-score" class="best"></p>
       <div class="controls">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <span data-i18n="ctl.move">移动</span></div>
@@ -48,6 +50,17 @@
         <div><kbd>P</kbd> <span data-i18n="ctl.pause">暂停</span> · <kbd>M</kbd> <span data-i18n="ctl.mute">静音</span></div>
       </div>
       <p class="touch-note" data-i18n="title.touch">触屏：左手拇指移动（轻点冲刺），右手拇指瞄准射击。</p>
+    </div>
+
+    <div id="maps" class="panel wide hidden">
+      <h2 data-i18n="maps.title">地图</h2>
+      <p class="tag" data-i18n="maps.tag">每个主题下有不同的地图。挑一张，出发！</p>
+      <div id="map-themes"></div>
+      <p class="touch-note" data-i18n="maps.more">更多主题，敬请期待</p>
+      <div class="map-actions">
+        <button id="map-back" class="ghost" data-i18n="maps.back">返回</button>
+        <button id="map-play" data-i18n="maps.play">出发！</button>
+      </div>
     </div>
 
     <div id="pause" class="panel hidden">
@@ -64,7 +77,9 @@
         <div><span data-i18n="over.kills">击杀</span><b id="go-kills">0</b></div>
         <div><span data-i18n="over.best">最高分</span><b id="go-best">0</b></div>
       </div>
+      <p id="go-map" class="current-map"></p>
       <button id="again" data-i18n="over.again">再来一局</button>
+      <button id="over-maps" class="ghost" data-i18n="over.maps">换张地图</button>
     </div>
   </div>
   </div>

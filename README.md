@@ -11,7 +11,11 @@ npm run dev      # http://localhost:5173
 npm run build    # static build in dist/
 ```
 
-Add `?seed=1234` to the URL to generate a different island.
+Pick a map on the title screen's **选择地图 / MAPS** dashboard. Maps are grouped by theme; the
+island theme has six hand-tuned islands plus a random card that rolls a fresh seed. Each card
+shows a painted preview and that map's best score, best wave and run count (kept in the
+browser). `?map=island/twins` opens a map directly and `?seed=1234` plays a random island with
+that seed.
 
 Phones always play in landscape: Android locks the orientation in fullscreen, and an upright iPhone gets the page rotated a quarter turn.
 
@@ -41,7 +45,9 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 
 | File | Purpose |
 | --- | --- |
-| `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting |
+| `src/maps.js` | Map catalogue: themes, their variants (seed + terrain knobs for islands) and per-map records. A new theme is one more entry here, see the file header |
+| `src/dashboard.js` | The map dashboard: a section per theme, preview cards, random-seed card |
+| `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting; `DEFAULT_SHAPE` lists the knobs a map can turn |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX) |
 | `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), builds recoloured rival skins |
 | `src/world.js` | Scene building: water, vegetation, props, ambient life |

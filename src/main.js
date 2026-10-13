@@ -1,5 +1,4 @@
 import { Application } from 'pixi.js';
-import { Island } from './island.js';
 import { buildArt } from './art.js';
 import { loadSkins, loadLaugh } from './skins.js';
 import { buildTerrainTextures } from './world.js';
@@ -8,6 +7,8 @@ import { Game } from './game.js';
 import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
 import { t, setLang, applyDom, CJK_TEXT } from './i18n.js';
+import { Dashboard } from './dashboard.js';
+import { RANDOM_ID, makeChoice, choiceKey, worldFor, readSelected, recordRun } from './maps.js';
 import './style.css';
 
 const $ = (id) => document.getElementById(id);
@@ -24,6 +25,20 @@ function show(id) {
 function setLoading(text, pct) {
   $('load-text').textContent = text;
   $('load-bar').style.width = `${pct}%`;
+}
+
+// Which map to show first: ?map=theme/id, ?seed=N (a random island with that seed), the map
+// played last, or the classic island.
+function initialChoice() {
+  const q = new URLSearchParams(location.search);
+  const seed = Number(q.get('seed'));
+  if (seed) return makeChoice('island', RANDOM_ID, seed);
+  const m = q.get('map');
+  if (m) {
+    const [theme, id] = m.includes('/') ? m.split('/') : ['island', m];
+    return makeChoice(theme, id);
+  }
+  return readSelected() ?? makeChoice('island', 'cove');
 }
 
 function readBest() {
@@ -84,27 +99,38 @@ async function boot() {
   await nextFrame();
   const art = buildArt();
 
-  setLoading(t('loading.island'), 38);
-  await nextFrame();
-  const seed = Number(new URLSearchParams(location.search).get('seed')) || 20261012;
-  const island = new Island(seed);
-
-  setLoading(t('loading.beaches'), 55);
-  await nextFrame();
   const gl = app.renderer.gl;
   const maxTex = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 4096;
-  const terrainTex = buildTerrainTextures(island, maxTex);
-
-  setLoading(t('loading.ready'), 100);
-  await nextFrame();
-
   const input = new Input(app.canvas);
   let game = null;
   let demo = true;
+  // The map whose terrain is currently painted and uploaded: { key, choice, island, terrainTex }.
+  let built = null;
+
+  // Paints and uploads the terrain for a map, behind the loading screen. The height field is
+  // cheap and cached by maps.js; the 3200² terrain canvas is the slow part, so it is only
+  // rebuilt when the map actually changes, and the previous one is freed first.
+  const prepare = async (choice) => {
+    if (built && built.key === choiceKey(choice)) return;
+    show('loading');
+    setLoading(t('loading.island'), 38);
+    await nextFrame();
+    const island = worldFor(choice);
+    if (game) { game.destroy(); game = null; }
+    if (built) for (const tex of Object.values(built.terrainTex)) tex.destroy(true);
+    built = null;
+    setLoading(t('loading.beaches'), 55);
+    await nextFrame();
+    const terrainTex = buildTerrainTextures(island, maxTex);
+    built = { key: choiceKey(choice), choice, island, terrainTex };
+    setLoading(t('loading.ready'), 100);
+    await nextFrame();
+  };
 
   const newGame = (isDemo) => {
     if (game) game.destroy();
     demo = isDemo;
+    const { island, terrainTex, choice } = built;
     game = new Game({
       app, art, skins, island, terrainTex, input, demo: isDemo,
       onPause: (p) => show(p ? 'pause' : null),
@@ -112,41 +138,64 @@ async function boot() {
       onGameOver: ({ score, wave, kills }) => {
         const best = Math.max(readBest(), score);
         writeBest(best);
+        recordRun(choice, { score, wave, kills });
         $('go-score').textContent = score.toLocaleString();
         $('go-wave').textContent = wave;
         $('go-kills').textContent = kills;
         $('go-best').textContent = best.toLocaleString();
+        $('go-map').textContent = t('title.current', { name: dashboard.name(choice) });
         setTimeout(() => show('over'), 900);
       },
     });
   };
 
+  const dashboard = new Dashboard({ root: $('map-themes'), onPlay: (choice) => start(choice) });
+  dashboard.select(initialChoice(), { persist: false });
+  dashboard.render();
+
   const showBest = () => { $('best-score').textContent = readBest() ? t('title.best', { n: readBest().toLocaleString() }) : ''; };
+  const showCurrent = () => { $('current-map').textContent = t('title.current', { name: dashboard.name() }); };
+  const showTitle = () => { if (!demo) newGame(true); showBest(); showCurrent(); show('title'); };
+  const showMaps = () => { if (!demo) newGame(true); show('maps'); dashboard.open(); };
+
+  await prepare(dashboard.choice);
   newGame(true);
-  showBest();
-  show('title');
+  showTitle();
   for (const btn of document.querySelectorAll('[data-lang-btn]')) {
-    btn.addEventListener('click', () => { setLang(btn.dataset.langBtn); showBest(); });
+    btn.addEventListener('click', () => { setLang(btn.dataset.langBtn); showBest(); showCurrent(); dashboard.render(); });
   }
 
-  const start = () => {
+  let starting = false;
+  const start = async (choice = dashboard.choice) => {
+    if (starting) return;
+    starting = true;
     sfx.unlock();
     lockLandscape();
+    dashboard.select(choice);
+    showCurrent();
+    await prepare(choice);
     newGame(false);
     show(null);
+    starting = false;
   };
-  $('play').addEventListener('click', start);
-  $('again').addEventListener('click', start);
+  $('play').addEventListener('click', () => start());
+  $('again').addEventListener('click', () => start());
+  $('map-play').addEventListener('click', () => start());
+  $('open-maps').addEventListener('click', showMaps);
+  $('over-maps').addEventListener('click', showMaps);
+  $('map-back').addEventListener('click', showTitle);
   $('resume').addEventListener('click', () => { game.paused = false; show(null); });
-  $('quit').addEventListener('click', () => { newGame(true); show('title'); });
-  $('btn-pause').addEventListener('click', () => game.togglePause());
-  $('btn-mute').addEventListener('click', () => game.toggleMute());
+  $('quit').addEventListener('click', showTitle);
+  $('btn-pause').addEventListener('click', () => game?.togglePause());
+  $('btn-mute').addEventListener('click', () => game?.toggleMute());
   // Pause when the tab or app goes to the background (phone call, app switch, screen lock).
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && !demo && !game.paused) game.togglePause();
+    if (document.hidden && game && !demo && !game.paused) game.togglePause();
   });
+  const open = (id) => !$(id).classList.contains('hidden');
   addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (!$('title').classList.contains('hidden') || !$('over').classList.contains('hidden'))) start();
+    if (e.key === 'Enter' && (open('title') || open('over') || open('maps'))) start();
+    else if (e.key === 'Escape' && open('maps')) showTitle();
   });
 
   app.renderer.on('resize', () => game && game.resize());
