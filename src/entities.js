@@ -41,7 +41,7 @@ function stepFx(e, dt, moving) {
     else {
       const h = game.island.heightAt(e.x, e.y);
       const onPath = game.island.pathAt(e.x, e.y) > 0.5;
-      game.fx.dust(e.x, e.y, 2, onPath ? 0xb89a72 : h < H_GRASS ? 0xe8d6a8 : 0x9cc27a);
+      game.fx.dust(e.x, e.y, 2, onPath ? 0xff9ccf : h < H_GRASS ? 0xffcf5a : 0xffe08a);
     }
   } else if (wading) {
     e.stepT = 0.9;

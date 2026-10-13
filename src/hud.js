@@ -205,13 +205,13 @@ export class Hud {
 
   drawStatic() {
     this.hpBg.clear()
-      .roundRect(0, 0, 300, 70, 16).fill({ color: 0x0b1e2a, alpha: 0.55 }).stroke({ width: 2, color: 0xffffff, alpha: 0.15 })
-      .circle(34, 34, 29).fill(0x2a7fa8).stroke({ width: 3, color: 0xffd23f });
-    this.wpBg.clear().roundRect(0, 0, 270, 118, 16).fill({ color: 0x0b1e2a, alpha: 0.55 }).stroke({ width: 2, color: 0xffffff, alpha: 0.15 });
+      .roundRect(0, 0, 300, 70, 16).fill({ color: 0x3a0f2a, alpha: 0.7 }).stroke({ width: 3, color: 0xff7eb3, alpha: 0.9 })
+      .circle(34, 34, 29).fill(0xff7eb3).stroke({ width: 3, color: 0xffd23f });
+    this.wpBg.clear().roundRect(0, 0, 270, 118, 16).fill({ color: 0x3a0f2a, alpha: 0.7 }).stroke({ width: 3, color: 0xff7eb3, alpha: 0.9 });
     this.gunIcon.position.set(60, 40);
     this.wpName.position.set(126, 12);
     this.ammoText.position.set(258, 30);
-    this.miniBg.clear().roundRect(-4, -4, this.miniSize + 8, this.miniSize + 8, 16).fill({ color: 0x0b1e2a, alpha: 0.7 });
+    this.miniBg.clear().roundRect(-4, -4, this.miniSize + 8, this.miniSize + 8, 16).fill({ color: 0x3a0f2a, alpha: 0.7 }).stroke({ width: 3, color: 0xff7eb3, alpha: 0.9 });
   }
 
   banner(title, sub, dur = 2, color = 0xffffff) {
@@ -240,7 +240,7 @@ export class Hud {
     // Health
     const hpFrac = Math.max(0, P.hp / P.maxHp);
     this.shownHp = this.shownHp == null ? hpFrac : this.shownHp + (hpFrac - this.shownHp) * Math.min(1, dt * 4);
-    const col = hpFrac > 0.5 ? 0x4ade80 : hpFrac > 0.25 ? 0xfacc15 : 0xef4444;
+    const col = hpFrac > 0.5 ? 0xfff3d6 : hpFrac > 0.25 ? 0xffb300 : 0xff2e63;
     const dashFrac = P.dashCd > 0 ? 1 - P.dashCd / 0.85 : 1;
     this.hpBar.clear()
       .roundRect(76, 36, 208, 16, 8).fill({ color: 0x000000, alpha: 0.5 })
@@ -248,7 +248,7 @@ export class Hud {
       .roundRect(78, 38, 204 * hpFrac, 12, 6).fill(col)
       .roundRect(78, 39, 204 * hpFrac, 4, 2).fill({ color: 0xffffff, alpha: 0.3 })
       .roundRect(76, 56, 90, 6, 3).fill({ color: 0x000000, alpha: 0.5 })
-      .roundRect(76, 56, 90 * dashFrac, 6, 3).fill(dashFrac >= 1 ? 0x7dd3fc : 0x3b6b85);
+      .roundRect(76, 56, 90 * dashFrac, 6, 3).fill(dashFrac >= 1 ? 0xb7f542 : 0x5a7a20);
     this.setText(this.hpText, 'hp', `${Math.ceil(P.hp)} / ${P.maxHp}`);
     this.portrait.texture = g.skins.hero[Math.floor(g.time * 1.5) % 4];
 
@@ -266,7 +266,7 @@ export class Hud {
       const x = 14 + i * 62, y = 74;
       const owned = !!P.arsenal[k], cur = k === P.weapon;
       this.slots.roundRect(x, y, 56, 32, 8)
-        .fill({ color: cur ? 0x2a7fa8 : 0x000000, alpha: cur ? 0.8 : 0.35 })
+        .fill({ color: cur ? 0xff7eb3 : 0x000000, alpha: cur ? 0.85 : 0.35 })
         .stroke({ width: 2, color: cur ? 0xffd23f : 0xffffff, alpha: cur ? 1 : 0.15 });
       this.slotIcons[i].position.set(x + 30, y + 17);
       this.slotIcons[i].alpha = owned ? 1 : 0.18;
@@ -289,7 +289,7 @@ export class Hud {
     if (boss) {
       const w = Math.min(460, this.w - 60), x = (this.w - w) / 2, y = this.bossY;
       this.bossBar.roundRect(x - 3, y - 3, w + 6, 20, 8).fill({ color: 0x000000, alpha: 0.6 })
-        .roundRect(x, y, w * Math.max(0, boss.hp / boss.maxHp), 14, 6).fill(0xe11d48)
+        .roundRect(x, y, w * Math.max(0, boss.hp / boss.maxHp), 14, 6).fill(0xb14bff)
         .roundRect(x, y, w * Math.max(0, boss.hp / boss.maxHp), 4, 2).fill({ color: 0xffffff, alpha: 0.3 });
       this.bossName.position.set(this.w / 2, y - 4);
     }
@@ -297,15 +297,15 @@ export class Hud {
     // Minimap
     const k = this.miniSize / WORLD;
     const d = this.miniDots.clear();
-    for (const p of g.pickups) d.circle(p.x * k, p.y * k, 2.5).fill(p.kind === 'weapon' ? 0x7dd3fc : p.kind === 'health' ? 0xff5a7a : 0xffd23f);
+    for (const p of g.pickups) d.circle(p.x * k, p.y * k, 2.5).fill(p.kind === 'weapon' ? 0xb14bff : p.kind === 'health' ? 0xffffff : 0xff2e63).stroke({ width: 1, color: 0x000000, alpha: 0.5 });
     for (const e of g.enemies) {
       if (e.dead) continue;
       d.circle(e.x * k, e.y * k, e.type === 'boss' ? 5 : 2.6).fill(e.type === 'egg' ? 0xff5a3d : e.T.color).stroke({ width: 1, color: 0x000000, alpha: 0.6 });
     }
     const hw = this.w / 2 / g.zoom, hh = this.h / 2 / g.zoom;
-    d.rect((g.cam.x - hw) * k, (g.cam.y - hh) * k, hw * 2 * k, hh * 2 * k).stroke({ width: 1, color: 0xffffff, alpha: 0.5 });
+    d.rect((g.cam.x - hw) * k, (g.cam.y - hh) * k, hw * 2 * k, hh * 2 * k).stroke({ width: 1, color: 0x3a0f2a, alpha: 0.6 });
     const pulse = 3.5 + Math.sin(g.time * 6) * 0.8;
-    d.circle(P.x * k, P.y * k, pulse).fill(0xffd23f).stroke({ width: 1.5, color: 0x000000 });
+    d.circle(P.x * k, P.y * k, pulse).fill(0x3f8f3a).stroke({ width: 1.5, color: 0x000000 });
 
     // Banner & toast
     if (this.bannerT > 0) this.bannerT -= dt;
@@ -325,19 +325,15 @@ export class Hud {
     const r = this.reloadArc.clear();
     if (!input.touch && !P.dead) {
       const mx = input.mouse.x, my = input.mouse.y;
+      // The crosshair is an eye: the white widens with the spread, the pupil follows the aim.
       const spread = 9 + W.spread * 60 + P.recoil * 2;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        c.moveTo(mx + dx * spread, my + dy * spread).lineTo(mx + dx * (spread + 9), my + dy * (spread + 9));
-      }
-      c.stroke({ width: 5, color: 0x000000, alpha: 0.5 });
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        c.moveTo(mx + dx * spread, my + dy * spread).lineTo(mx + dx * (spread + 9), my + dy * (spread + 9));
-      }
-      c.stroke({ width: 2.5, color: 0xffffff });
-      c.circle(mx, my, 2).fill(0xffd23f);
+      c.ellipse(mx, my, spread + 6, (spread + 6) * 0.7).stroke({ width: 5, color: 0x000000, alpha: 0.5 });
+      c.ellipse(mx, my, spread + 6, (spread + 6) * 0.7).fill({ color: 0xffffff, alpha: 0.35 }).stroke({ width: 2.5, color: 0xffffff });
+      c.circle(mx, my, 5).fill(0x3f8f3a).stroke({ width: 1.5, color: 0x000000, alpha: 0.6 });
+      c.circle(mx, my, 2).fill(0x101010);
       if (P.reloading > 0) {
         const f = 1 - P.reloading / W.reload;
-        r.arc(mx, my, 24, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2).stroke({ width: 4, color: 0x7dd3fc });
+        r.arc(mx, my, 24, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2).stroke({ width: 4, color: 0xb7f542 });
       }
     }
     // Fixed touch sticks; labels fade out once the player has had time to learn them
@@ -355,8 +351,8 @@ export class Hud {
       }
       input.stickCenters.forEach((c, i) => {
         const k = knobs[i];
-        s.circle(c.x, c.y, R).fill({ color: 0x0b1e2a, alpha: 0.22 }).stroke({ width: 2, color: 0xffffff, alpha: k.on ? 0.4 : 0.22 });
-        s.circle(k.x, k.y, 26).fill({ color: i ? 0xff6b6b : 0x7dd3fc, alpha: k.on ? 0.6 : 0.3 });
+        s.circle(c.x, c.y, R).fill({ color: 0x3a0f2a, alpha: 0.22 }).stroke({ width: 2, color: 0xff7eb3, alpha: k.on ? 0.6 : 0.3 });
+        s.circle(k.x, k.y, 26).fill({ color: i ? 0xff2e63 : 0xb7f542, alpha: k.on ? 0.7 : 0.4 });
       });
     }
   }

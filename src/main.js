@@ -68,7 +68,7 @@ async function boot() {
   const app = new Application();
   await app.init({
     resizeTo: $('app'),
-    background: 0x0e3b52,
+    background: 0xfff0cf,
     antialias: true,
     autoDensity: true,
     resolution: Math.min(window.devicePixelRatio || 1, 2),

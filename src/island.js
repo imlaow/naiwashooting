@@ -217,39 +217,42 @@ export class Island {
         const sh = sampleGrid(shade, GW, GRID, x, y);
         let r, g, b, a = 255;
         if (h < 0) {
-          // Shallow lagoon water over sand.
+          // Shallows: the milk thins out into runny yolk near the shore.
           const t = (h - H_DEEP) / -H_DEEP;
           const ripple = Math.sin(x * 0.045 + det * 14 + Math.sin(y * 0.03) * 2) * 0.5 + 0.5;
-          r = lerp(22, 92, t); g = lerp(128, 206, t); b = lerp(160, 196, t);
-          const sand = t * t * 0.5;
-          r = lerp(r, 214, sand); g = lerp(g, 204, sand); b = lerp(b, 156, sand);
-          r += ripple * 14 * t; g += ripple * 14 * t; b += ripple * 10 * t;
+          r = lerp(255, 255, t); g = lerp(236, 196, t); b = lerp(200, 60, t);
+          const yolk = t * t * 0.6;
+          r = lerp(r, 255, yolk); g = lerp(g, 160, yolk); b = lerp(b, 0, yolk);
+          r -= ripple * 6 * t; g -= ripple * 14 * t; b -= ripple * 10 * t;
           a = 255 * (0.25 + 0.7 * smoothstep(0, 0.55, t));
         } else if (h < H_GRASS + 0.02) {
+          // Beaches are egg yolk; the wet strip is the darker runny part.
           const wet = 1 - smoothstep(0, H_SAND, h);
           const ripple = Math.sin(x * 0.07 + y * 0.025 + det * 12) * 5;
-          r = 238 + grain * 22 + ripple; g = 218 + grain * 20 + ripple; b = 168 + grain * 18 + ripple;
-          r = lerp(r, 186, wet * 0.8); g = lerp(g, 160, wet * 0.8); b = lerp(b, 112, wet * 0.8);
+          r = 255 + grain * 10 + ripple; g = 186 + grain * 22 + ripple; b = 30 + grain * 18 + ripple;
+          r = lerp(r, 232, wet * 0.8); g = lerp(g, 130, wet * 0.8); b = lerp(b, 0, wet * 0.8);
           if (h > H_GRASS - 0.03) {
             const k = smoothstep(H_GRASS - 0.03, H_GRASS + 0.02, h + (det - 0.5) * 0.08 + grain * 0.03);
-            const gc = grassColor(this.moistAt(x, y), det, grain);
+            const gc = skinColor(this.moistAt(x, y), det, grain);
             r = lerp(r, gc[0], k); g = lerp(g, gc[1], k); b = lerp(b, gc[2], k);
           }
         } else {
-          const gc = grassColor(this.moistAt(x, y), det, grain);
+          const gc = skinColor(this.moistAt(x, y), det, grain);
           r = gc[0]; g = gc[1]; b = gc[2];
           if (h > H_ROCK - 0.06) {
+            // Highlands are eggshell.
             const k = smoothstep(H_ROCK - 0.06, H_ROCK + 0.04, h + (det - 0.5) * 0.12);
-            const rr = 132 + grain * 30 + det * 20;
-            r = lerp(r, rr, k); g = lerp(g, rr - 4, k); b = lerp(b, rr - 18, k);
+            const rr = 236 + grain * 24 + det * 12;
+            r = lerp(r, rr, k); g = lerp(g, rr - 8, k); b = lerp(b, rr - 30, k);
           }
         }
         if (h > -0.01) {
+          // Paths are tongues.
           const pv = sampleGrid(this.path, PW, PGRID, x, y);
           if (pv > 0.05) {
             const k = smoothstep(0.25, 0.65, pv + grain * 0.35);
-            const dr = 168 + grain * 30 + det * 16;
-            r = lerp(r, dr, k); g = lerp(g, dr - 38, k); b = lerp(b, dr - 82, k);
+            const pr = 250 + grain * 10, pg = 90 + grain * 30 + det * 20, pb = 150 + grain * 20 + det * 16;
+            r = lerp(r, pr, k); g = lerp(g, pg, k); b = lerp(b, pb, k);
           }
           r *= sh; g *= sh; b *= sh;
         }
@@ -270,15 +273,13 @@ export class Island {
     const rand = mulberry32(this.seed + 77);
     const R = (a, b) => a + rand() * (b - a);
 
-    // Grass blades and clover
+    // Hairs on the skin
     for (let i = 0; i < 26000; i++) {
       const x = R(0, WORLD), y = R(0, WORLD);
       const h = this.heightAt(x, y);
       if (h < H_GRASS + 0.01 || h > H_ROCK || this.pathAt(x, y) > 0.3) continue;
-      const m = this.moistAt(x, y);
-      const dark = rand() < 0.5;
-      ctx.strokeStyle = dark ? `rgba(40,${90 + m * 40 | 0},30,0.55)` : `rgba(150,${200 + m * 30 | 0},90,0.45)`;
-      ctx.lineWidth = R(1, 2);
+      ctx.strokeStyle = rand() < 0.5 ? 'rgba(150,90,0,0.5)' : 'rgba(255,235,150,0.5)';
+      ctx.lineWidth = R(1, 1.8);
       ctx.beginPath();
       const n = 2 + (rand() * 3 | 0);
       for (let k = 0; k < n; k++) {
@@ -288,82 +289,73 @@ export class Island {
       }
       ctx.stroke();
     }
-    // Flowers
-    const petals = ['#ff6b8b', '#ffd23f', '#ffffff', '#c084fc', '#ff8c42', '#7dd3fc'];
+    // Tiny eggs with faces, where the flowers used to be
     for (let i = 0; i < 1600; i++) {
       const x = R(0, WORLD), y = R(0, WORLD);
       const h = this.heightAt(x, y);
       if (h < H_GRASS + 0.03 || h > H_ROCK - 0.05 || this.pathAt(x, y) > 0.2) continue;
-      const col = petals[(rand() * petals.length) | 0];
       const cluster = 1 + (rand() * 4 | 0);
-      for (let k = 0; k < cluster; k++) {
-        const fx = x + R(-14, 14), fy = y + R(-10, 10), s = R(1.6, 2.8);
-        ctx.fillStyle = col;
-        for (let pIdx = 0; pIdx < 5; pIdx++) {
-          const a = pIdx / 5 * Math.PI * 2;
-          ctx.beginPath();
-          ctx.arc(fx + Math.cos(a) * s, fy + Math.sin(a) * s, s * 0.8, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.fillStyle = '#ffe066';
-        ctx.beginPath(); ctx.arc(fx, fy, s * 0.6, 0, Math.PI * 2); ctx.fill();
-      }
+      for (let k = 0; k < cluster; k++) drawMiniEgg(ctx, x + R(-14, 14), y + R(-10, 10), R(3, 5), rand() < 0.6);
     }
-    // Pebbles on paths and beaches
+    // Pores on paths and eyeballs on the beaches
     for (let i = 0; i < 5000; i++) {
       const x = R(0, WORLD), y = R(0, WORLD);
       const h = this.heightAt(x, y);
       const onPath = this.pathAt(x, y) > 0.5;
       if (!(onPath || (h > 0 && h < H_GRASS - 0.02 && rand() < 0.35))) continue;
-      const s = R(1.5, onPath ? 5 : 3.5);
-      const v = R(110, 190) | 0;
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx.beginPath(); ctx.ellipse(x + 1, y + 1.2, s, s * 0.7, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = `rgb(${v},${v - 6},${v - 16})`;
-      ctx.beginPath(); ctx.ellipse(x, y, s, s * 0.7, R(0, 3), 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.25)';
-      ctx.beginPath(); ctx.ellipse(x - s * 0.3, y - s * 0.25, s * 0.4, s * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+      if (onPath) {
+        // taste buds
+        const s = R(1.5, 4);
+        ctx.fillStyle = 'rgba(190,40,100,0.5)';
+        ctx.beginPath(); ctx.ellipse(x, y, s, s * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(255,200,230,0.6)';
+        ctx.beginPath(); ctx.ellipse(x - s * 0.3, y - s * 0.25, s * 0.4, s * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+      } else {
+        drawEyeball(ctx, x, y, R(2.5, 4.5), R(0, 6));
+      }
     }
-    // Shells and starfish on the sand
+    // Mouths and teeth on the sand, where the shells and starfish were
     for (let i = 0; i < 4000; i++) {
       const x = R(0, WORLD), y = R(0, WORLD);
       const h = this.heightAt(x, y);
       if (h < 0.003 || h > 0.08) continue;
       if (rand() < 0.75) continue;
-      if (rand() < 0.3) drawStarfish(ctx, x, y, R(5, 8), R(0, 6), rand() < 0.5 ? '#ff7b54' : '#f4a259');
-      else drawShell(ctx, x, y, R(3.5, 6), R(0, 6), rand() < 0.5 ? '#fde2e4' : '#f9d5a7');
+      if (rand() < 0.4) drawMouth(ctx, x, y, R(5, 9), R(-0.4, 0.4));
+      else drawTooth(ctx, x, y, R(3, 5), R(0, 6));
     }
-    // Seaweed in the shallows
+    // Ears sprouting from the shallows
     for (let i = 0; i < 2600; i++) {
       const x = R(0, WORLD), y = R(0, WORLD);
       const h = this.heightAt(x, y);
       if (h > -0.03 || h < H_DEEP + 0.02 || rand() < 0.5) continue;
-      ctx.strokeStyle = `rgba(30,${110 + (rand() * 40 | 0)},70,0.5)`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let k = 0; k < 3; k++) {
-        ctx.moveTo(x + k * 3, y);
-        ctx.bezierCurveTo(x + k * 3 + 6, y - 6, x + k * 3 - 6, y - 12, x + k * 3 + 2, y - 18);
+      for (let k = 0; k < 2; k++) {
+        const bx = x + k * 7, lean = (k ? 1 : -1) * R(2, 5);
+        ctx.fillStyle = 'rgba(249,199,44,0.75)';
+        ctx.beginPath(); ctx.moveTo(bx - 2.5, y); ctx.quadraticCurveTo(bx + lean - 3, y - 10, bx + lean, y - 18); ctx.quadraticCurveTo(bx + lean + 3, y - 10, bx + 2.5, y); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(255,126,179,0.8)';
+        ctx.beginPath(); ctx.moveTo(bx - 1, y - 2); ctx.quadraticCurveTo(bx + lean - 1, y - 9, bx + lean, y - 14); ctx.quadraticCurveTo(bx + lean + 1, y - 9, bx + 1, y - 2); ctx.closePath(); ctx.fill();
       }
-      ctx.stroke();
     }
-    // Stepping stones along the main path
+    // Fried eggs along the main path, in place of stepping stones
     const main = this.paths[0];
     for (let i = 4; i < main.length - 4; i += 5) {
       const pt = main[i];
-      const s = R(6, 10);
-      ctx.fillStyle = 'rgba(0,0,0,0.2)';
-      ctx.beginPath(); ctx.ellipse(pt.x + R(-8, 8) + 1.5, pt.y + 2, s, s * 0.7, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#a8a29e';
-      ctx.beginPath(); ctx.ellipse(pt.x + R(-8, 8), pt.y, s, s * 0.7, R(0, 3), 0, Math.PI * 2); ctx.fill();
+      const s = R(7, 11), ox = R(-8, 8);
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.beginPath(); ctx.ellipse(pt.x + ox + 1.5, pt.y + 2, s, s * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fffaf0';
+      ctx.beginPath(); ctx.ellipse(pt.x + ox, pt.y, s, s * 0.7, R(0, 3), 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffb300';
+      ctx.beginPath(); ctx.ellipse(pt.x + ox, pt.y, s * 0.45, s * 0.32, 0, 0, Math.PI * 2); ctx.fill();
     }
-    // Footprints from the dock up the beach
+    // Frog footprints from the dock up the beach
     for (let i = 0; i < 14; i++) {
       const x = this.spawn.x + Math.sin(i * 0.5) * 8 + (i % 2 ? 7 : -7);
       const y = this.dock.y + 20 - i * 22;
       if (this.heightAt(x, y) > H_GRASS) break;
-      ctx.fillStyle = 'rgba(120,95,60,0.35)';
-      ctx.beginPath(); ctx.ellipse(x, y, 4, 6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(180,80,0,0.35)';
+      ctx.beginPath(); ctx.ellipse(x, y, 4, 5, 0, 0, Math.PI * 2); ctx.fill();
+      for (const t of [-1, 0, 1]) { ctx.beginPath(); ctx.ellipse(x + t * 3.5, y - 6, 1.6, 2.6, 0, 0, Math.PI * 2); ctx.fill(); }
     }
     this.paintDock(ctx);
     this.paintPlaza(ctx);
@@ -376,7 +368,7 @@ export class Island {
       for (const x of [d.x - 4, d.x + d.w - 6]) {
         ctx.fillStyle = 'rgba(0,30,40,0.35)';
         ctx.beginPath(); ctx.ellipse(x + 5, y + 14, 9, 4, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#5b3a21';
+        ctx.fillStyle = '#d99a12';
         ctx.fillRect(x, y - 6, 10, 18);
       }
     }
@@ -385,23 +377,23 @@ export class Island {
     ctx.fillRect(d.x + 8, d.y + 60, d.w, d.h - 50);
     const rand = mulberry32(this.seed + 5);
     for (let y = d.y; y < d.y + d.h; y += 12) {
-      const tone = 140 + (rand() * 30 | 0);
-      ctx.fillStyle = `rgb(${tone},${tone * 0.68 | 0},${tone * 0.42 | 0})`;
+      const tone = 225 + (rand() * 30 | 0);
+      ctx.fillStyle = `rgb(${tone},${tone * 0.9 | 0},${tone * 0.68 | 0})`;
       ctx.fillRect(d.x, y, d.w, 11);
-      ctx.fillStyle = 'rgba(60,35,15,0.6)';
+      ctx.fillStyle = 'rgba(200,120,30,0.6)';
       ctx.fillRect(d.x, y + 10, d.w, 2);
-      ctx.fillStyle = 'rgba(255,240,200,0.18)';
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.fillRect(d.x, y, d.w, 2);
-      ctx.fillStyle = '#3b2a1a';
+      ctx.fillStyle = '#c47a10';
       ctx.fillRect(d.x + 6, y + 4, 2, 2);
       ctx.fillRect(d.x + d.w - 8, y + 4, 2, 2);
       for (let k = 0; k < 3; k++) {
-        ctx.fillStyle = 'rgba(80,50,25,0.35)';
+        ctx.fillStyle = 'rgba(200,120,30,0.35)';
         ctx.fillRect(d.x + rand() * d.w, y + 3 + rand() * 6, 6 + rand() * 14, 1);
       }
     }
     // Rope rails
-    ctx.strokeStyle = '#d6c08a'; ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ff7eb3'; ctx.lineWidth = 2;
     for (const x of [d.x + 2, d.x + d.w - 2]) {
       ctx.beginPath();
       for (let y = d.y + 40; y < d.y + d.h - 70; y += 70) {
@@ -419,8 +411,8 @@ export class Island {
       const sx = x + Math.cos(a) * 26, sy = y + Math.sin(a) * 18;
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
       ctx.beginPath(); ctx.ellipse(sx + 1.5, sy + 2, 7, 5, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = i % 2 ? '#8d8a82' : '#a29e94';
-      ctx.beginPath(); ctx.ellipse(sx, sy, 7, 5, a, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = i % 2 ? '#fbf3e4' : '#f9c72c';
+      ctx.beginPath(); ctx.ellipse(sx, sy, 6, 7.5, 0, 0, Math.PI * 2); ctx.fill();
     }
     const g = ctx.createRadialGradient(x, y, 2, x, y, 24);
     g.addColorStop(0, '#2a1d14'); g.addColorStop(1, 'rgba(60,40,25,0.4)');
@@ -451,7 +443,7 @@ export class Island {
         if (d > width || this.inDock(x, y)) continue;
         const brk = fbm(noise, x / 40, y / 40, 3);
         const a = (1 - d / width) * smoothstep(0.3, 0.6, brk + 0.15 - offset * 0.1);
-        px[p] = 255; px[p + 1] = 255; px[p + 2] = 255; px[p + 3] = a * 235;
+        px[p] = 255; px[p + 1] = 200; px[p + 2] = 60; px[p + 3] = a * 235;
       }
     }
     ctx.putImageData(img, 0, 0);
@@ -468,13 +460,13 @@ export class Island {
       const wx = x * k, wy = y * k;
       const h = this.heightAt(wx, wy);
       let c;
-      if (h < H_DEEP) c = [22, 84, 128];
-      else if (h < 0) c = [52, 160, 176];
-      else if (this.pathAt(wx, wy) > 0.5) c = [170, 130, 90];
-      else if (h < H_GRASS) c = [232, 210, 160];
-      else if (h < H_ROCK) c = lerpC([96, 156, 62], [58, 118, 48], this.moistAt(wx, wy));
-      else c = [140, 138, 126];
-      if (this.inDock(wx, wy)) c = [150, 100, 60];
+      if (h < H_DEEP) c = [255, 240, 205];
+      else if (h < 0) c = [255, 205, 90];
+      else if (this.pathAt(wx, wy) > 0.5) c = [250, 100, 160];
+      else if (h < H_GRASS) c = [255, 170, 20];
+      else if (h < H_ROCK) c = lerpC([235, 185, 40], [255, 140, 190], this.moistAt(wx, wy));
+      else c = [245, 238, 220];
+      if (this.inDock(wx, wy)) c = [240, 210, 150];
       img.data[p] = c[0]; img.data[p + 1] = c[1]; img.data[p + 2] = c[2]; img.data[p + 3] = 255;
     }
     ctx.putImageData(img, 0, 0);
@@ -482,12 +474,14 @@ export class Island {
   }
 }
 
-function grassColor(m, det, grain) {
-  const out = lerpC([118, 172, 66], [56, 122, 46], clamp(m * 1.3 - 0.15, 0, 1));
-  const patch = smoothstep(0.55, 0.75, det);
-  out[0] = out[0] * (1 - patch * 0.18) + grain * 14;
-  out[1] = out[1] * (1 - patch * 0.1) + grain * 18;
-  out[2] = out[2] * (1 - patch * 0.15) + grain * 10;
+// The island is Naiwa's skin: yellow hide where it is dry, pink flesh where it is damp,
+// with cream belly patches here and there.
+function skinColor(m, det, grain) {
+  const out = lerpC([249, 199, 44], [255, 140, 190], clamp(m * 1.4 - 0.3, 0, 1));
+  const patch = smoothstep(0.6, 0.78, det);
+  out[0] = lerp(out[0], 244, patch) + grain * 12;
+  out[1] = lerp(out[1], 223, patch) + grain * 16;
+  out[2] = lerp(out[2], 179, patch) + grain * 10;
   return out;
 }
 
@@ -506,42 +500,62 @@ function sampleGrid(arr, w, cell, x, y) {
   return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
 }
 
-function drawStarfish(ctx, x, y, r, rot, col) {
+// A tiny egg, optionally with the egg's face.
+function drawMiniEgg(ctx, x, y, r, withFace) {
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath(); ctx.ellipse(x + 1, y + 1.5, r * 0.8, r, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fbf3e4';
+  ctx.beginPath(); ctx.ellipse(x, y, r * 0.8, r, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.beginPath(); ctx.ellipse(x - r * 0.3, y - r * 0.4, r * 0.25, r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+  if (!withFace) return;
+  ctx.fillStyle = '#3f8f3a';
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(x + s * r * 0.33, y - r * 0.1, r * 0.17, r * 0.2, 0, 0, Math.PI * 2); ctx.fill(); }
+  ctx.strokeStyle = '#7a4a10'; ctx.lineWidth = Math.max(0.8, r * 0.14);
+  ctx.beginPath(); ctx.moveTo(x - r * 0.2, y + r * 0.35); ctx.lineTo(x + r * 0.2, y + r * 0.35); ctx.stroke();
+}
+
+function drawEyeball(ctx, x, y, r, look) {
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath(); ctx.arc(x + 1, y + 1.5, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  const ix = x + Math.cos(look) * r * 0.3, iy = y + Math.sin(look) * r * 0.3;
+  ctx.fillStyle = '#3f8f3a';
+  ctx.beginPath(); ctx.arc(ix, iy, r * 0.55, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#101010';
+  ctx.beginPath(); ctx.arc(ix, iy, r * 0.28, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.beginPath(); ctx.arc(ix - r * 0.18, iy - r * 0.2, r * 0.12, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(200,40,40,0.35)'; ctx.lineWidth = 0.6;
+  for (let i = 0; i < 3; i++) {
+    const a = look + 2 + i * 1.4;
+    ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * 0.95, y + Math.sin(a) * r * 0.95); ctx.lineTo(ix + Math.cos(a) * r * 0.6, iy + Math.sin(a) * r * 0.6); ctx.stroke();
+  }
+}
+
+function drawMouth(ctx, x, y, w, rot) {
   ctx.save();
   ctx.translate(x, y); ctx.rotate(rot);
   ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  starPath(ctx, 1, 1.5, r); ctx.fill();
-  ctx.fillStyle = col;
-  starPath(ctx, 0, 0, r); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  for (let i = 0; i < 5; i++) {
-    const a = i / 5 * Math.PI * 2 - Math.PI / 2;
-    ctx.fillRect(Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.45, 1, 1);
-  }
+  ctx.beginPath(); ctx.ellipse(1, 1.5, w, w * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ff7eb3';
+  ctx.beginPath(); ctx.ellipse(0, 0, w, w * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#7a1030';
+  ctx.beginPath(); ctx.ellipse(0, 0.5, w * 0.7, w * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  for (let i = -2; i <= 2; i++) ctx.fillRect(i * w * 0.25 - w * 0.08, -w * 0.12, w * 0.16, w * 0.2);
   ctx.restore();
 }
 
-function starPath(ctx, ox, oy, r) {
-  ctx.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const a = i / 10 * Math.PI * 2 - Math.PI / 2;
-    const rr = i % 2 ? r * 0.42 : r;
-    ctx.lineTo(ox + Math.cos(a) * rr, oy + Math.sin(a) * rr);
-  }
-  ctx.closePath();
-}
-
-function drawShell(ctx, x, y, r, rot, col) {
+function drawTooth(ctx, x, y, r, rot) {
   ctx.save();
   ctx.translate(x, y); ctx.rotate(rot);
   ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  ctx.beginPath(); ctx.arc(1, 1.5, r, Math.PI, 0); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = col;
-  ctx.beginPath(); ctx.arc(0, 0, r, Math.PI, 0); ctx.lineTo(r * 0.2, r * 0.4); ctx.lineTo(-r * 0.2, r * 0.4); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = 'rgba(150,100,80,0.5)'; ctx.lineWidth = 0.7;
-  for (let i = 1; i < 5; i++) {
-    const a = Math.PI + i / 5 * Math.PI;
-    ctx.beginPath(); ctx.moveTo(0, r * 0.3); ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); ctx.stroke();
-  }
+  ctx.beginPath(); ctx.moveTo(-r + 1, -r + 1.5); ctx.lineTo(r + 1, -r + 1.5); ctx.lineTo(r * 0.5 + 1, r + 1.5); ctx.lineTo(-r * 0.5 + 1, r + 1.5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#fffaf0';
+  ctx.beginPath(); ctx.moveTo(-r, -r); ctx.lineTo(r, -r); ctx.lineTo(r * 0.5, r); ctx.lineTo(-r * 0.5, r); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(150,120,80,0.5)'; ctx.lineWidth = 0.7;
+  ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(0, r * 0.6); ctx.stroke();
   ctx.restore();
 }

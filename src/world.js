@@ -60,18 +60,18 @@ export class Environment {
   // ---------- Water ----------
   buildWater(layer, tex) {
     const M = 1600;
-    const base = new Graphics().rect(-M, -M, WORLD + M * 2, WORLD + M * 2).fill(0x1a6f9c);
+    const base = new Graphics().rect(-M, -M, WORLD + M * 2, WORLD + M * 2).fill(0xfff0cf);
     layer.addChild(base);
     this.wavesA = new TilingSprite({ texture: this.art.waves, width: WORLD + M * 2, height: WORLD + M * 2 });
     this.wavesA.position.set(-M, -M);
     this.wavesA.tileScale.set(2.2);
-    this.wavesA.alpha = 0.35;
-    this.wavesA.tint = 0xbfefff;
+    this.wavesA.alpha = 0.6;
+    this.wavesA.tint = 0xffffff;
     this.wavesB = new TilingSprite({ texture: this.art.waves, width: WORLD + M * 2, height: WORLD + M * 2 });
     this.wavesB.position.set(-M, -M);
     this.wavesB.tileScale.set(3.4, 2.6);
-    this.wavesB.alpha = 0.22;
-    this.wavesB.tint = 0x8fd8ff;
+    this.wavesB.alpha = 0.45;
+    this.wavesB.tint = 0xffc14d;
     layer.addChild(this.wavesA, this.wavesB);
 
     this.foamA = new Sprite(tex.foamA);
@@ -79,6 +79,21 @@ export class Environment {
     for (const f of [this.foamA, this.foamB]) { f.width = f.height = WORLD; }
     this.game.layers.foam.addChild(this.foamB, this.foamA);
 
+    // Yolks bobbing in the deep milk.
+    this.yolks = [];
+    const R = this.rand;
+    for (let i = 0; i < 90; i++) {
+      const x = rnd(R, -M * 0.6, WORLD + M * 0.6), y = rnd(R, -M * 0.6, WORLD + M * 0.6);
+      if (this.island.heightAt(x, y) > H_DEEP - 0.06) continue;
+      const s = new Sprite(this.art.yolk);
+      s.anchor.set(0.5);
+      s.position.set(x, y);
+      s.scale.set(rnd(R, 0.6, 1.6));
+      s.rotation = rnd(R, 0, 6.28);
+      s.alpha = 0.9;
+      layer.addChild(s);
+      this.yolks.push({ s, ph: rnd(R, 0, 6.28), x, y });
+    }
     this.glints = [];
     for (let i = 0; i < 22; i++) {
       const s = new Sprite(this.art.orb);
@@ -305,7 +320,7 @@ export class Environment {
       const s = makeSprite(art.cloud);
       s.position.set(rnd(R, 0, WORLD), rnd(R, 0, WORLD));
       s.scale.set(rnd(R, 1.8, 3.4), rnd(R, 1.5, 2.6));
-      s.alpha = 0.16;
+      s.alpha = 0.13;
       L.air.addChild(s);
       this.clouds.push(s);
     }
@@ -342,6 +357,11 @@ export class Environment {
     const ph = (t * 0.45) % 1;
     this.foamA.alpha = 0.55 + 0.45 * Math.sin(ph * Math.PI * 2);
     this.foamB.alpha = 0.3 + 0.3 * Math.sin(ph * Math.PI * 2 - 1.9);
+    for (const y of this.yolks) {
+      y.s.x = y.x + Math.sin(t * 0.4 + y.ph) * 14;
+      y.s.y = y.y + Math.cos(t * 0.3 + y.ph) * 10;
+      y.s.rotation += dt * 0.05;
+    }
     this.boat.rotation = Math.sin(t * 0.9) * 0.035;
     this.boat.y = this.island.boat.y + Math.sin(t * 1.3) * 2;
     if (this.flag) {

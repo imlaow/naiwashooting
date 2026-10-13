@@ -3,6 +3,12 @@
 A top-down 2D island shooter built with [PixiJS](https://pixijs.com) v8 and Vite.
 The hero is Naiwa, whose sprite frames are cut from `mmexport1791681378822.jpg`.
 
+The world is drawn to match the sprites in `public/assets`: a yolk island with Naiwa-skin
+hills and tongue paths, afloat in a sea of milk. Trees are eggs on frog legs or giant bunny
+ears, rocks are eggs, huts are Naiwa bellies, crates are milk cartons, barrels are bomb eggs,
+and the beaches are scattered with eyeballs and teeth. All of it is still painted procedurally
+in `src/art.js` and `src/island.js`.
+
 ## Run
 
 ```bash
