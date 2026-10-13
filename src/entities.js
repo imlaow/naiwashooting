@@ -21,11 +21,13 @@ const HERO_ANCHOR = { x: 0.5, y: 0.96 };
 // then pushed out of obstacles.
 function moveBody(e, dx, dy) {
   const isl = e.game.island;
-  const nx = e.x + dx, ny = e.y + dy;
-  if (isl.isWalkable(nx, e.y)) e.x = nx;
-  if (isl.isWalkable(e.x, ny)) e.y = ny;
+  const ox = e.x, oy = e.y;
+  if (isl.isWalkable(e.x + dx, e.y)) e.x += dx;
+  if (isl.isWalkable(e.x, e.y + dy)) e.y += dy;
   e.game.statics.resolve(e, e.r);
-  if (!isl.isWalkable(e.x, e.y)) { e.x -= dx; e.y -= dy; }
+  // Pushed off walkable ground: go back to where we were, never step backwards
+  // (that used to walk stranded enemies off the map, leaving a wave unfinishable).
+  if (!isl.isWalkable(e.x, e.y)) { e.x = ox; e.y = oy; }
 }
 
 function stepFx(e, dt, moving) {
@@ -459,12 +461,27 @@ export class Enemy {
       const d2 = ox * ox + oy * oy;
       if (d2 < m * m && d2 > 0.01) {
         const d = Math.sqrt(d2), push = (m - d) * 0.5;
-        this.x += (ox / d) * push; this.y += (oy / d) * push;
+        const nx = this.x + (ox / d) * push, ny = this.y + (oy / d) * push;
+        if (game.island.isWalkable(nx, ny)) { this.x = nx; this.y = ny; }
       }
     }
     const kf = Math.max(0, 1 - dt * 7);
     this.kx *= kf; this.ky *= kf;
     moveBody(this, (this.vx + this.kx) * dt, (this.vy + this.ky) * dt);
+    // Safety net: an enemy stuck out in deep water (or with a broken position) is
+    // brought back onto the island so the wave can still be cleared.
+    if (!game.island.isWalkable(this.x, this.y) || !Number.isFinite(this.x + this.y)) {
+      this.strandedT = (this.strandedT || 0) + dt;
+      if (this.strandedT > 1.5) {
+        this.strandedT = 0;
+        const p = game.spawnPoint(this.type);
+        if (p) {
+          this.x = p.x; this.y = p.y;
+          this.vx = this.vy = this.kx = this.ky = 0;
+          this.spawnT = 0.7;
+        }
+      }
+    } else this.strandedT = 0;
     this.moving = Math.hypot(this.vx, this.vy) > 30;
     stepFx(this, dt, this.moving);
     this.animT += dt * (this.moving ? (this.type === 'crab' ? 12 : 8) : 2);

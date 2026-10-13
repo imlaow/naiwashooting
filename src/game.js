@@ -313,6 +313,14 @@ export class Game {
         return { x, y };
       }
     }
+    // Last resort (player boxed into a corner of the island): anywhere walkable
+    // that isn't right on top of him, so the queue can't stall.
+    for (let i = 0; i < 200; i++) {
+      const x = rnd(40, WORLD - 40), y = rnd(40, WORLD - 40);
+      if (Math.hypot(x - P.x, y - P.y) < 300) continue;
+      if (!isl.isWalkable(x, y) || isl.inDock(x, y) || this.statics.overlaps(x, y, 26)) continue;
+      return { x, y };
+    }
     return null;
   }
 
