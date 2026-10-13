@@ -7,8 +7,7 @@ import { Game } from './game.js';
 import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
 import { t, setLang, applyDom, CJK_TEXT } from './i18n.js';
-import { Dashboard } from './dashboard.js';
-import { RANDOM_ID, makeChoice, choiceKey, worldFor, readSelected, recordRun } from './maps.js';
+import { makeChoice, worldFor, readSelected, writeSelected, recordRun, mapName, choiceFromQuery } from './maps.js';
 import './style.css';
 
 const $ = (id) => document.getElementById(id);
@@ -27,18 +26,10 @@ function setLoading(text, pct) {
   $('load-bar').style.width = `${pct}%`;
 }
 
-// Which map to show first: ?map=theme/id, ?seed=N (a random island with that seed), the map
-// played last, or the classic island.
+// Which map to play: the lobby's ?map=theme/id (&seed=N) or legacy ?seed=N, else the map
+// played last, else the classic island.
 function initialChoice() {
-  const q = new URLSearchParams(location.search);
-  const seed = Number(q.get('seed'));
-  if (seed) return makeChoice('island', RANDOM_ID, seed);
-  const m = q.get('map');
-  if (m) {
-    const [theme, id] = m.includes('/') ? m.split('/') : ['island', m];
-    return makeChoice(theme, id);
-  }
-  return readSelected() ?? makeChoice('island', 'cove');
+  return choiceFromQuery(location.search) ?? readSelected() ?? makeChoice('island', 'cove');
 }
 
 function readBest() {
@@ -77,7 +68,7 @@ async function boot() {
   const app = new Application();
   await app.init({
     resizeTo: $('app'),
-    background: 0x0e3b52,
+    background: 0xfff0cf,
     antialias: true,
     autoDensity: true,
     resolution: Math.min(window.devicePixelRatio || 1, 2),
@@ -97,40 +88,31 @@ async function boot() {
 
   setLoading(t('loading.palms'), 20);
   await nextFrame();
-  const art = buildArt();
+  const art = buildArt(skins.images);
 
   const gl = app.renderer.gl;
   const maxTex = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 4096;
   const input = new Input(app.canvas);
   let game = null;
   let demo = true;
-  // The map whose terrain is currently painted and uploaded: { key, choice, island, terrainTex }.
-  let built = null;
 
-  // Paints and uploads the terrain for a map, behind the loading screen. The height field is
-  // cheap and cached by maps.js; the 3200² terrain canvas is the slow part, so it is only
-  // rebuilt when the map actually changes, and the previous one is freed first.
-  const prepare = async (choice) => {
-    if (built && built.key === choiceKey(choice)) return;
-    show('loading');
-    setLoading(t('loading.island'), 38);
-    await nextFrame();
-    const island = worldFor(choice);
-    if (game) { game.destroy(); game = null; }
-    if (built) for (const tex of Object.values(built.terrainTex)) tex.destroy(true);
-    built = null;
-    setLoading(t('loading.beaches'), 55);
-    await nextFrame();
-    const terrainTex = buildTerrainTextures(island, maxTex);
-    built = { key: choiceKey(choice), choice, island, terrainTex };
-    setLoading(t('loading.ready'), 100);
-    await nextFrame();
-  };
+  // The map is chosen on the lobby page (index.html) and handed over in the URL.
+  const choice = initialChoice();
+  writeSelected(choice);
+  setLoading(t('loading.island'), 38);
+  await nextFrame();
+  const island = worldFor(choice);
+
+  setLoading(t('loading.beaches'), 55);
+  await nextFrame();
+  const terrainTex = buildTerrainTextures(island, maxTex, skins.images);
+
+  setLoading(t('loading.ready'), 100);
+  await nextFrame();
 
   const newGame = (isDemo) => {
     if (game) game.destroy();
     demo = isDemo;
-    const { island, terrainTex, choice } = built;
     game = new Game({
       app, art, skins, island, terrainTex, input, demo: isDemo,
       onPause: (p) => show(p ? 'pause' : null),
@@ -143,47 +125,34 @@ async function boot() {
         $('go-wave').textContent = wave;
         $('go-kills').textContent = kills;
         $('go-best').textContent = best.toLocaleString();
-        $('go-map').textContent = t('title.current', { name: dashboard.name(choice) });
+        $('go-map').textContent = t('title.current', { name: mapName(choice) });
         setTimeout(() => show('over'), 900);
       },
     });
   };
 
-  const dashboard = new Dashboard({ root: $('map-themes'), onPlay: (choice) => start(choice) });
-  dashboard.select(initialChoice(), { persist: false });
-  dashboard.render();
+  const toLobby = () => { location.href = './'; };
 
   const showBest = () => { $('best-score').textContent = readBest() ? t('title.best', { n: readBest().toLocaleString() }) : ''; };
-  const showCurrent = () => { $('current-map').textContent = t('title.current', { name: dashboard.name() }); };
+  const showCurrent = () => { $('current-map').textContent = t('title.current', { name: mapName(choice) }); };
   const showTitle = () => { if (!demo) newGame(true); showBest(); showCurrent(); show('title'); };
-  const showMaps = () => { if (!demo) newGame(true); show('maps'); dashboard.open(); };
 
-  await prepare(dashboard.choice);
   newGame(true);
   showTitle();
   for (const btn of document.querySelectorAll('[data-lang-btn]')) {
-    btn.addEventListener('click', () => { setLang(btn.dataset.langBtn); showBest(); showCurrent(); dashboard.render(); });
+    btn.addEventListener('click', () => { setLang(btn.dataset.langBtn); showBest(); showCurrent(); });
   }
 
-  let starting = false;
-  const start = async (choice = dashboard.choice) => {
-    if (starting) return;
-    starting = true;
+  const start = () => {
     sfx.unlock();
     lockLandscape();
-    dashboard.select(choice);
-    showCurrent();
-    await prepare(choice);
     newGame(false);
     show(null);
-    starting = false;
   };
-  $('play').addEventListener('click', () => start());
-  $('again').addEventListener('click', () => start());
-  $('map-play').addEventListener('click', () => start());
-  $('open-maps').addEventListener('click', showMaps);
-  $('over-maps').addEventListener('click', showMaps);
-  $('map-back').addEventListener('click', showTitle);
+  $('play').addEventListener('click', start);
+  $('again').addEventListener('click', start);
+  $('open-maps').addEventListener('click', toLobby);
+  $('over-maps').addEventListener('click', toLobby);
   $('resume').addEventListener('click', () => { game.paused = false; show(null); });
   $('quit').addEventListener('click', showTitle);
   $('btn-pause').addEventListener('click', () => game?.togglePause());
@@ -192,10 +161,8 @@ async function boot() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && game && !demo && !game.paused) game.togglePause();
   });
-  const open = (id) => !$(id).classList.contains('hidden');
   addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (open('title') || open('over') || open('maps'))) start();
-    else if (e.key === 'Escape' && open('maps')) showTitle();
+    if (e.key === 'Enter' && (!$('title').classList.contains('hidden') || !$('over').classList.contains('hidden'))) start();
   });
 
   app.renderer.on('resize', () => game && game.resize());

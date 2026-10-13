@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN" data-lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#ff7eb3" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>奶蛙枪战</title>
+  <link rel="icon" href="assets/hero_1.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=ZCOOL+KuaiLe&family=Nunito:wght@600;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+  <div id="stage"></div>
+  <div id="touch-hud">
+    <button id="btn-mute" class="icon" data-i18n-label="hud.mute" aria-label="静音">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path class="fill" d="M4 9h4l5-4v14l-5-4H4z" /><path class="on" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" /><path class="off" d="M16.5 9.5l5 5m0-5l-5 5" /></svg>
+    </button>
+    <button id="btn-pause" class="icon" data-i18n-label="hud.pause" aria-label="暂停">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg>
+    </button>
+  </div>
+  <div id="overlay">
+    <div id="loading" class="panel">
+      <h2 data-i18n="loading.title">奶蛙枪战</h2>
+      <div class="bar"><div id="load-bar"></div></div>
+      <p id="load-text">启动中…</p>
+    </div>
+
+    <div id="title" class="panel hidden">
+      <div class="lang-switch">
+        <button data-lang-btn="zh">中文</button><button data-lang-btn="en">EN</button>
+      </div>
+      <img class="hero" src="assets/hero_1.png" alt="主角奶蛙" data-i18n-alt="title.heroAlt" />
+      <h1><b data-i18n="title.name">奶蛙枪战</b><span data-i18n="title.sub">海岛大作战</span></h1>
+      <p class="tag" data-i18n="title.tag">敌对奶蛙入侵了你的热带小岛。拿起武器，守卫海滩！</p>
+      <div class="actions">
+        <button id="play" class="egg-btn"><span data-i18n="title.play">开始游戏</span></button>
+        <button id="open-maps" class="gunner-btn"><span data-i18n="title.maps">选择地图</span></button>
+      </div>
+      <p id="current-map" class="current-map"></p>
+      <p id="best-score" class="best"></p>
+      <div class="controls">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <span data-i18n="ctl.move">移动</span></div>
+        <div><kbd data-i18n="ctl.mouse">鼠标</kbd> <span data-i18n="ctl.aim">瞄准射击</span></div>
+        <div><kbd data-i18n="ctl.space">空格</kbd> <span data-i18n="ctl.dash">冲刺</span></div>
+        <div><kbd>R</kbd> <span data-i18n="ctl.reload">换弹</span></div>
+        <div><kbd>1</kbd>–<kbd>4</kbd> <span data-i18n="ctl.weapons">/ 滚轮 切换武器</span></div>
+        <div><kbd>P</kbd> <span data-i18n="ctl.pause">暂停</span> · <kbd>M</kbd> <span data-i18n="ctl.mute">静音</span></div>
+      </div>
+      <p class="touch-note" data-i18n="title.touch">触屏：左手拇指移动（轻点冲刺），右手拇指瞄准射击。</p>
+    </div>
+
+    <div id="pause" class="panel hidden">
+      <img class="laugher" src="assets/laugh_pose.png" alt="" />
+      <h2 data-i18n="pause.title">已暂停</h2>
+      <div class="actions">
+        <button id="resume" class="egg-btn"><span data-i18n="pause.resume">继续</span></button>
+        <button id="quit" class="gunner-btn"><span data-i18n="pause.quit">返回主菜单</span></button>
+      </div>
+    </div>
+
+    <div id="over" class="panel hidden">
+      <h2 data-i18n="over.title">奶蛙阵亡</h2>
+      <div class="stats">
+        <div><span data-i18n="over.score">得分</span><b id="go-score">0</b></div>
+        <div><span data-i18n="over.wave">波次</span><b id="go-wave">0</b></div>
+        <div><span data-i18n="over.kills">击杀</span><b id="go-kills">0</b></div>
+        <div><span data-i18n="over.best">最高分</span><b id="go-best">0</b></div>
+      </div>
+      <p id="go-map" class="current-map"></p>
+      <div class="actions">
+        <button id="again" class="egg-btn"><span data-i18n="over.again">再来一局</span></button>
+        <button id="over-maps" class="gunner-btn"><span data-i18n="over.maps">换张地图</span></button>
+      </div>
+    </div>
+  </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
