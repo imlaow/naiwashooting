@@ -8,6 +8,7 @@ import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
 import { t, setLang, applyDom, CJK_TEXT } from './i18n.js';
 import { Dashboard } from './dashboard.js';
+import { initMenu } from './menu.js';
 import { RANDOM_ID, makeChoice, choiceKey, worldFor, readSelected, recordRun } from './maps.js';
 import './style.css';
 
@@ -70,6 +71,7 @@ function lockLandscape() {
 
 async function boot() {
   applyDom();
+  initMenu();
   // Runs before Pixi's own resize handler, which waits a frame and then measures #app.
   layout();
   addEventListener('resize', layout);

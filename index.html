@@ -24,20 +24,23 @@
     </button>
   </div>
   <div id="overlay">
-    <div id="loading" class="panel">
-      <h2 data-i18n="loading.title">奶蛙枪战</h2>
-      <div class="bar"><div id="load-bar"></div></div>
-      <p id="load-text">启动中…</p>
-    </div>
+    <img class="decor kicker" src="assets/gunner.png" alt="" aria-hidden="true" />
+    <img class="decor peeker" src="assets/egg.png" alt="" aria-hidden="true" />
 
-    <div id="title" class="panel hidden">
+    <div id="loading" class="panel"><div class="belly">
+      <h2 data-i18n="loading.title">奶蛙枪战</h2>
+      <div class="bar"><div id="load-bar"><span class="neck-head"><img src="assets/hero_1.png" alt="" /></span></div></div>
+      <p id="load-text">启动中…</p>
+    </div></div>
+
+    <div id="title" class="panel hidden"><div class="belly">
       <div class="lang-switch">
         <button data-lang-btn="zh">中文</button><button data-lang-btn="en">EN</button>
       </div>
       <img class="hero" src="assets/hero_1.png" alt="主角奶蛙" data-i18n-alt="title.heroAlt" />
       <h1><b data-i18n="title.name">奶蛙枪战</b><span data-i18n="title.sub">海岛大作战</span></h1>
       <p class="tag" data-i18n="title.tag">敌对奶蛙入侵了你的热带小岛。拿起武器，守卫海滩！</p>
-      <button id="play" data-i18n="title.play">开始游戏</button>
+      <button id="play" class="egg" data-i18n="title.play">开始游戏</button>
       <button id="open-maps" class="ghost" data-i18n="title.maps">选择地图</button>
       <p id="current-map" class="current-map"></p>
       <p id="best-score" class="best"></p>
@@ -50,26 +53,28 @@
         <div><kbd>P</kbd> <span data-i18n="ctl.pause">暂停</span> · <kbd>M</kbd> <span data-i18n="ctl.mute">静音</span></div>
       </div>
       <p class="touch-note" data-i18n="title.touch">触屏：左手拇指移动（轻点冲刺），右手拇指瞄准射击。</p>
-    </div>
+    </div></div>
 
-    <div id="maps" class="panel wide hidden">
+    <div id="maps" class="panel wide hidden"><div class="belly">
       <h2 data-i18n="maps.title">地图</h2>
       <p class="tag" data-i18n="maps.tag">每个主题下有不同的地图。挑一张，出发！</p>
       <div id="map-themes"></div>
       <p class="touch-note" data-i18n="maps.more">更多主题，敬请期待</p>
       <div class="map-actions">
         <button id="map-back" class="ghost" data-i18n="maps.back">返回</button>
-        <button id="map-play" data-i18n="maps.play">出发！</button>
+        <button id="map-play" class="egg" data-i18n="maps.play">出发！</button>
       </div>
-    </div>
+    </div></div>
 
-    <div id="pause" class="panel hidden">
+    <div id="pause" class="panel hidden"><div class="belly">
+      <div class="lazy" aria-hidden="true"><img src="assets/hero_3.png" alt="" /><i></i><i></i><i></i></div>
       <h2 data-i18n="pause.title">已暂停</h2>
-      <button id="resume" data-i18n="pause.resume">继续</button>
+      <button id="resume" class="egg" data-i18n="pause.resume">继续</button>
       <button id="quit" class="ghost" data-i18n="pause.quit">返回主菜单</button>
-    </div>
+    </div></div>
 
-    <div id="over" class="panel hidden">
+    <div id="over" class="panel hidden"><div class="belly">
+      <div class="splat" aria-hidden="true"><img class="pancake" src="assets/hero_1.png" alt="" /><img class="mourner" src="assets/egg.png" alt="" /></div>
       <h2 data-i18n="over.title">奶蛙阵亡</h2>
       <div class="stats">
         <div><span data-i18n="over.score">得分</span><b id="go-score">0</b></div>
@@ -78,11 +83,18 @@
         <div><span data-i18n="over.best">最高分</span><b id="go-best">0</b></div>
       </div>
       <p id="go-map" class="current-map"></p>
-      <button id="again" data-i18n="over.again">再来一局</button>
+      <button id="again" class="egg" data-i18n="over.again">再来一局</button>
       <button id="over-maps" class="ghost" data-i18n="over.maps">换张地图</button>
-    </div>
+    </div></div>
   </div>
   </div>
+  <!-- Roughens the menu panels' yellow rim into fur. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="fur" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" />
+      <feDisplacementMap in="SourceGraphic" scale="9" />
+    </filter>
+  </svg>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>
