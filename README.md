@@ -58,7 +58,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/entities.js` | Player, enemies, weapon stats |
 | `src/game.js` | Game loop, camera, bullets, waves, pickups, scoring |
 | `src/hud.js` | HUD, minimap, banners, crosshair |
-| `src/menu.js` | Menu decoration: egg buttons whose eyes follow the pointer, poking Naiwa on the title screen. The menu look itself lives in `src/style.css` |
+| `src/menu.js` | Menu decoration: poking Naiwa on the title screen. The menu look itself lives in `src/style.css` |
 | `src/laugh.js` | Laugh sound for the 5th-kill laugh; the animation follows its playback position |
 | `src/fx.js` | Particles, decals, damage numbers |
 | `src/audio.js` | WebAudio-synthesised sound effects |

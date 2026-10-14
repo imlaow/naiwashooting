@@ -13,10 +13,6 @@
   --sea: #1a6f9c;
   --eggs: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='100' viewBox='0 0 90 100'%3E%3Cg id='e'%3E%3Cpath d='M22 6c10 0 17 14 17 25s-8 18-17 18S5 42 5 31 12 6 22 6z' fill='%23f2b705'/%3E%3Ccircle cx='16' cy='24' r='3.2' fill='%23a8c86e'/%3E%3Ccircle cx='28' cy='24' r='3.2' fill='%23a8c86e'/%3E%3Ccircle cx='16' cy='24' r='1.6' fill='%23222'/%3E%3Ccircle cx='28' cy='24' r='1.6' fill='%23222'/%3E%3Cpath d='M19 31h6' stroke='%23a0660a' stroke-width='1.6' stroke-linecap='round'/%3E%3C/g%3E%3Cuse href='%23e' x='45' y='50'/%3E%3C/svg%3E");
 }
-/* Lets the egg buttons' pupils roll around in a CSS animation on touch screens. */
-@property --ex { syntax: '<length>'; inherits: false; initial-value: 0px; }
-@property --ey { syntax: '<length>'; inherits: false; initial-value: 0px; }
-
 * { box-sizing: border-box; }
 html, body {
   margin: 0;
@@ -195,43 +191,7 @@ button:hover { transform: translateY(-2px); }
 button:active { transform: translateY(4px); box-shadow: 0 2px 0 #b8860b; }
 button:focus-visible { outline: 3px solid var(--olive); outline-offset: 3px; }
 
-/* Main buttons are eggs. Their pupils (--ex/--ey) follow the pointer, set by menu.js. */
-button.egg {
-  --ex: 0px; --ey: 0px;
-  position: relative;
-  padding: 32px 50px 14px;
-  border-radius: 50% 50% 46% 46% / 66% 66% 34% 34%;
-  background:
-    radial-gradient(ellipse 30% 26% at 32% 24%, rgba(255, 250, 210, 0.85), transparent),
-    linear-gradient(#ffd84d, #f2b705 70%, #d99a00);
-  box-shadow: inset -8px -10px 0 rgba(170, 100, 0, 0.3), 0 6px 0 #8a5d00, 0 12px 18px rgba(60, 30, 0, 0.35);
-  transition: transform 0.12s cubic-bezier(0.3, 1.8, 0.5, 1);
-}
-button.egg::before, button.egg::after {
-  content: '';
-  position: absolute;
-  top: 8px;
-  left: calc(50% - 24px);
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at calc(50% + var(--ex)) calc(50% + var(--ey)), #15140c 0 4px, transparent 4.6px),
-    radial-gradient(circle, var(--iris) 0 7px, #6e8a3a 7.6px);
-  box-shadow: 0 0 0 1.5px var(--olive-dark);
-}
-button.egg::after { left: calc(50% + 4px); }
-button.egg:hover { transform: scale(1.08, 0.94) rotate(-2deg); }
-button.egg:active { transform: scale(1.25, 0.7) translateY(8px); box-shadow: inset -8px -10px 0 rgba(170, 100, 0, 0.3), 0 1px 0 #8a5d00; }
-body.touch button.egg { animation: shifty 3.4s ease-in-out infinite; }
-@keyframes shifty {
-  0%, 30% { --ex: 0px; --ey: 0px; }
-  40%, 55% { --ex: -4px; --ey: 1px; }
-  65%, 80% { --ex: 4px; --ey: -2px; }
-  90% { --ex: 0px; --ey: 3px; }
-}
-
-/* Secondary buttons: a plain yellow lozenge beside the eggs. */
+/* Menu buttons: a plain yellow lozenge. */
 button.ghost {
   padding: 10px 30px;
   font-size: 18px;
@@ -471,8 +431,6 @@ body.compact .hero { height: 84px; margin: -4px 0 0; }
 body.compact h1 { font-size: 44px; }
 body.compact h2 { font-size: 30px; }
 body.compact .tag { margin-bottom: 10px; font-size: 14px; }
-body.compact .belly > button.egg { font-size: 22px; padding: 26px 40px 10px; }
-body.compact button.egg::before, body.compact button.egg::after { top: 6px; }
 body.compact .touch-note { margin-top: 8px; }
 body.compact .stats { margin: 8px 0 12px; gap: 8px; }
 body.compact .stats div { padding: 8px 6px 6px; }
@@ -594,5 +552,4 @@ body.compact .map-name { font-size: 15px; }
 body.compact .map-desc { display: none; }
 body.compact .theme-head h3 { font-size: 19px; }
 body.compact .map-actions { bottom: -12px; margin: 4px -22px -12px; padding: 8px 0 10px; }
-body.compact .map-actions > button.egg { font-size: 20px; padding: 24px 32px 8px; }
 body.compact .map-actions > button.ghost { font-size: 16px; padding: 7px 22px; }
