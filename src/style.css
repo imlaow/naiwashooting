@@ -225,11 +225,11 @@ kbd {
 }
 .touch-note { font-size: 13px; opacity: 0.7; margin: 12px 0 0; }
 
-/* Loading bar: Naiwa's neck, stretching further the more has loaded. */
+/* Loading bar in Naiwa's yellow. */
 .bar {
   position: relative;
   height: 22px;
-  margin: 26px 36px 12px 10px;
+  margin: 18px 10px 12px;
   border-radius: 11px;
   background: var(--belly-edge);
   box-shadow: inset 0 3px 6px rgba(120, 70, 0, 0.35);
@@ -245,18 +245,6 @@ kbd {
     linear-gradient(#ffe066, var(--fur) 60%, var(--fur-dark));
   transition: width 0.25s;
 }
-.neck-head {
-  position: absolute;
-  right: -30px;
-  top: -30px;
-  width: 54px;
-  height: 52px;
-  overflow: hidden;
-  animation: nod 0.7s ease-in-out infinite;
-  transform-origin: 30% 90%;
-}
-.neck-head img { position: absolute; width: 132px; left: -44px; top: -2px; }
-@keyframes nod { 50% { transform: rotate(-12deg) translateY(-2px); } }
 #load-text { font-weight: 700; }
 
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 14px 0 20px; }
