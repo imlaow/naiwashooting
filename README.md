@@ -1,4 +1,4 @@
-# 奶蛙枪战 (Naiwa Shootout)
+# 奶蛙射击 (Naiwa Shootout)
 
 A top-down 2D island shooter built with [PixiJS](https://pixijs.com) v8 and Vite.
 The hero is Naiwa, whose sprite frames are cut from `mmexport1791681378822.jpg`.

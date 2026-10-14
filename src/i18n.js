@@ -1,8 +1,8 @@
 // UI strings. Chinese is the default; the title screen can switch to English.
 const STRINGS = {
   zh: {
-    'doc.title': '奶蛙枪战',
-    'loading.title': '奶蛙枪战',
+    'doc.title': '奶蛙射击',
+    'loading.title': '奶蛙射击',
     'loading.start': '启动中…',
     'loading.fonts': '加载字体和奶蛙…',
     'loading.palms': '绘制椰子树…',
@@ -10,7 +10,7 @@ const STRINGS = {
     'loading.beaches': '绘制沙滩和泻湖…',
     'loading.ready': '准备就绪！',
     'loading.failed': '启动失败：{msg}',
-    'title.name': '奶蛙枪战',
+    'title.name': '奶蛙射击',
     'title.sub': '海岛大作战',
     'title.heroAlt': '主角奶蛙',
     'title.tag': '敌对奶蛙入侵了你的热带小岛。拿起武器，守卫海滩！',
@@ -48,7 +48,7 @@ const STRINGS = {
     'hud.starting': '{n} 秒后开始',
     'hud.left': '剩余敌人 {n}',
     'hud.combo': '{n} 连击  x{m}',
-    'game.intro': '奶蛙枪战',
+    'game.intro': '奶蛙射击',
     'game.introSub': '击退敌对奶蛙的入侵！',
     'game.ammo': '弹药',
     'game.weaponAmmo': '{w}弹药',
