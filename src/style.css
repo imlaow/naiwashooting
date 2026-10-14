@@ -589,6 +589,7 @@ html[data-lang="zh"] .theme-head h3 { letter-spacing: 3px; }
 .map-thumb .pin.spawn { background: var(--sun); }
 .map-thumb .pin.village { background: #ff8c42; }
 .map-thumb .pin.lookout { background: #a78bfa; }
+.map-card[data-map^="factory/"] .map-thumb { border-radius: 14px; background: #3f6b3a; }
 .map-card.random .map-thumb { background: linear-gradient(135deg, #165480, #2a8aa8); }
 .map-card.random .map-thumb .dice { font-size: 42px; filter: drop-shadow(0 4px 4px rgba(0,0,0,0.4)); animation: tumble 2.2s ease-in-out infinite; }
 @keyframes tumble { 0%, 50% { transform: none; } 70% { transform: rotate(200deg) scale(1.2); } 85%, 100% { transform: rotate(360deg); } }

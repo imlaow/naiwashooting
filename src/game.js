@@ -4,7 +4,7 @@ import { WORLD } from './island.js';
 import { StaticWorld } from './physics.js';
 import { Fx } from './fx.js';
 import { Environment, makeSprite } from './world.js';
-import { Player, Enemy, ENEMY_TYPES, WEAPON_ORDER, EGG_FOOT } from './entities.js';
+import { Player, Enemy, ENEMY_TYPES, WEAPON_ORDER, EGG_FOOT, moveBody } from './entities.js';
 import { Hud } from './hud.js';
 import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
@@ -13,7 +13,9 @@ import { t } from './i18n.js';
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class Game {
-  constructor({ app, art, skins, island, terrainTex, input, onGameOver, onPause, onMute, demo = false }) {
+  // `island` is the map's terrain (an Island or a Factory, see maps.js) and Scene the class
+  // that builds its scenery (Environment by default).
+  constructor({ app, art, skins, island, terrainTex, input, onGameOver, onPause, onMute, demo = false, Scene = Environment }) {
     this.demo = demo;
     this.app = app; this.art = art; this.skins = skins; this.island = island; this.input = input;
     this.onGameOver = onGameOver; this.onPause = onPause; this.onMute = onMute;
@@ -50,7 +52,7 @@ export class Game {
     this.pickups = [];
     this.timers = [];
 
-    this.env = new Environment(this, terrainTex);
+    this.env = new Scene(this, terrainTex);
     const sp = island.spawn;
     this.player = new Player(this, sp.x, sp.y);
     for (const w of this.env.weaponSpots) this.spawnPickup('weapon', w.x, w.y, w.kind, Infinity);
@@ -285,7 +287,7 @@ export class Game {
       b.life -= dt;
       if (alive && b.life <= 0) {
         alive = false;
-        if (isl.heightAt(b.x, b.y) < 0 && !isl.inDock(b.x, b.y)) this.fx.splash(b.x, b.y, 3);
+        if (isl.isWading(b.x, b.y)) this.fx.splash(b.x, b.y, 3);
         else this.fx.dust(b.x, b.y, 1);
       }
       if (!alive) {
@@ -309,8 +311,7 @@ export class Game {
         const d = pass < 2 ? rnd(680, 1250) : rnd(400, 1600);
         const x = P.x + Math.cos(a) * d, y = P.y + Math.sin(a) * d;
         if (!isl.isWalkable(x, y) || isl.inDock(x, y)) continue;
-        const h = isl.heightAt(x, y);
-        if (pass === 0 && type === 'egg' && (h > 0.05 || h < -0.09)) continue;
+        if (pass === 0 && !isl.goodSpawn(type, x, y)) continue;
         if (this.statics.overlaps(x, y, 26)) continue;
         return { x, y };
       }
@@ -364,7 +365,7 @@ export class Game {
       this.hud.banner(t('hud.wave', { n }), t('game.bossWave'), 2.6, 0xff6b6b);
       sfx.play('boss');
     } else {
-      this.hud.banner(t('hud.wave', { n }), n === 1 ? t('game.firstWave') : t('game.incoming', { n: q.length }), 2.2);
+      this.hud.banner(t('hud.wave', { n }), n === 1 ? t(this.island.firstWaveKey ?? 'game.firstWave') : t('game.incoming', { n: q.length }), 2.2);
       sfx.play('wave');
     }
   }
@@ -467,6 +468,16 @@ export class Game {
     });
   }
 
+  // Conveyor belts carry whoever stands on them.
+  applyDrift(dt) {
+    const isl = this.island;
+    for (const e of [this.player, ...this.enemies]) {
+      if (e.dead || e.spawnT > 0) continue;
+      const v = isl.drift(e.x, e.y);
+      if (v) moveBody(e, v * dt, 0);
+    }
+  }
+
   togglePause() {
     if (this.demo || this.state === 'dead') return;
     this.paused = !this.paused;
@@ -502,6 +513,7 @@ export class Game {
     const mouseWorld = this.screenToWorld(input.mouse.x, input.mouse.y);
     this.player.update(dt, input, mouseWorld);
     for (const e of this.enemies) if (!e.dead) e.update(dt);
+    this.applyDrift(dt);
     this.updateBullets(dt);
     this.updatePickups(dt);
     this.updateWaves(dt);
@@ -543,7 +555,7 @@ export class Game {
     input.endFrame();
   }
 
-  // Title-screen backdrop: the camera drifts around the island.
+  // Title-screen backdrop: the camera drifts around the map.
   updateDemo(dt) {
     this.time += dt;
     const isl = this.island;

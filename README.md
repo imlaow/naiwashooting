@@ -12,10 +12,10 @@ npm run build    # static build in dist/
 ```
 
 Pick a map on the title screen's **选择地图 / MAPS** dashboard. Maps are grouped by theme; the
-island theme has six hand-tuned islands plus a random card that rolls a fresh seed. Each card
-shows a painted preview and that map's best score, best wave and run count (kept in the
-browser). `?map=island/twins` opens a map directly and `?seed=1234` plays a random island with
-that seed.
+island theme has six hand-tuned islands plus a random card that rolls a fresh seed, and the
+factory theme has the **奶蛋加工厂 / Dairy Plant**. Each card shows a painted preview and that
+map's best score, best wave and run count (kept in the browser). `?map=island/twins` or
+`?map=factory/dairy` opens a map directly and `?seed=1234` plays a random island with that seed.
 
 Phones always play in landscape: Android locks the orientation in fullscreen, and an upright iPhone gets the page rotated a quarter turn.
 
@@ -40,6 +40,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 - Shooting a red barrel makes it explode, and nearby barrels go off too.
 - Shallow water slows you down. Kill enemies in quick succession to build a combo multiplier.
 - Every 5th kill, Naiwa stops and laughs his head off for 12 seconds. He can't move or shoot while laughing, but nothing can hurt him.
+- In the factory, the two conveyor belts in the production hall carry anyone standing on them (in opposite directions), the milk canal is wadeable but slow except on the two bridges, and machines, silos, containers and the warehouse and boiler house are cover. The SMG is under the water tower, the shotgun outside the warehouse and the rifle in the far corner behind the tanks.
 
 ## Code map
 
@@ -48,6 +49,9 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/maps.js` | Map catalogue: themes, their variants (seed + terrain knobs for islands) and per-map records. A new theme is one more entry here, see the file header |
 | `src/dashboard.js` | The map dashboard: a section per theme, preview cards, random-seed card |
 | `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting; `DEFAULT_SHAPE` lists the knobs a map can turn |
+| `src/factory.js` | The factory map's layout (hall, belts, canal, tank farm, buildings, yard), its floor painting and minimap; same terrain interface as `Island` plus belt `drift` |
+| `src/factoryScene.js` | Builds the factory scene: perimeter wall, sprites and colliders, moving belts and cartons, smoke, steam, lamps |
+| `src/factoryArt.js` | Painted factory textures (silos, water tower, chimney, machines, containers, lorry, buildings), built the first time a factory loads |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX) |
 | `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), builds recoloured rival skins |
 | `src/world.js` | Scene building: water, vegetation, props, ambient life |

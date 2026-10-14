@@ -9,7 +9,7 @@ import { laugh } from './laugh.js';
 import { t, setLang, applyDom, CJK_TEXT } from './i18n.js';
 import { Dashboard } from './dashboard.js';
 import { initMenu } from './menu.js';
-import { RANDOM_ID, makeChoice, choiceKey, worldFor, readSelected, recordRun } from './maps.js';
+import { RANDOM_ID, makeChoice, choiceKey, worldFor, findTheme, readSelected, recordRun } from './maps.js';
 import './style.css';
 
 const $ = (id) => document.getElementById(id);
@@ -114,14 +114,15 @@ async function boot() {
   // rebuilt when the map actually changes, and the previous one is freed first.
   const prepare = async (choice) => {
     if (built && built.key === choiceKey(choice)) return;
+    const [buildMsg, paintMsg] = findTheme(choice.theme).loading;
     show('loading');
-    setLoading(t('loading.island'), 38);
+    setLoading(t(buildMsg), 38);
     await nextFrame();
     const island = worldFor(choice);
     if (game) { game.destroy(); game = null; }
     if (built) for (const tex of Object.values(built.terrainTex)) tex.destroy(true);
     built = null;
-    setLoading(t('loading.beaches'), 55);
+    setLoading(t(paintMsg), 55);
     await nextFrame();
     const terrainTex = buildTerrainTextures(island, maxTex);
     built = { key: choiceKey(choice), choice, island, terrainTex };
@@ -134,7 +135,7 @@ async function boot() {
     demo = isDemo;
     const { island, terrainTex, choice } = built;
     game = new Game({
-      app, art, skins, island, terrainTex, input, demo: isDemo,
+      app, art, skins, island, terrainTex, input, demo: isDemo, Scene: findTheme(choice.theme).scene,
       onPause: (p) => show(p ? 'pause' : null),
       onMute: (m) => $('btn-mute').classList.toggle('muted', m),
       onGameOver: ({ score, wave, kills }) => {

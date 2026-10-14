@@ -4,10 +4,15 @@
 // theme (for the island theme: a seed plus a few terrain knobs). The dashboard draws one section
 // per theme, so a new theme (desert, snow, city…) is one more entry in THEMES: give it an id,
 // its variants, a `world(choice)` that returns the terrain object the game walks on (same
-// interface as Island: heightAt / isWalkable / isWading / inDock / spawn / village …), a
-// `thumbnail(world, size)` that paints a preview canvas, and name strings under `theme.<id>`
-// in i18n.js.
+// interface as Island: isWalkable / isWading / inDock / goodSpawn / dustColor / drift /
+// paintTerrain / paintMinimap / spawn / village / lookout), the `scene` class that builds its
+// scenery (see Environment in world.js), a `thumbnail(world, size)` that paints a preview
+// canvas, the two `loading` lines shown while it is built, and name strings under
+// `theme.<id>` in i18n.js.
 import { Island } from './island.js';
+import { Factory } from './factory.js';
+import { Environment } from './world.js';
+import { FactoryEnvironment } from './factoryScene.js';
 
 export const THEMES = [
   {
@@ -29,7 +34,20 @@ export const THEMES = [
       { id: 'twins', seed: 2024, shape: { size: 0.5, rough: 0.4, warp: 0.3, hill: 0.24, hillX: -0.3, hillY: -0.12, strait: 0.5, straitAngle: 1.1 }, tags: ['large', 'water'] },
     ],
     world: (choice) => new Island(choice.seed, choice.shape),
+    scene: Environment,
     thumbnail: (world, size) => world.paintMinimap(size),
+    loading: ['loading.island', 'loading.beaches'],
+  },
+  {
+    id: 'factory',
+    variants: [
+      // The milk-and-egg plant: belts in the hall, a milk canal to wade, tanks and a loading yard.
+      { id: 'dairy', seed: 520, shape: {}, tags: ['large', 'belts'] },
+    ],
+    world: (choice) => new Factory(choice.seed),
+    scene: FactoryEnvironment,
+    thumbnail: (world, size) => world.paintMinimap(size),
+    loading: ['loading.factory', 'loading.factoryPaint'],
   },
 ];
 

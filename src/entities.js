@@ -3,7 +3,6 @@ import { Container, Sprite, Graphics } from 'pixi.js';
 import { makeSprite } from './world.js';
 import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
-import { H_GRASS } from './island.js';
 
 export const WEAPONS = {
   pistol: { name: 'Pistol', dmg: 20, rate: 0.24, mag: 12, reload: 0.9, speed: 980, spread: 0.035, pellets: 1, life: 0.72, reserve: Infinity, kick: 3, shake: 2.5, sound: 'pistol', knock: 140 },
@@ -19,7 +18,7 @@ const HERO_ANCHOR = { x: 0.5, y: 0.96 };
 
 // Shared movement: axis-separated so characters slide along shorelines,
 // then pushed out of obstacles.
-function moveBody(e, dx, dy) {
+export function moveBody(e, dx, dy) {
   const isl = e.game.island;
   const ox = e.x, oy = e.y;
   if (isl.isWalkable(e.x + dx, e.y)) e.x += dx;
@@ -38,11 +37,7 @@ function stepFx(e, dt, moving) {
   if (moving) {
     e.stepT = wading ? 0.28 : 0.24;
     if (wading) { game.fx.splash(e.x, e.y, 3); if (e === game.player) sfx.play('splash', 0.4); }
-    else {
-      const h = game.island.heightAt(e.x, e.y);
-      const onPath = game.island.pathAt(e.x, e.y) > 0.5;
-      game.fx.dust(e.x, e.y, 2, onPath ? 0xb89a72 : h < H_GRASS ? 0xe8d6a8 : 0x9cc27a);
-    }
+    else game.fx.dust(e.x, e.y, 2, game.island.dustColor(e.x, e.y));
   } else if (wading) {
     e.stepT = 0.9;
     game.fx.ripple(e.x, e.y, 0.8);
@@ -466,7 +461,7 @@ export class Enemy {
     this.kx *= kf; this.ky *= kf;
     moveBody(this, (this.vx + this.kx) * dt, (this.vy + this.ky) * dt);
     // Safety net: an enemy stuck out in deep water (or with a broken position) is
-    // brought back onto the island so the wave can still be cleared.
+    // brought back onto the map so the wave can still be cleared.
     if (!game.island.isWalkable(this.x, this.y) || !Number.isFinite(this.x + this.y)) {
       this.strandedT = (this.strandedT || 0) + dt;
       if (this.strandedT > 1.5) {

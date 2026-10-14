@@ -97,6 +97,22 @@ export class Island {
     return this.heightAt(x, y) < 0 && !this.inDock(x, y);
   }
 
+  // Where a rival may turn up early in a wave: eggs waddle ashore on the beaches.
+  goodSpawn(type, x, y) {
+    if (type !== 'egg') return true;
+    const h = this.heightAt(x, y);
+    return h <= 0.05 && h >= -0.09;
+  }
+
+  // Colour of the dust kicked up by footsteps.
+  dustColor(x, y) {
+    if (this.pathAt(x, y) > 0.5) return 0xb89a72;
+    return this.heightAt(x, y) < H_GRASS ? 0xe8d6a8 : 0x9cc27a;
+  }
+
+  // Sideways push from the ground (conveyor belts); islands have none.
+  drift() { return 0; }
+
   // ---------- Layout ----------
   planLayout() {
     const rand = this.rand;

@@ -13,15 +13,19 @@ function canvasTexture(canvas, resolution = 1) {
   return new Texture({ source: new CanvasSource({ resource: canvas, resolution }) });
 }
 
-// Paints the big terrain/foam canvases. Heavy (runs once per page load).
+// Paints the big terrain/foam canvases. Heavy (runs once per map). Maps without a coastline
+// (the factory) have no foam.
 export function buildTerrainTextures(island, maxTextureSize) {
   const scale = maxTextureSize >= WORLD ? 1 : 0.5;
-  return {
+  const tex = {
     terrain: canvasTexture(island.paintTerrain(scale), scale),
-    foamA: canvasTexture(island.paintFoam(0.5, 0), 0.5),
-    foamB: canvasTexture(island.paintFoam(0.5, 1), 0.5),
     minimap: canvasTexture(island.paintMinimap(180)),
   };
+  if (island.paintFoam) {
+    tex.foamA = canvasTexture(island.paintFoam(0.5, 0), 0.5);
+    tex.foamB = canvasTexture(island.paintFoam(0.5, 1), 0.5);
+  }
+  return tex;
 }
 
 const rnd = (r, a, b) => a + r() * (b - a);
