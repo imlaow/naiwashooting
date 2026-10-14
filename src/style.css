@@ -125,21 +125,8 @@ h2 { font-size: 40px; display: table; margin-inline: auto; animation: jelly 2.6s
   50% { transform: scale(1.04, 0.97) rotate(-2deg); }
   65% { transform: rotate(1.5deg); }
 }
-h1 { font-size: clamp(48px, 12vw, 84px); line-height: 0.95; animation: kicked 3.2s ease-out infinite; }
+h1 { font-size: clamp(48px, 12vw, 84px); line-height: 0.95; margin-bottom: 22px; animation: kicked 3.2s ease-out infinite; }
 h1 b { font-weight: inherit; display: inline-block; animation: jelly 2.6s ease-in-out infinite; }
-h1 span {
-  display: table;
-  margin: 10px auto 0;
-  padding: 2px 14px 4px;
-  font-size: 0.4em;
-  color: var(--ink);
-  text-shadow: none;
-  background: var(--iris);
-  border: 3px solid var(--olive-dark);
-  border-radius: 10px 30px 12px 26px;
-  transform: rotate(-4deg);
-  box-shadow: 3px 4px 0 var(--olive-dark);
-}
 /* Timed to the bunny's kick on the right of the title screen. */
 @keyframes kicked {
   0%, 60%, 100% { transform: none; }
@@ -327,7 +314,6 @@ kbd {
 
 /* Chinese headings and buttons read better with wider letter spacing. */
 html[data-lang="zh"] h1 { letter-spacing: 4px; }
-html[data-lang="zh"] h1 span { letter-spacing: 6px; }
 html[data-lang="zh"] .belly > button { letter-spacing: 3px; }
 html[data-lang="zh"] .stats span { letter-spacing: 3px; }
 
