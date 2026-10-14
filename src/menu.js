@@ -1,17 +1,8 @@
-// Menu antics: the hands on every panel, egg buttons whose pupils follow the pointer, and
-// poking Naiwa on the title screen. All of it is decoration; the menus work without it.
+// Menu antics: egg buttons whose pupils follow the pointer, and poking Naiwa on the title
+// screen. All of it is decoration; the menus work without it.
 const HERO_FRAMES = ['assets/hero_1.png', 'assets/hero_2.png', 'assets/hero_3.png', 'assets/hero_0.png'];
 
 export function initMenu() {
-  for (const panel of document.querySelectorAll('.panel')) {
-    for (const side of ['l', 'r']) {
-      const hand = document.createElement('i');
-      hand.className = `hand ${side}`;
-      hand.setAttribute('aria-hidden', 'true');
-      panel.append(hand);
-    }
-  }
-
   const eggs = [...document.querySelectorAll('button.egg')];
   addEventListener('pointermove', (e) => {
     if (e.pointerType === 'touch') return;

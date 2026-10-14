@@ -11,7 +11,6 @@
   --olive-dark: #4a4320;
   --iris: #a8c86e;
   --sea: #1a6f9c;
-  --hand: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cg fill='%236f6635' stroke='%234a4320' stroke-width='2'%3E%3Crect x='22' y='12' width='33' height='10' rx='5'/%3E%3Crect x='24' y='23' width='36' height='10' rx='5'/%3E%3Crect x='23' y='34' width='34' height='10' rx='5'/%3E%3Crect x='20' y='45' width='27' height='9' rx='4.5'/%3E%3Cellipse cx='18' cy='34' rx='16' ry='19'/%3E%3Crect x='7' y='3' width='10' height='22' rx='5' transform='rotate(-28 12 14)'/%3E%3C/g%3E%3Cellipse cx='14' cy='29' rx='6' ry='9' fill='%23877c45'/%3E%3C/svg%3E");
   --eggs: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='100' viewBox='0 0 90 100'%3E%3Cg id='e'%3E%3Cpath d='M22 6c10 0 17 14 17 25s-8 18-17 18S5 42 5 31 12 6 22 6z' fill='%23f2b705'/%3E%3Ccircle cx='16' cy='24' r='3.2' fill='%23a8c86e'/%3E%3Ccircle cx='28' cy='24' r='3.2' fill='%23a8c86e'/%3E%3Ccircle cx='16' cy='24' r='1.6' fill='%23222'/%3E%3Ccircle cx='28' cy='24' r='1.6' fill='%23222'/%3E%3Cpath d='M19 31h6' stroke='%23a0660a' stroke-width='1.6' stroke-linecap='round'/%3E%3C/g%3E%3Cuse href='%23e' x='45' y='50'/%3E%3C/svg%3E");
 }
 /* Lets the egg buttons' pupils roll around in a CSS animation on touch screens. */
@@ -67,7 +66,7 @@ body.playing #stage canvas { cursor: none; }
 @keyframes drift { to { transform: translate(90px, 100px); } }
 #overlay.hidden, .panel.hidden { display: none; }
 
-/* ---------- Panels: Naiwa's belly, a furry yellow rim, and his hands hanging on to the sides ---------- */
+/* ---------- Panels: Naiwa's belly with a furry yellow rim ---------- */
 .panel {
   --blob: 70px 96px 80px 110px / 60px 70px 92px 76px;
   width: min(560px, 100%);
@@ -112,23 +111,6 @@ body.playing #stage canvas { cursor: none; }
   scrollbar-width: thin;
   scrollbar-color: var(--fur-dark) transparent;
 }
-/* Olive hands, added by menu.js, gripping the rim and drumming their fingers. */
-.panel .hand {
-  position: absolute;
-  top: 44%;
-  left: -34px;
-  width: 64px;
-  height: 64px;
-  background: var(--hand) center / contain no-repeat;
-  filter: drop-shadow(0 4px 3px rgba(60, 30, 0, 0.4));
-  pointer-events: none;
-  transform-origin: 20% 50%;
-  animation: drum 1.6s ease-in-out infinite;
-}
-.panel .hand.r { left: auto; right: -34px; top: 52%; transform: scaleX(-1); transform-origin: 80% 50%; animation-name: drum-r; animation-delay: -0.7s; }
-@keyframes drum { 0%, 60%, 100% { rotate: 0deg; } 70% { rotate: -9deg; } 80% { rotate: 4deg; } 90% { rotate: -6deg; } }
-@keyframes drum-r { 0%, 60%, 100% { rotate: 0deg; } 70% { rotate: 9deg; } 80% { rotate: -4deg; } 90% { rotate: 6deg; } }
-
 h1, h2 {
   font-family: 'Lilita One', 'ZCOOL KuaiLe', 'Arial Black', sans-serif;
   font-weight: 400;
@@ -500,8 +482,6 @@ body.compact .lazy img { height: 90px; }
 body.compact .splat { height: 40px; }
 body.compact .splat .pancake { height: 120px; }
 body.compact .splat .mourner { height: 34px; left: calc(50% + 100px); }
-body.compact .panel .hand { width: 48px; height: 48px; left: -24px; }
-body.compact .panel .hand.r { left: auto; right: -24px; }
 body.compact .kicker { height: 74%; }
 body.compact .peeker { height: 24%; }
 body.rotated #touch-hud { top: calc(env(safe-area-inset-right) + 10px); right: calc(env(safe-area-inset-bottom) + 10px); }
@@ -559,18 +539,6 @@ html[data-lang="zh"] .theme-head h3 { letter-spacing: 3px; }
   background: #fff0b8;
   box-shadow: 0 0 0 3px var(--iris), 0 5px 0 var(--olive-dark), 0 12px 22px rgba(120, 70, 0, 0.3);
   animation: chosen 1.4s ease-in-out infinite;
-}
-/* The picked card gets grabbed by one of Naiwa's hands. */
-.map-card.on::after {
-  content: '';
-  position: absolute;
-  top: -22px;
-  right: -12px;
-  width: 44px;
-  height: 44px;
-  background: var(--hand) center / contain no-repeat;
-  transform: rotate(120deg);
-  filter: drop-shadow(0 3px 2px rgba(60, 30, 0, 0.35));
 }
 @keyframes chosen { 50% { transform: translateY(-3px) scale(1.02, 0.98); } }
 .map-thumb {
