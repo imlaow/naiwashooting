@@ -1,7 +1,7 @@
 # Online play: self-hosted servers (design)
 
-Status: **stage 1 of 7 done** (layout extraction, 2026-10-17). This is the agreed design; build it in
-the stages at the end.
+Status: **stages 1–2 of 7 done** (layout extraction and the sim/view split, 2026-10-17). This is the
+agreed design; build it in the stages at the end.
 
 ## Decisions
 
@@ -103,8 +103,8 @@ the renderer, so it's still the biggest job.
 
 ## Code split (the big refactor)
 
-What already runs without Pixi: `island.js` and `factory.js` (only their `paint*` methods use
-`document`), `noise.js`, `physics.js`, and since stage 1 everything in `src/sim/`. Map layout is
+What runs without Pixi: `island.js` and `factory.js` (only their `paint*` methods use `document`),
+`noise.js`, and everything in `src/sim/`, which since stage 2 is the whole game. Map layout is
 seeded, so the server and every client rebuild the same colliders from the map choice:
 `buildMap(makeChoice(theme, id, seed))` from `src/sim/maps.js`. Nothing about the map goes over the
 wire except `{ theme, id, seed }`.
@@ -112,7 +112,7 @@ wire except `{ theme, id, seed }`.
 What has to change:
 
 1. **Layout out of the scene builders. Done.** See "Stage 1 as built" below.
-2. **Sim state classes without sprites.** `Player` / `Enemy` keep position, HP, timers and AI;
+2. **Sim state classes without sprites. Done.** `Player` / `Enemy` keep position, HP, timers and AI;
    `PlayerView` / `EnemyView` own the Pixi containers and `sync()`. Couplings to remove:
    - `Player.update` reads `laugh.time()` (the audio playback position). The sim uses a fixed
      duration (`LAUGH_SECONDS`, from the sheet's frame count / fps, stored as a constant) and the
@@ -120,16 +120,16 @@ What has to change:
    - Muzzle offsets use gun texture widths (`Player.shoot`, `Enemy.fire`): replace with a constant
      table per gun.
    - `focusBox`, `crown`, the HP bar, `ghost()` and `stepFx` are view-only.
-3. **Events instead of direct fx/sfx/HUD calls.** Game logic currently calls `game.fx.*`, `sfx.play`,
+3. **Events instead of direct fx/sfx/HUD calls. Done.** Game logic used to call `game.fx.*`, `sfx.play`,
    `game.hud.*`, `game.shake` inline. The sim pushes events instead (`shot`, `hit`, `kill`, `explode`,
    `pickup`, `hurt`, `laugh`, `wave`, `waveCleared`, `downed`, `revived`, …) and the view turns them
    into particles, sounds, banners and shake. Online, the room broadcasts the same events.
-4. **Input as commands.** `Player.update(dt, input, mouseWorld)` becomes `update(dt, cmd)` with
+4. **Input as commands. Done.** `Player.update(dt, input, mouseWorld)` becomes `update(dt, cmd)` with
    `cmd = { mx, my, aim, fire, dash, dashDir, reload, weapon, cycle, last }`. The browser builds `cmd`
    from `Input`. Online it goes through `defineInput()`, which also numbers commands for
    reconciliation. Touch auto-aim (`nearestEnemy`) stays in the browser, so the server only sees an
    aim angle.
-5. **Fixed time step.** The sim steps at 1/60 s (the current code clamps `dt` to 1/30 anyway). The
+5. **Fixed time step. Done.** The sim steps at 1/60 s (the old code clamped `dt` to 1/30 anyway). The
    browser accumulates frame time and runs whole steps. On the server, `setFixedTimestep` drives
    the steps.
 
@@ -173,12 +173,78 @@ reproduce it. Only the map layout must stay seeded.
 - Cost on the server: building an island world takes 110–200 ms, the island layout another 8–19 ms,
   the factory under 3 ms in total.
 
+### Stage 2 as built
+
+- **Files.** `src/sim/sim.js` (`Sim`: colliders, props, player, enemies, bullets, pickups, waves,
+  scoring, events), `src/sim/entities.js` (`Player`, `Enemy`, weapon and enemy tables, `moveBody`),
+  `src/sim/physics.js` (moved from `src/`). The browser side is in `src/view/`: `game.js` (the
+  session: fixed-step loop, input → command, events → effects, sprites for props / pickups / bullets,
+  camera, pause, title demo), `entities.js` (`PlayerView`, `EnemyView`), and the moved `world.js`,
+  `factoryScene.js`, `fx.js`, `hud.js`. `island.js` and `factory.js` stay in `src/`.
+- **API.** `new Sim(world, layout)` with both from `buildMap` (the browser computes the layout once
+  per map in `prepare()` and hands the same object to the sim and the scene). `sim.step(STEP, cmd)`,
+  then `sim.takeEvents()`. `STEP = 1/60`. The events and their fields are listed at the top of
+  `sim.js`. Every player, enemy, prop, pickup and bullet has an `id` from `sim.newId()`, and the view
+  keeps its sprites in maps by id (`Game.reconcile`), which is how it will follow schema maps later.
+- **Scenes only draw.** The sim adds the layout's colliders, props and weapon pickups; `Environment`
+  and `FactoryEnvironment` take `(game, terrainTex, layout)` and draw `layout.objects`. Prop sprites
+  (and the crate flip) are made by `Game`.
+- **Different from the plan:**
+  - **Drawing between steps.** Not in the plan, but needed so 90/120/144 Hz screens don't judder: the
+    browser runs whole steps until the sim has caught up with the frame (so the sim is up to one step
+    ahead), then draws the player, enemies and bullets between their positions before and after the
+    last step. At 60 Hz that is always the latest step, as before. Frame time is still capped at
+    1/30 s (below 30 fps the game slows down rather than jumping), and the death slow-motion scales
+    frame time, not the step.
+  - **Key presses wait for a step.** Number keys, wheel, Q, R, dash and HUD taps (weapon slot,
+    reload) are collected each frame and go into the next step's command, so a frame without a step
+    doesn't lose them. HUD taps used to call the player directly.
+  - **Some drawn state stays in the sim** because the logic reads it: `Enemy.animT` (the egg's
+    waddle steers by its walk phase) and `moving` on the player and enemies (the player's is taken
+    before the gun's kick, so firing on the spot doesn't start the walk cycle). Bullets carry their
+    look (`tint`, `orb`, `scale`), which is the `kind` of the planned bullet message.
+  - **The laugh no longer waits for its frames.** Before, there was no laugh at all until the laugh
+    sprite sheets had loaded in the background. Now the sim always laughs (12 s) and the view shows
+    the walk frames until the sheets arrive.
+  - **Muzzle offsets:** `GUN_SIZES` and `GUN_GRIP` in `sim/entities.js`, and `art.js` paints the guns
+    from them (like `ROCK_SIZES`). They give exactly the old offsets (38 / 52 / 66 / 78 px, the
+    boss's SMG 72). Enemy gun heights are `ENEMY_TYPES[t].gunH`, the boss's gun scale `gunScale`.
+  - **Game over** (the 0.6 s before the results, the slow-motion) is the view's, on the `died`
+    event, in real time. The sim only sets `state = 'dead'`.
+  - Touch auto-aim calls `sim.nearestEnemy()` from the browser; the sim only ever sees an angle.
+- **Checks.**
+  - **Same behaviour, exactly.** Before the change, the old game ran in headless Chromium with the
+    Pixi ticker stopped, `game.update(1/60)` stepped by hand and a scripted bot (moves away from
+    close enemies, walks to pickups, aims at the nearest enemy, fires, dashes, presses R, 1–4, the
+    wheel and Q on a timer), tracing player position / HP, score, kills, wave, state, enemy count,
+    queue, props, pickups, bullets, weapon and ammo, laugh, and the first enemy's position and HP once
+    per second. `Math.random` was split into two seeded streams: one for the game logic, one for
+    view-only randomness (particles, shake, text drift, crate flips, pickup bob phase), so effects
+    that are drawn in a different order can't shift the logic's sequence. The 5-minute traces on
+    `island/cove`, `factory/dairy` and `island/twins` (waves 2–6, all four weapons, laughs, King
+    Naiwa on cove and dairy, crates and barrels) and a run where the bot doesn't shoot and dies
+    are **byte-identical** before and after. Screenshots taken at the same frames differ in 0.1–1.4 %
+    of pixels, all particles, floating-text drift and decal rotation.
+  - In the browser, both themes: pause and resume, touch auto-aim and the aim stick, HUD weapon and
+    reload taps, dash ghosts and i-frames, barrel chain reactions, crates breaking, the laugh (laugh
+    frames, untouchable, over at 12 s with a full heal), King Naiwa with his crown on wave 5, belt
+    drift and slow wading in the factory, game over with the results panel and records, the title
+    demo; one second of frames at 144, 90 and 30 Hz runs one second of sim.
+  - `node tools/sim-headless.mjs` runs 10 minutes of game time on all seven maps in plain Node in
+    about 11 s: waves 8–10, 176–197 kills per map, King Naiwa beaten on every map, at most one death
+    per map, no errors (seeds 1–3). `--trace` prints the state every game second; record one before
+    stage 3 and compare after it to show single-player is unchanged.
+  - Layout check, `--scene` and `--scene --draw` dumps unchanged.
+- **Cost:** one step is 30–60 µs on one Neoverse-N1 core with up to 20 enemies (the bot runs).
+
 ## Several players in the sim
 
-`game.player` becomes `players` (a map by id) plus `localId` on the client. Places that assume one
-player today: enemy targeting and `fire()` leading (`entities.js`), `spawnPoint`, `explode`,
-`updateBullets`, `updatePickups`, `updateWaves` (heal and supply crate), `onEnemyKilled` (heal
-chance, laugh), `applyDrift`, camera and `volumeAt` (view: follow the local player).
+`sim.player` becomes `players` (a map by id) plus `localId` on the client. Places that assume one
+player today (since stage 2 all in `src/sim/` unless marked): enemy targeting and `fire()` leading
+(`entities.js`), `spawnPoint`, `explode`, `updateBullets`, `updatePickups`, `updateWaves` (heal and
+supply crate), `onEnemyKilled` (heal chance, laugh), `dropWeapon` (picks a gun the player lacks),
+`applyDrift`, `onPlayerDeath` (ends the run), and in the view `Game.hero`, the camera, `volumeAt`,
+the HUD and the `command()` it builds (follow the local player).
 
 - **Targeting:** nearest living, not downed, not laughing player that the enemy can see, re-picked
   with the existing `losT` timer. When every player is laughing or downed, enemies wander as they do
@@ -191,6 +257,18 @@ chance, laugh), `applyDrift`, camera and `volumeAt` (view: follow the local play
 - **Laugh:** each player laughs on their own 5th, 10th, … kill. Enemies ignore that player and go for
   the others.
 - **Friendly fire:** off in co-op.
+
+Found in stage 2:
+
+- `step(dt, cmd)` becomes `step(dt, cmds)` keyed by player id; a player without a command this step
+  keeps its last one (or stands still).
+- The player events already carry the player's `id` (`shot`, `hurt`, `dash`, `laugh`, `laughEnd`,
+  `switch`, `reload`, `reloaded`, `empty`, `died`); `pickup` needs one. The view must only apply
+  recoil, the hurt flash, screen shake, toasts and the laugh sound for `localId`, and draw the rest
+  for everyone.
+- Bullets need an `owner` (player id) for per-player kills, combo and laugh; `kill` should say who.
+- Record `node tools/sim-headless.mjs --trace` before starting and compare after: with one bot the
+  trace must not change.
 
 ### Downed and revive (co-op)
 
@@ -309,7 +387,7 @@ Each stage leaves single-player working and is pushed on its own.
 
 1. **Layout extraction. Done.** Pure layout for island and factory, scenes draw from it. Check: identical
    collider / prop / weapon-spot lists for all seven maps (a small Node script).
-2. **Sim / view split.** `src/sim/` with commands, events and a fixed step; the view in `src/view/`.
+2. **Sim / view split. Done.** `src/sim/` with commands, events and a fixed step; the view in `src/view/`.
    Check: single-player plays the same; a Node script runs the sim headless for 10 minutes of waves
    with a scripted bot and no errors.
 3. **Several players in the sim.** Targeting, spawns, scaling, downed/revive, per-player laugh.

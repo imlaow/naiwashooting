@@ -12,7 +12,10 @@ See `README.md` for running the game, controls and the code map.
 
 ## Online play
 
-Planned, not built: self-hosted servers in the style of Minecraft (co-op and PvP, owners put
-a `wss://` tunnel or proxy in front), built on Colyseus 0.18 rather than our own netcode. The agreed
-design and build stages are in `docs/online.md`. Keep
-it up to date as stages land.
+In progress (stages 1–2 of 7 done): self-hosted servers in the style of Minecraft (co-op and PvP,
+owners put a `wss://` tunnel or proxy in front), built on Colyseus 0.18 rather than our own netcode.
+The agreed design and build stages are in `docs/online.md`. Keep it up to date as stages land.
+
+All game logic is in `src/sim/` (no Pixi, DOM, audio or HUD imports); `src/view/` draws it. After
+touching `src/sim/`, run `node tools/sim-headless.mjs` (must end with "no errors") and
+`node tools/dump-layouts.mjs --check`.
