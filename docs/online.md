@@ -39,6 +39,17 @@ Status: **planned, nothing built yet.** This is the agreed design; build it in t
 - **Browser:** `@colyseus/sdk` with `Predict` adds about 69 KB gzipped (the game's JS is about 233 KB).
   Load it on demand when ONLINE opens.
 
+**Server size.** Measured on one Neoverse-N1 (ARM) core, Node 24: building the island takes 140 ms
+and 15 MB, the factory 3 ms. A synthetic heavy tick (20 enemies steering, 120 bullets, line-of-sight
+checks, 8 players moving) takes 0.22 ms, so 1.3 % of a core at 60 Hz. Allowing ×5 for the real sim plus
+schema encoding, that's under 10 % of one core and about 100–150 MB of memory with Colyseus. Upload
+bandwidth is the real limit. The estimate is 15–25 KB/s per player (20 Hz delta patches + bullet and
+event messages), so about 0.8 Mbps for 4 players and 1.5 Mbps for 8. Measure it in stage 7.
+Recommended minimum: 1 vCPU and 512 MB–1 GB RAM (cheapest VPS, Oracle free tier, Raspberry Pi 4/5, or
+any home PC). Pick the location by ping to the players. For players in mainland China, Cloudflare
+tunnels route through edges outside the mainland, so a nearby VPS (e.g. Hong Kong) with Caddy may
+play better.
+
 The API names come from the 0.18 announcement (released 2026-08-20). Check them against the docs when
 building and pin the exact version: Colyseus is pre-1.0 and every minor release has had breaking
 changes.
