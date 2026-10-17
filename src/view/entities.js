@@ -13,7 +13,10 @@ const HERO_ANCHOR = { x: 0.5, y: 0.96 };
 export const EGG_FOOT = 0.99;
 
 // Between the position before the last step (px, py) and the current one; alpha 1 is the current.
-export const lerpPos = (v, x, y, alpha) => (alpha >= 1 || v.px === undefined ? [x, y] : [v.px + (x - v.px) * alpha, v.py + (y - v.py) * alpha]);
+// A jump further than any step's travel (a respawn, a stranded enemy put back) isn't smoothed.
+const TELEPORT = 120;
+export const lerpPos = (v, x, y, alpha) => (alpha >= 1 || v.px === undefined || Math.abs(x - v.px) + Math.abs(y - v.py) > TELEPORT
+  ? [x, y] : [v.px + (x - v.px) * alpha, v.py + (y - v.py) * alpha]);
 
 function stepFx(v, e, dt, moving, splashSound) {
   const game = v.game;

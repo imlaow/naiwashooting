@@ -8,7 +8,7 @@ import { WORLD } from '../island.js';
 import { mulberry32 } from '../noise.js';
 import { Sim, STEP } from '../sim/sim.js';
 import { Bot } from '../sim/bot.js';
-import { WEAPONS, WEAPON_ORDER, ENEMY_TYPES, GUN_H } from '../sim/entities.js';
+import { WEAPONS, WEAPON_ORDER, ENEMY_TYPES, GUN_H, idleCommand } from '../sim/entities.js';
 import { Fx } from './fx.js';
 import { Environment, makeSprite } from './world.js';
 import { PlayerView, EnemyView, EGG_FOOT, lerpPos } from './entities.js';
@@ -141,7 +141,7 @@ export class Game {
       fire = input.mouse.down;
     }
     const recent = input.recentMove;
-    const cmd = { mx: input.move.x, my: input.move.y, aim, fire, dashDir: recent && { x: recent.x, y: recent.y }, ...this.presses };
+    const cmd = { ...idleCommand(aim), mx: input.move.x, my: input.move.y, fire, dashDir: recent && { x: recent.x, y: recent.y }, ...this.presses };
     this.presses = noPresses();
     return cmd;
   }
@@ -174,7 +174,7 @@ export class Game {
         if (v) { v.flash = 0.08; v.hpBarT = 2.5; }
         const crit = e.dmg >= 50;
         fx.text(e.x + (Math.random() - 0.5) * 20, e.y - e.h - 10, String(Math.round(e.dmg)), crit ? 0xffd23f : 0xffffff, crit ? 1.2 : 0.8);
-        sfx.play('hit');
+        sfx.play('hit', e.by === this.localId ? 1 : this.volumeAt(e.x, e.y));
         break;
       }
       case 'kill': this.onKill(e); break;
@@ -182,7 +182,7 @@ export class Game {
         if (this.island.isWading(e.x, e.y)) fx.splash(e.x, e.y, 10);
         else fx.dust(e.x, e.y, 8, 0xdddddd);
         break;
-      case 'bite': sfx.play('egg'); break;
+      case 'bite': sfx.play('egg', e.target === this.localId ? 1 : this.volumeAt(e.x, e.y)); break;
       case 'hurt':
         if (mine) { this.hero.flash = 0.15; this.shake(9); }
         fx.burst(e.x, e.y - 40, 0xffd23f, 6);
@@ -489,7 +489,9 @@ export class Game {
     this.world.position.set(Math.round(sw / 2 - this.cam.x * this.zoom + shx), Math.round(sh / 2 - this.cam.y * this.zoom + shy));
     const hw = sw / 2 / this.zoom, hh = sh / 2 / this.zoom;
     const view = { x0: this.cam.x - hw, x1: this.cam.x + hw, y0: this.cam.y - hh, y1: this.cam.y + hh };
-    this.env.update(dt, view, [...this.playerViews.values(), ...this.enemyViews.values()]);
+    // Dead players' hidden views stay where they died, so they don't fade anything.
+    const live = [...this.playerViews.values()].filter((v) => !v.p.dead);
+    this.env.update(dt, view, [...live, ...this.enemyViews.values()]);
 
     const S = this.me;
     const low = S.dead ? 1 : S.hp / S.maxHp;

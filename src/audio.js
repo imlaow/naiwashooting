@@ -121,14 +121,14 @@ class Sfx {
         this.tone({ dur: 0.6, f0: 120, f1: 25, vol: 0.6 * v, type: 'sine' });
         break;
       case 'hurt':
-        this.tone({ dur: 0.18, f0: 300, f1: 110, vol: 0.3, type: 'sawtooth' });
-        this.noiseBurst({ dur: 0.12, freq: 400, q: 1, vol: 0.3 });
+        this.tone({ dur: 0.18, f0: 300, f1: 110, vol: 0.3 * v, type: 'sawtooth' });
+        this.noiseBurst({ dur: 0.12, freq: 400, q: 1, vol: 0.3 * v });
         break;
       case 'pickup':
-        [523, 659, 784, 1046].forEach((f, i) => this.tone({ dur: 0.09, f0: f, vol: 0.13, type: 'triangle', delay: i * 0.05 }));
+        [523, 659, 784, 1046].forEach((f, i) => this.tone({ dur: 0.09, f0: f, vol: 0.13 * v, type: 'triangle', delay: i * 0.05 }));
         break;
       case 'heal':
-        [392, 523, 659].forEach((f, i) => this.tone({ dur: 0.15, f0: f, f1: f * 1.02, vol: 0.14, type: 'sine', delay: i * 0.07 }));
+        [392, 523, 659].forEach((f, i) => this.tone({ dur: 0.15, f0: f, f1: f * 1.02, vol: 0.14 * v, type: 'sine', delay: i * 0.07 }));
         break;
       case 'reload':
         this.noiseBurst({ dur: 0.04, freq: 2500, q: 5, vol: 0.25 });
@@ -139,7 +139,7 @@ class Sfx {
         this.tone({ dur: 0.03, f0: 1800, f1: 1500, vol: 0.1 });
         break;
       case 'dash':
-        this.noiseBurst({ dur: 0.22, freq: 600, q: 1.5, vol: 0.25, sweep: 4 });
+        this.noiseBurst({ dur: 0.22, freq: 600, q: 1.5, vol: 0.25 * v, sweep: 4 });
         break;
       case 'splash':
         if (!this.gate('splash', 120)) return;

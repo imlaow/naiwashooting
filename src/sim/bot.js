@@ -7,7 +7,7 @@
 // It moves, aims at the nearest enemy, shoots, dashes away from eggs, reloads, switches to its
 // best gun and walks over pickups. In co-op it goes to a downed teammate and stands by them until
 // they are back up, and when it is down itself it crawls towards the nearest teammate.
-import { WEAPONS } from './entities.js';
+import { WEAPONS, idleCommand } from './entities.js';
 
 export class Bot {
   constructor(sim, id, rand) {
@@ -68,7 +68,7 @@ export class Bot {
     if (P.down) {
       const mate = this.teammate(false, Infinity);
       const dx = mate ? mate.p.x - P.x : 0, dy = mate ? mate.p.y - P.y : 0, l = Math.hypot(dx, dy);
-      return { mx: l > 30 ? dx / l : 0, my: l > 30 ? dy / l : 0, aim, fire: false, dash: false, dashDir: null, reload: false, weapon: null, cycle: 0, last: false };
+      return { ...idleCommand(aim), mx: l > 30 ? dx / l : 0, my: l > 30 ? dy / l : 0 };
     }
     let pick = null, pd = 700;
     for (const p of sim.pickups) {
@@ -108,13 +108,12 @@ export class Bot {
     const slot = P.slot;
     const weapon = this.pickWeapon(target ? td : Infinity);
     return {
+      ...idleCommand(aim),
       mx: dx, my: dy,
-      aim,
       fire: !!target && seen && td < 650,
-      dash, dashDir: null,
+      dash,
       reload: slot.mag === 0 || (!seen && slot.mag < WEAPONS[P.weapon].mag / 2),
       weapon: weapon !== P.weapon ? weapon : null,
-      cycle: 0, last: false,
     };
   }
 }

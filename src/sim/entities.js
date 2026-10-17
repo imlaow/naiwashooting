@@ -26,8 +26,9 @@ export const DOWN_SPEED = 0.3;
 export const BLEED_SECONDS = 30;
 export const REVIVE_RANGE = 60;
 export const REVIVE_SECONDS = 3;
-// A player without a command this step stands still and holds fire.
-const idle = (aim) => ({ mx: 0, my: 0, aim, fire: false, dash: false, dashDir: null, reload: false, weapon: null, cycle: 0, last: false });
+// A player without a command this step stands still and holds fire. Also the full command
+// shape: other commands start from it (sim/bot.js, view/game.js).
+export const idleCommand = (aim) => ({ mx: 0, my: 0, aim, fire: false, dash: false, dashDir: null, reload: false, weapon: null, cycle: 0, last: false });
 
 // Shared movement: axis-separated so characters slide along shorelines,
 // then pushed out of obstacles.
@@ -113,8 +114,9 @@ export class Player {
 
   cycle(dir) {
     const owned = WEAPON_ORDER.filter((k) => this.arsenal[k]);
-    const i = owned.indexOf(this.weapon);
-    this.switchTo(owned[(i + dir + owned.length) % owned.length]);
+    const i = owned.indexOf(this.weapon), n = owned.length;
+    // Wrapped for any number of steps (wheel ticks add up between sim steps).
+    this.switchTo(owned[((i + Math.trunc(dir)) % n + n) % n]);
   }
 
   startReload() {
@@ -138,7 +140,7 @@ export class Player {
   //   dash     dash this step, towards (mx, my), else dashDir (the way it was just moving), else aim
   //   reload, weapon (switch to), cycle (±n through owned weapons), last (back to the previous one)
   // A downed player only crawls and aims.
-  update(dt, cmd = idle(this.aim)) {
+  update(dt, cmd = idleCommand(this.aim)) {
     if (this.dead) return;
     const sim = this.sim;
     if (this.down) { this.crawl(dt, cmd); return; }
@@ -317,8 +319,8 @@ export class Enemy {
     let wx = 0, wy = 0, speed = this.T.speed * this.speedMul;
     const T = this.T;
 
-    if (!P || P.laughT >= 0 || P.down) {
-      // Enemies lose track of a laughing (or downed) Naiwa and mill around until they can
+    if (!P || P.laughT >= 0 || !P.up) {
+      // Enemies lose track of a laughing (or downed, or dead) Naiwa and mill around until they can
       // pick someone else.
       this.wanderT -= dt;
       if (!(this.wanderT > 0)) { this.wanderT = 1.2 + Math.random() * 1.8; this.wanderA = Math.random() * Math.PI * 2; }
