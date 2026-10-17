@@ -1,7 +1,7 @@
 // Builds the island scene: water, terrain, props, vegetation and ambient life.
 import { Container, Sprite, TilingSprite, Graphics, Texture, CanvasSource } from 'pixi.js';
 import { WORLD, H_DEEP } from '../island.js';
-import { islandLayout, ROCK_SIZES } from '../sim/layoutIsland.js';
+import { ROCK_SIZES } from '../sim/layoutIsland.js';
 
 export function makeSprite(tex) {
   const s = new Sprite(tex);
@@ -28,16 +28,15 @@ export function buildTerrainTextures(island, maxTextureSize) {
   return tex;
 }
 
-// Draws an island from its layout (sim/layoutIsland.js), which also supplies the colliders, props
-// and weapon spots.
+// Draws an island from its layout (sim/layoutIsland.js). The sim adds the layout's colliders,
+// props and weapon spots; the props and pickups are drawn by Game.
 export class Environment {
-  constructor(game, terrainTex) {
+  constructor(game, terrainTex, layout) {
     this.game = game;
     const { island, art, layers } = game;
     this.island = island;
     this.art = art;
-    this.layout = islandLayout(island);
-    this.weaponSpots = this.layout.weaponSpots;
+    this.layout = layout;
     this.t = 0;
     this.cullables = [];
     this.tall = [];
@@ -54,9 +53,7 @@ export class Environment {
     this.boat.position.set(island.boat.x, island.boat.y);
     layers.ground.addChild(this.boat);
 
-    for (const c of this.layout.colliders) game.statics.add({ ...c });
     this.placeObjects();
-    for (const p of this.layout.props) game.addProp(p.kind, p.x, p.y);
     this.buildAmbient();
   }
 

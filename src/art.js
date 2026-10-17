@@ -2,6 +2,7 @@
 import { Texture, CanvasSource } from 'pixi.js';
 import { mulberry32 } from './noise.js';
 import { ROCK_SIZES } from './sim/layoutIsland.js';
+import { GUN_SIZES, GUN_GRIP } from './sim/entities.js';
 
 const RES = 2;
 
@@ -483,12 +484,10 @@ function butterfly(phase, color) {
 }
 
 // ---------- Weapons & FX ----------
+// Sized by GUN_SIZES, held at GUN_GRIP: the sim places the muzzle from the same numbers.
 function gun(kind) {
-  const specs = {
-    pistol: [36, 18], smg: [50, 22], shotgun: [64, 18], rifle: [76, 18],
-  };
-  const [w, h] = specs[kind];
-  return paint(w, h, [10 / w, 0.45], (ctx) => {
+  const [w, h] = GUN_SIZES[kind];
+  return paint(w, h, [GUN_GRIP / w, 0.45], (ctx) => {
     const metal = linear(ctx, 0, 0, 0, h, [[0, '#6b7280'], [0.5, '#374151'], [1, '#111827']]);
     ctx.fillStyle = metal;
     if (kind === 'pistol') {

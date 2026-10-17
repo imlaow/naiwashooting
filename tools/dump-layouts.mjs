@@ -2,15 +2,16 @@
 // plain text, one entry per line, so two dumps can be compared with diff.
 //
 //   node tools/dump-layouts.mjs            layouts from src/sim (no Pixi, no DOM)
-//   node tools/dump-layouts.mjs --scene    the same lists, recorded while the scene classes
-//                                          build each map with Pixi stubbed out
+//   node tools/dump-layouts.mjs --scene    the same lists, recorded while the Sim builds each
+//                                          map (Pixi stubbed out for the scenes)
 //   node tools/dump-layouts.mjs --scene --draw
 //                                          also lists what the scenes drew (sprites, lights,
 //                                          decoration), to check single-player looks the same
 //   node tools/dump-layouts.mjs --check     compares the layouts with tools/layout-baseline.txt
 //
-// tools/layout-baseline.txt was recorded with --scene before the layout moved to src/sim, so
-// --check proves the layout functions build exactly the maps the game always had.
+// tools/layout-baseline.txt was recorded with --scene before the layout moved to src/sim (when the
+// scenes still registered colliders and props), so --check proves the layout functions build
+// exactly the maps the game always had.
 import { register } from 'node:module';
 import { readFileSync } from 'node:fs';
 
@@ -81,21 +82,27 @@ function islandArt() {
   return new Proxy(known, { get: (t, k) => (k in t ? t[k] : (t[k] = tok(String(k)))) });
 }
 
-// Builds a map's scene against a fake Game and records what it registered.
+// Builds a map's Sim, recording the colliders it registers, and draws its scene against a fake
+// Game.
 async function viaScene(choice) {
   const { findTheme, worldFor } = await import('../src/maps.js');
   const { StaticWorld } = await import('../src/sim/physics.js');
+  const { Sim } = await import('../src/sim/sim.js');
   const { Container } = await import('pixi.js');
   const island = worldFor(choice);
-  const statics = new StaticWorld();
+  const theme = findTheme(choice.theme);
+  const layout = theme.layout(island);
   const colliders = [];
-  const add = statics.add.bind(statics);
-  statics.add = (c) => { colliders.push(c); return add(c); };
-  const props = [];
+  const add = StaticWorld.prototype.add;
+  StaticWorld.prototype.add = function (c) { if (!c.owner) colliders.push(c); return add.call(this, c); };
+  const sim = new Sim(island, layout);
+  StaticWorld.prototype.add = add;
+  const props = sim.props.map(({ kind, x, y }) => ({ kind, x, y }));
+  const weaponSpots = sim.pickups.filter((p) => p.kind === 'weapon').map((p) => ({ kind: p.weapon, x: p.x, y: p.y }));
   const layers = new Proxy({}, { get: (t, k) => t[k] ?? (t[k] = new Container()) });
-  const game = { island, art: islandArt(), layers, statics, fx: {}, addProp: (kind, x, y) => props.push({ kind, x, y }) };
-  const env = new (findTheme(choice.theme).scene)(game, { terrain: { name: 'terrain' } });
-  return { colliders, props, weaponSpots: env.weaponSpots, occupied: env.occupied ?? env.layout?.occupied, env, layers };
+  const game = { island, art: islandArt(), layers, fx: {} };
+  const env = new theme.scene(game, { terrain: { name: 'terrain' } }, layout);
+  return { colliders, props, weaponSpots, occupied: layout.occupied, env, layers };
 }
 
 async function viaLayout(choice) {

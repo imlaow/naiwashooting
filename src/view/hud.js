@@ -1,7 +1,7 @@
 // Screen-space HUD: health, ammo, wave info, minimap, banners and crosshair.
 import { Container, Graphics, Sprite, Text } from 'pixi.js';
 import { WORLD } from '../island.js';
-import { WEAPONS, WEAPON_ORDER } from '../entities.js';
+import { WEAPONS, WEAPON_ORDER } from '../sim/entities.js';
 import { t } from '../i18n.js';
 
 export const FONT = '"Lilita One", "ZCOOL KuaiLe", "Arial Black", sans-serif';
@@ -137,14 +137,14 @@ export class Hud {
   // A touch on the weapon panel switches weapon (slot row) or reloads (ammo area).
   tap(x, y) {
     if (!this.ui.visible || !this.w) return false;
-    const P = this.game.player, p = this.wpPanel, s = p.scale.x;
+    const P = this.game.sim.player, p = this.wpPanel, s = p.scale.x;
     const lx = (x - p.x) / s, ly = (y - p.y) / s;
     if (lx < 0 || lx > 270 || ly < 0 || ly > 118 || P.dead) return false;
     if (ly >= 64) {
       const k = WEAPON_ORDER[Math.max(0, Math.min(WEAPON_ORDER.length - 1, Math.floor((lx - 11) / 62)))];
-      P.switchTo(k);
+      this.game.presses.weapon = k;
     } else {
-      P.startReload();
+      this.game.presses.reload = true;
     }
     return true;
   }
@@ -235,7 +235,7 @@ export class Hud {
   }
 
   update(dt, mouseWorld) {
-    const g = this.game, P = g.player, input = g.input;
+    const g = this.game, S = g.sim, P = S.player, input = g.input;
     if (input.touch !== this.touchLayout) this.resize(this.w, this.h);
     // Health
     const hpFrac = Math.max(0, P.hp / P.maxHp);
@@ -274,16 +274,16 @@ export class Hud {
     });
 
     // Wave & score
-    const st = g.state;
-    this.setText(this.waveText, 'wave', g.wave ? t('hud.wave', { n: g.wave }) : t('hud.getReady'));
-    const remaining = g.queue.length + g.enemies.filter((e) => !e.dead).length;
-    this.setText(this.enemyText, 'enemies', st === 'break' ? t('hud.nextWave', { n: Math.ceil(g.stateT) }) : st === 'intro' ? t('hud.starting', { n: Math.ceil(g.stateT) }) : t('hud.left', { n: remaining }));
-    this.setText(this.scoreText, 'score', g.score.toLocaleString());
-    const mult = 1 + Math.min(3, Math.floor(g.combo / 3) * 0.5);
-    this.setText(this.comboText, 'combo', g.comboT > 0 && g.combo > 1 ? t('hud.combo', { n: g.combo, m: mult }) : '');
+    const st = S.state;
+    this.setText(this.waveText, 'wave', S.wave ? t('hud.wave', { n: S.wave }) : t('hud.getReady'));
+    const remaining = S.queue.length + S.enemies.filter((e) => !e.dead).length;
+    this.setText(this.enemyText, 'enemies', st === 'break' ? t('hud.nextWave', { n: Math.ceil(S.stateT) }) : st === 'intro' ? t('hud.starting', { n: Math.ceil(S.stateT) }) : t('hud.left', { n: remaining }));
+    this.setText(this.scoreText, 'score', S.score.toLocaleString());
+    const mult = 1 + Math.min(3, Math.floor(S.combo / 3) * 0.5);
+    this.setText(this.comboText, 'combo', S.comboT > 0 && S.combo > 1 ? t('hud.combo', { n: S.combo, m: mult }) : '');
 
     // Boss bar
-    const boss = g.boss && !g.boss.dead ? g.boss : null;
+    const boss = S.boss && !S.boss.dead ? S.boss : null;
     this.bossBar.clear();
     this.bossName.visible = !!boss;
     if (boss) {
@@ -297,8 +297,8 @@ export class Hud {
     // Minimap
     const k = this.miniSize / WORLD;
     const d = this.miniDots.clear();
-    for (const p of g.pickups) d.circle(p.x * k, p.y * k, 2.5).fill(p.kind === 'weapon' ? 0x7dd3fc : p.kind === 'health' ? 0xff5a7a : 0xffd23f);
-    for (const e of g.enemies) {
+    for (const p of S.pickups) d.circle(p.x * k, p.y * k, 2.5).fill(p.kind === 'weapon' ? 0x7dd3fc : p.kind === 'health' ? 0xff5a7a : 0xffd23f);
+    for (const e of S.enemies) {
       if (e.dead) continue;
       d.circle(e.x * k, e.y * k, e.type === 'boss' ? 5 : 2.6).fill(e.type === 'egg' ? 0xff5a3d : e.T.color).stroke({ width: 1, color: 0x000000, alpha: 0.6 });
     }
@@ -325,7 +325,7 @@ export class Hud {
     const r = this.reloadArc.clear();
     if (!input.touch && !P.dead) {
       const mx = input.mouse.x, my = input.mouse.y;
-      const spread = 9 + W.spread * 60 + P.recoil * 2;
+      const spread = 9 + W.spread * 60 + g.hero.recoil * 2;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         c.moveTo(mx + dx * spread, my + dy * spread).lineTo(mx + dx * (spread + 9), my + dy * (spread + 9));
       }

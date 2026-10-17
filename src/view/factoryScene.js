@@ -8,33 +8,29 @@ import { WALL0, WALL1, WALL_T, GATE, CANAL } from '../factory.js';
 import { factoryArt, building } from '../factoryArt.js';
 import { makeSprite } from './world.js';
 import { mulberry32 } from '../noise.js';
-import { factoryLayout } from '../sim/layoutFactory.js';
 
 const WALL_H = 64; // how tall the perimeter wall stands
 const rnd = (r, a, b) => a + r() * (b - a);
 
 export class FactoryEnvironment {
-  constructor(game, terrainTex) {
+  constructor(game, terrainTex, layout) {
     this.game = game;
     const { island: fac, art, layers } = game;
     this.fac = fac;
     this.art = art;
     this.fa = factoryArt();
-    this.layout = factoryLayout(fac);
+    this.layout = layout;
     this.rand = mulberry32(fac.seed + 1234);
     this.t = 0;
     this.cullables = [];
     this.fading = [];
     this.lights = [];
     this.lamps = [];
-    this.weaponSpots = this.layout.weaponSpots;
 
-    for (const c of this.layout.colliders) game.statics.add({ ...c });
     this.buildGround(layers, terrainTex);
     this.buildWalls(layers.objects);
     this.buildBelts(layers);
     this.placeObjects();
-    for (const p of this.layout.props) game.addProp(p.kind, p.x, p.y);
     this.buildOutside();
     this.buildAmbient();
   }

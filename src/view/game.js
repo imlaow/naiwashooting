@@ -1,27 +1,35 @@
-// Game session: scene graph, camera, combat, waves and scoring.
+// Game session in the browser: runs the Sim (sim/sim.js) at its fixed step and draws it. Turns
+// keyboard, mouse and touch input into the sim's commands and its events into particles, sounds,
+// banners and screen shake. Also owns the camera, pause and the title-screen demo.
 import { Container, Sprite } from 'pixi.js';
 import { WORLD } from '../island.js';
-import { StaticWorld } from '../sim/physics.js';
+import { Sim, STEP } from '../sim/sim.js';
+import { WEAPONS, WEAPON_ORDER, ENEMY_TYPES, GUN_H } from '../sim/entities.js';
 import { Fx } from './fx.js';
 import { Environment, makeSprite } from './world.js';
-import { Player, Enemy, ENEMY_TYPES, WEAPON_ORDER, EGG_FOOT, moveBody } from '../entities.js';
+import { PlayerView, EnemyView, EGG_FOOT, lerpPos } from './entities.js';
 import { Hud } from './hud.js';
 import { sfx } from '../audio.js';
 import { laugh } from '../laugh.js';
 import { t } from '../i18n.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
+const PICKUP_TINT = { health: 0xff5a7a, ammo: 0xffd23f, weapon: 0x7dd3fc };
+// One-shot inputs (key presses, wheel, taps) wait here until a step takes them.
+const noPresses = () => ({ dash: false, reload: false, weapon: null, cycle: 0, last: false });
 
 export class Game {
-  // `island` is the map's terrain (an Island or a Factory, see maps.js) and Scene the class
-  // that builds its scenery (Environment by default).
-  constructor({ app, art, skins, island, terrainTex, input, onGameOver, onPause, onMute, demo = false, Scene = Environment }) {
+  // `island` is the map's terrain (an Island or a Factory, see maps.js), `layout` its colliders,
+  // props and weapon spots, and Scene the class that draws its scenery (Environment by default).
+  constructor({ app, art, skins, island, layout, terrainTex, input, onGameOver, onPause, onMute, demo = false, Scene = Environment }) {
     this.demo = demo;
     this.app = app; this.art = art; this.skins = skins; this.island = island; this.input = input;
     this.onGameOver = onGameOver; this.onPause = onPause; this.onMute = onMute;
     this.time = 0;
     this.timeScale = 1;
     this.paused = false;
+    this.acc = 0;
+    this.presses = noPresses();
 
     this.root = new Container();
     app.stage.addChildAt(this.root, 0);
@@ -43,28 +51,24 @@ export class Game {
     this.hurtVignette.alpha = 0;
     this.root.addChild(this.hurtVignette);
 
-    this.statics = new StaticWorld();
+    this.sim = new Sim(island, layout);
     this.fx = new Fx(art, this.layers);
-    this.props = [];
-    this.enemies = [];
-    this.bullets = [];
+    // Sprites for the sim's things, by id.
+    this.propViews = new Map();
+    this.pickupViews = new Map();
+    this.enemyViews = new Map();
+    this.bulletViews = new Map();
     this.bulletPool = [];
-    this.pickups = [];
-    this.timers = [];
+    this.stamp = 0;
 
-    this.env = new Scene(this, terrainTex);
+    this.env = new Scene(this, terrainTex, layout);
+    this.syncProps(0);
+    this.hero = new PlayerView(this, this.sim.player);
+    this.syncPickups(0);
+
     const sp = island.spawn;
-    this.player = new Player(this, sp.x, sp.y);
-    for (const w of this.env.weaponSpots) this.spawnPickup('weapon', w.x, w.y, w.kind, Infinity);
-
     this.cam = { x: sp.x, y: sp.y - 80 };
     this.shakeAmt = 0;
-    this.score = 0; this.kills = 0;
-    this.combo = 0; this.comboT = 0;
-    this.wave = 0;
-    this.queue = [];
-    this.state = 'intro';
-    this.stateT = 3;
 
     this.hud = new Hud(this, terrainTex.minimap);
     input.uiTap = demo ? null : (x, y) => this.hud.tap(x, y);
@@ -84,402 +88,296 @@ export class Game {
   shake(n) { this.shakeAmt = Math.min(22, this.shakeAmt + n); }
 
   volumeAt(x, y) {
-    const d = Math.hypot(x - this.player.x, y - this.player.y);
+    const P = this.sim.player;
+    const d = Math.hypot(x - P.x, y - P.y);
     return Math.max(0, 1 - d / 1300);
-  }
-
-  nearestEnemy(x, y, maxD) {
-    let best = null, bd = maxD;
-    for (const e of this.enemies) {
-      if (e.dead || e.spawnT > 0) continue;
-      const d = Math.hypot(e.x - x, e.y - y);
-      if (d < bd && this.statics.clearLine(x, y, e.x, e.y, 24)) { bd = d; best = e; }
-    }
-    return best;
   }
 
   screenToWorld(sx, sy) {
     return { x: (sx - this.world.x) / this.zoom, y: (sy - this.world.y) / this.zoom };
   }
 
-  after(sec, fn) { this.timers.push({ t: sec, fn }); }
-
-  // ---------- Props ----------
-  addProp(kind, x, y) {
-    const sprite = makeSprite(kind === 'crate' ? this.art.crate : this.art.barrel);
-    sprite.position.set(x, y);
-    sprite.zIndex = y;
-    if (kind === 'crate' && Math.random() < 0.5) sprite.scale.x = -1;
-    this.layers.objects.addChild(sprite);
-    const prop = { kind, x, y, hp: kind === 'crate' ? 45 : 22, sprite, shakeT: 0 };
-    prop.collider = this.statics.add({ kind: 'circle', x, y: y - 12, r: kind === 'crate' ? 22 : 17, owner: prop });
-    this.props.push(prop);
-    return prop;
+  // ---------- Input → commands ----------
+  // Collects this frame's key presses; a frame without a step (screens faster than 60 Hz) keeps
+  // them for the next one.
+  collectPresses() {
+    const input = this.input, p = this.presses;
+    WEAPON_ORDER.forEach((k, i) => { if (input.wasPressed(String(i + 1))) p.weapon = k; });
+    p.cycle += input.wheel;
+    if (input.wasPressed('q')) p.last = true;
+    if (input.wasPressed('r')) p.reload = true;
+    if (input.wasPressed(' ') || input.wasPressed('shift') || input.dashTap) p.dash = true;
   }
 
-  damageProp(p, dmg) {
-    if (p.dead) return;
-    p.hp -= dmg;
-    p.shakeT = 0.15;
-    if (p.kind === 'crate') { this.fx.splinters(p.x, p.y - 24, 0xb8803f, 3); sfx.play('wood', this.volumeAt(p.x, p.y)); }
-    if (p.hp <= 0) this.destroyProp(p);
-  }
-
-  destroyProp(p) {
-    p.dead = true;
-    this.statics.remove(p.collider);
-    p.sprite.destroy();
-    this.props.splice(this.props.indexOf(p), 1);
-    if (p.kind === 'crate') {
-      this.fx.splinters(p.x, p.y - 20, 0xb8803f, 20);
-      sfx.play('crateBreak', this.volumeAt(p.x, p.y));
-      this.shake(3);
-      const r = Math.random();
-      if (r < 0.3) this.spawnPickup('health', p.x, p.y);
-      else if (r < 0.6) this.spawnPickup('ammo', p.x, p.y);
-      else if (r < 0.7) this.dropWeapon(p.x, p.y);
+  // The sim's command for the next step. Touch play aims at the nearest enemy in sight unless
+  // the aim stick is held.
+  command(mouseWorld) {
+    const P = this.sim.player, input = this.input;
+    let aim = P.aim, fire = false;
+    if (input.touch) {
+      if (input.aimStick.active) {
+        aim = Math.atan2(input.aimStick.y, input.aimStick.x);
+        fire = true;
+      } else {
+        const target = this.sim.nearestEnemy(P.x, P.y, 520);
+        if (target) aim = Math.atan2(target.y - P.y, target.x - P.x);
+        else if (input.move.x || input.move.y) aim = Math.atan2(input.move.y, input.move.x);
+      }
     } else {
-      this.explode(p.x, p.y - 10, 130, 80);
+      aim = Math.atan2(mouseWorld.y + GUN_H - P.y, mouseWorld.x - P.x);
+      fire = input.mouse.down;
     }
+    const recent = input.recentMove;
+    const cmd = { mx: input.move.x, my: input.move.y, aim, fire, dashDir: recent && { x: recent.x, y: recent.y }, ...this.presses };
+    this.presses = noPresses();
+    return cmd;
   }
 
-  explode(x, y, R, dmg) {
-    this.fx.explosion(x, y, R);
-    sfx.play('explosion', Math.max(0.3, this.volumeAt(x, y)));
-    this.shake(20 * Math.max(0.3, this.volumeAt(x, y)));
-    for (const e of this.enemies) {
-      const d = Math.hypot(e.x - x, e.y - y);
-      if (d < R + e.r) e.hit(dmg * (1 - (d / (R + e.r)) * 0.6), Math.atan2(e.y - y, e.x - x), 500);
-    }
-    const P = this.player;
-    const pd = Math.hypot(P.x - x, P.y - y);
-    if (pd < R + P.r) P.hurt(dmg * 0.45 * (1 - (pd / (R + P.r)) * 0.5), x, y);
-    for (const p of [...this.props]) {
-      if (p.dead) continue;
-      const d = Math.hypot(p.x - x, p.y - y);
-      if (d < R + 20) this.after(0.12 + Math.random() * 0.1, () => this.damageProp(p, 60));
-    }
-  }
-
-  // ---------- Pickups ----------
-  dropWeapon(x, y) {
-    const missing = WEAPON_ORDER.filter((k) => k !== 'pistol' && !this.player.arsenal[k]);
-    const pool = missing.length ? missing : WEAPON_ORDER.slice(1);
-    this.spawnPickup('weapon', x, y, pool[(Math.random() * pool.length) | 0]);
-  }
-
-  // Health and ammo stay on the ground until picked up; dropped weapons fade after a while.
-  spawnPickup(kind, x, y, weapon = null, life = kind === 'weapon' ? 22 : Infinity) {
-    const root = new Container();
-    const glow = new Sprite(this.art.glow);
-    glow.anchor.set(0.5);
-    glow.blendMode = 'add';
-    glow.tint = kind === 'health' ? 0xff5a7a : kind === 'ammo' ? 0xffd23f : 0x7dd3fc;
-    glow.scale.set(1.1, 0.55);
-    glow.alpha = 0.7;
-    const tex = kind === 'health' ? this.art.medkit : kind === 'ammo' ? this.art.ammo : this.art.guns[weapon];
-    const icon = makeSprite(tex);
-    if (kind === 'weapon') icon.anchor.set(0.5, 0.5);
-    root.addChild(glow, icon);
-    root.position.set(x, y);
-    root.zIndex = y;
-    this.layers.objects.addChild(root);
-    this.pickups.push({ kind, weapon, x, y, root, icon, glow, life, t: Math.random() * 6, delay: 0.4 });
-  }
-
-  updatePickups(dt) {
-    const P = this.player;
-    for (let i = this.pickups.length - 1; i >= 0; i--) {
-      const p = this.pickups[i];
-      p.t += dt; p.life -= dt; p.delay -= dt;
-      p.icon.y = (p.kind === 'weapon' ? -22 : -6) + Math.sin(p.t * 3) * 4;
-      p.icon.rotation = p.kind === 'weapon' ? Math.sin(p.t * 1.5) * 0.15 : 0;
-      p.glow.alpha = 0.5 + Math.sin(p.t * 4) * 0.2;
-      p.root.visible = p.life > 4 || Math.floor(p.t * 8) % 2 === 0;
-      let take = false;
-      if (p.delay <= 0 && !P.dead && Math.hypot(P.x - p.x, P.y - p.y) < 36) {
-        // A laughing Naiwa leaves health packs alone: the laugh ends with a full heal anyway.
-        if (p.kind === 'health' && P.hp < P.maxHp && P.laughT < 0) {
-          const heal = Math.min(35, P.maxHp - P.hp);
-          P.hp += heal;
-          this.fx.text(P.x, P.y - 100, `+${Math.round(heal)}`, 0x4ade80, 1);
-          sfx.play('heal');
-          take = true;
-        } else if (p.kind === 'ammo') {
-          P.giveAmmo();
-          this.fx.text(P.x, P.y - 100, t('game.ammo'), 0xffd23f, 0.9);
-          sfx.play('pickup');
-          take = true;
-        } else if (p.kind === 'weapon') {
-          const had = !!P.arsenal[p.weapon];
-          P.giveWeapon(p.weapon);
-          const name = t(`weapon.${p.weapon}`);
-          this.fx.text(P.x, P.y - 100, had ? t('game.weaponAmmo', { w: name }) : name.toUpperCase(), 0x7dd3fc, 1.1);
-          if (!had) this.hud.toast(t(this.input.touch ? 'game.pickedUpTouch' : 'game.pickedUp', { w: name, n: WEAPON_ORDER.indexOf(p.weapon) + 1 }));
-          sfx.play('pickup');
-          take = true;
+  // ---------- Sim events → effects ----------
+  onEvent(e) {
+    const fx = this.fx;
+    switch (e.type) {
+      case 'shot': {
+        const W = WEAPONS[e.weapon];
+        this.hero.recoil = W.kick;
+        this.shake(W.shake);
+        fx.muzzle(e.x, e.y - GUN_H, e.ang);
+        fx.shell(e.px, e.py, e.ang);
+        sfx.play(W.sound);
+        break;
+      }
+      case 'enemyShot':
+        fx.muzzle(e.x, e.y - e.h, e.ang);
+        sfx.play('enemyShot', this.volumeAt(e.ex, e.ey));
+        break;
+      case 'ring':
+        sfx.play('shotgun', 0.6);
+        this.shake(4);
+        break;
+      case 'hit': {
+        const v = this.enemyViews.get(e.id);
+        if (v) { v.flash = 0.08; v.hpBarT = 2.5; }
+        const crit = e.dmg >= 50;
+        fx.text(e.x + (Math.random() - 0.5) * 20, e.y - e.h - 10, String(Math.round(e.dmg)), crit ? 0xffd23f : 0xffffff, crit ? 1.2 : 0.8);
+        sfx.play('hit');
+        break;
+      }
+      case 'kill': this.onKill(e); break;
+      case 'spawn':
+        if (this.island.isWading(e.x, e.y)) fx.splash(e.x, e.y, 10);
+        else fx.dust(e.x, e.y, 8, 0xdddddd);
+        break;
+      case 'bite': sfx.play('egg'); break;
+      case 'hurt':
+        this.hero.flash = 0.15;
+        this.shake(9);
+        fx.burst(e.x, e.y - 40, 0xffd23f, 6);
+        fx.text(e.x, e.y - 100, `-${Math.round(e.dmg)}`, 0xff5a5a, 0.9);
+        sfx.play('hurt');
+        break;
+      case 'died': this.onDied(e); break;
+      case 'dash':
+        this.hero.dashLeft = 0.17;
+        sfx.play('dash');
+        fx.dust(e.x, e.y, 5);
+        break;
+      case 'laugh':
+        laugh.play(sfx.muted);
+        fx.text(e.x, e.y - 120, t('game.laugh'), 0xffd23f, 1.4);
+        this.hud.toast(t('game.laughToast'));
+        break;
+      case 'laughEnd':
+        if (e.heal > 0) { fx.text(e.x, e.y - 100, `+${e.heal}`, 0x4ade80, 1.2); sfx.play('heal'); }
+        break;
+      case 'switch': case 'reload': case 'reloaded': sfx.play('reload'); break;
+      case 'empty': sfx.play('empty'); break;
+      case 'bulletHit': {
+        const color = e.target === 'enemy' ? ENEMY_TYPES[e.enemyType].color : e.target === 'crate' ? 0xd9a866 : 0xffe2a0;
+        fx.sparks(e.x, e.y - e.h, e.ang, color, 5);
+        if (e.target === 'wall') sfx.play('impact', this.volumeAt(e.x, e.y) * 0.6);
+        break;
+      }
+      case 'bulletEnd':
+        if (this.island.isWading(e.x, e.y)) fx.splash(e.x, e.y, 3);
+        else fx.dust(e.x, e.y, 1);
+        break;
+      case 'propHit': {
+        const v = this.propViews.get(e.id);
+        if (v) v.shakeT = 0.15;
+        if (e.kind === 'crate') { fx.splinters(e.x, e.y - 24, 0xb8803f, 3); sfx.play('wood', this.volumeAt(e.x, e.y)); }
+        break;
+      }
+      case 'propBroken':
+        if (e.kind === 'crate') {
+          fx.splinters(e.x, e.y - 20, 0xb8803f, 20);
+          sfx.play('crateBreak', this.volumeAt(e.x, e.y));
+          this.shake(3);
         }
+        break;
+      case 'explode': {
+        fx.explosion(e.x, e.y, e.r);
+        const v = Math.max(0.3, this.volumeAt(e.x, e.y));
+        sfx.play('explosion', v);
+        this.shake(20 * v);
+        break;
       }
-      if (take || p.life <= 0) {
-        if (take) this.fx.burst(p.x, p.y, p.glow.tint, 8);
-        p.root.destroy({ children: true });
-        this.pickups.splice(i, 1);
-      }
-    }
-  }
-
-  // ---------- Bullets ----------
-  fireBullet(o) {
-    let s = this.bulletPool.pop();
-    if (!s) { s = new Sprite(); this.layers.bullets.addChild(s); }
-    s.texture = o.orb ? this.art.orb : this.art.bullet;
-    s.anchor.set(...s.texture.anchorHint);
-    s.tint = o.tint ?? 0xffffff;
-    s.blendMode = 'add';
-    s.scale.set(o.scale ?? 1);
-    s.visible = true;
-    s.rotation = o.ang;
-    this.bullets.push({
-      s, x: o.x, y: o.y, vx: Math.cos(o.ang) * o.speed, vy: Math.sin(o.ang) * o.speed,
-      ang: o.ang, life: o.life, dmg: o.dmg, team: o.team, pierce: o.pierce ?? 0, knock: o.knock ?? 80,
-      h: o.h ?? 36, hits: null, tint: o.tint ?? 0xffffff, orb: !!o.orb, scale: o.scale ?? 1,
-    });
-  }
-
-  updateBullets(dt) {
-    const P = this.player;
-    const isl = this.island;
-    for (let i = this.bullets.length - 1; i >= 0; i--) {
-      const b = this.bullets[i];
-      let alive = true;
-      const dist = Math.hypot(b.vx, b.vy) * dt;
-      const steps = Math.max(1, Math.ceil(dist / 10));
-      const sx = (b.vx * dt) / steps, sy = (b.vy * dt) / steps;
-      for (let k = 0; k < steps && alive; k++) {
-        b.x += sx; b.y += sy;
-        const c = this.statics.pointHit(b.x, b.y);
-        if (c) {
-          if (c.owner) this.damageProp(c.owner, b.dmg);
-          this.fx.sparks(b.x, b.y - b.h, b.ang, c.owner?.kind === 'crate' ? 0xd9a866 : 0xffe2a0, 5);
-          if (!c.owner) sfx.play('impact', this.volumeAt(b.x, b.y) * 0.6);
-          alive = false;
-          break;
+      case 'pickup': this.onPickup(e); break;
+      case 'wave':
+        if (e.boss) {
+          this.hud.banner(t('hud.wave', { n: e.n }), t('game.bossWave'), 2.6, 0xff6b6b);
+          sfx.play('boss');
+        } else {
+          this.hud.banner(t('hud.wave', { n: e.n }), e.n === 1 ? t(this.island.firstWaveKey ?? 'game.firstWave') : t('game.incoming', { n: e.count }), 2.2);
+          sfx.play('wave');
         }
-        if (b.team === 'player') {
-          for (const e of this.enemies) {
-            if (e.dead || e.spawnT > 0) continue;
-            const dx = e.x - b.x, dy = e.y - b.y, m = e.r + 6;
-            if (dx * dx + dy * dy > m * m) continue;
-            if (b.hits && b.hits.has(e)) continue;
-            e.hit(b.dmg, b.ang, b.knock);
-            this.fx.sparks(b.x, b.y - b.h, b.ang, e.T.color, 5);
-            if (b.pierce > 0) { b.pierce--; (b.hits ??= new Set()).add(e); }
-            else { alive = false; break; }
-          }
-        } else if (!P.dead) {
-          const dx = P.x - b.x, dy = P.y - b.y, m = P.r + 4;
-          if (dx * dx + dy * dy < m * m && !(P.dashT > 0)) {
-            P.hurt(b.dmg, b.x - b.vx * 0.05, b.y - b.vy * 0.05);
-            alive = false;
-          }
-        }
-      }
-      b.life -= dt;
-      if (alive && b.life <= 0) {
-        alive = false;
-        if (isl.isWading(b.x, b.y)) this.fx.splash(b.x, b.y, 3);
-        else this.fx.dust(b.x, b.y, 1);
-      }
-      if (!alive) {
-        b.s.visible = false;
-        this.bulletPool.push(b.s);
-        this.bullets[i] = this.bullets[this.bullets.length - 1];
-        this.bullets.pop();
-        continue;
-      }
-      b.s.position.set(b.x, b.y - b.h);
-      if (b.orb) b.s.scale.set(b.scale * (1 + Math.sin(this.time * 30 + i) * 0.12));
+        break;
+      case 'waveCleared':
+        if (e.heal > 0) fx.text(e.x, e.y - 100, `+${e.heal}`, 0x4ade80, 1);
+        this.hud.banner(t('game.cleared'), t('game.bonus', { n: e.bonus }), 2.4, 0x4ade80);
+        sfx.play('pickup');
+        break;
     }
   }
 
-  // ---------- Enemies & waves ----------
-  spawnPoint(type) {
-    const P = this.player, isl = this.island;
-    for (let pass = 0; pass < 3; pass++) {
-      for (let i = 0; i < 60; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const d = pass < 2 ? rnd(680, 1250) : rnd(400, 1600);
-        const x = P.x + Math.cos(a) * d, y = P.y + Math.sin(a) * d;
-        if (!isl.isWalkable(x, y) || isl.inDock(x, y)) continue;
-        if (pass === 0 && !isl.goodSpawn(type, x, y)) continue;
-        if (this.statics.overlaps(x, y, 26)) continue;
-        return { x, y };
-      }
-    }
-    // Last resort (player boxed into a corner of the island): anywhere walkable
-    // that isn't right on top of him, so the queue can't stall.
-    for (let i = 0; i < 200; i++) {
-      const x = rnd(40, WORLD - 40), y = rnd(40, WORLD - 40);
-      if (Math.hypot(x - P.x, y - P.y) < 300) continue;
-      if (!isl.isWalkable(x, y) || isl.inDock(x, y) || this.statics.overlaps(x, y, 26)) continue;
-      return { x, y };
-    }
-    return null;
-  }
-
-  spawnEnemy(type, x, y) {
-    const e = new Enemy(this, type, x, y, this.wave);
-    this.enemies.push(e);
-    if (this.island.isWading(x, y)) this.fx.splash(x, y, 10);
-    else this.fx.dust(x, y, 8, 0xdddddd);
-    return e;
-  }
-
-  spawnNear(type, x, y, R) {
-    for (let i = 0; i < 20; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const px = x + Math.cos(a) * R, py = y + Math.sin(a) * R;
-      if (this.island.isWalkable(px, py) && !this.statics.overlaps(px, py, 18)) return this.spawnEnemy(type, px, py);
-    }
-    return null;
-  }
-
-  startWave(n) {
-    this.wave = n;
-    const boss = n % 5 === 0;
-    let eggs = Math.min(3 + n * 2, 18);
-    let gunners = Math.min(n, 10);
-    let heavies = Math.min(Math.floor((n - 1) / 2), 6);
-    if (boss) { eggs = Math.floor(eggs / 2); gunners = Math.floor(gunners / 2); heavies = Math.floor(heavies / 2); }
-    const q = [];
-    for (let i = 0; i < eggs; i++) q.push('egg');
-    for (let i = 0; i < gunners; i++) q.splice(Math.floor(Math.random() * (q.length + 1)), 0, 'gunner');
-    for (let i = 0; i < heavies; i++) q.splice(Math.floor(q.length * 0.4 + Math.random() * q.length * 0.6), 0, 'heavy');
-    if (boss) q.splice(Math.min(3, q.length), 0, 'boss');
-    this.queue = q;
-    this.maxAlive = Math.min(6 + n * 2, 20);
-    this.spawnT = 0.6;
-    this.waveTotal = q.length;
-    this.state = 'fight';
-    if (boss) {
-      this.hud.banner(t('hud.wave', { n }), t('game.bossWave'), 2.6, 0xff6b6b);
-      sfx.play('boss');
-    } else {
-      this.hud.banner(t('hud.wave', { n }), n === 1 ? t(this.island.firstWaveKey ?? 'game.firstWave') : t('game.incoming', { n: q.length }), 2.2);
-      sfx.play('wave');
-    }
-  }
-
-  updateWaves(dt) {
-    if (this.state === 'intro' || this.state === 'break') {
-      this.stateT -= dt;
-      if (this.stateT <= 0) this.startWave(this.wave + 1);
-      return;
-    }
-    if (this.state !== 'fight') return;
-    this.spawnT -= dt;
-    const alive = this.enemies.length;
-    if (this.queue.length && alive < this.maxAlive && this.spawnT <= 0) {
-      const type = this.queue[0];
-      const p = this.spawnPoint(type);
-      if (p) {
-        this.queue.shift();
-        const e = this.spawnEnemy(type, p.x, p.y);
-        if (type === 'boss') this.boss = e;
-      }
-      this.spawnT = rnd(0.35, 0.9) * (this.wave > 6 ? 0.7 : 1);
-    }
-    if (!this.queue.length && alive === 0) {
-      this.state = 'break';
-      this.stateT = 5;
-      const bonus = 250 * this.wave;
-      this.score += bonus;
-      const P = this.player;
-      const heal = Math.min(20, P.maxHp - P.hp);
-      if (heal > 0) { P.hp += heal; this.fx.text(P.x, P.y - 100, `+${heal}`, 0x4ade80, 1); }
-      this.hud.banner(t('game.cleared'), t('game.bonus', { n: bonus }), 2.4, 0x4ade80);
+  onPickup(e) {
+    const fx = this.fx;
+    if (e.kind === 'health') {
+      fx.text(e.px, e.py - 100, `+${Math.round(e.heal)}`, 0x4ade80, 1);
+      sfx.play('heal');
+    } else if (e.kind === 'ammo') {
+      fx.text(e.px, e.py - 100, t('game.ammo'), 0xffd23f, 0.9);
       sfx.play('pickup');
-      // Restock: a supply crate lands near the player every couple of waves.
-      if (this.wave % 2 === 0) {
-        const a = Math.random() * Math.PI * 2;
-        const x = P.x + Math.cos(a) * 120, y = P.y + Math.sin(a) * 120;
-        if (this.island.isWalkable(x, y)) this.spawnPickup('ammo', x, y);
-      }
+    } else {
+      const name = t(`weapon.${e.weapon}`);
+      fx.text(e.px, e.py - 100, e.had ? t('game.weaponAmmo', { w: name }) : name.toUpperCase(), 0x7dd3fc, 1.1);
+      if (!e.had) this.hud.toast(t(this.input.touch ? 'game.pickedUpTouch' : 'game.pickedUp', { w: name, n: WEAPON_ORDER.indexOf(e.weapon) + 1 }));
+      sfx.play('pickup');
     }
+    fx.burst(e.x, e.y, PICKUP_TINT[e.kind], 8);
   }
 
-  onEnemyKilled(e) {
-    this.kills++;
-    this.combo = this.comboT > 0 ? this.combo + 1 : 1;
-    this.comboT = 2.6;
-    const mult = 1 + Math.min(3, Math.floor(this.combo / 3) * 0.5);
-    const pts = Math.round(e.T.score * mult);
-    this.score += pts;
-    this.fx.text(e.x, e.y - e.height() - 30, `+${pts}`, 0xffd23f, 0.75);
-    if (this.kills % 5 === 0 && this.player.laugh()) {
-      laugh.play(sfx.muted);
-      this.fx.text(this.player.x, this.player.y - 120, t('game.laugh'), 0xffd23f, 1.4);
-      this.hud.toast(t('game.laughToast'));
+  onKill(e) {
+    const fx = this.fx, T = ENEMY_TYPES[e.enemyType], v = this.enemyViews.get(e.id);
+    fx.text(e.x, e.y - e.h - 30, `+${e.pts}`, 0xffd23f, 0.75);
+    fx.burst(e.x, e.y - e.h * 0.4, T.color, e.enemyType === 'boss' ? 40 : 14);
+    if (e.enemyType !== 'egg') {
+      if (v) fx.spawn({ tex: v.body.texture, x: e.x, y: e.y, ay: 0.96, life: 0.35, s0: T.scale, s1: T.scale * 0.2, flip: Math.sign(v.body.scale.x), a0: 1, a1: 0, tint: 0xffffff, sy: 1 });
+      fx.spawn({ tex: this.art.guns[T.gun], x: e.x, y: e.y - 20, z: 20, vz: 200, grav: 700, vx: rnd(-80, 80), life: 1.2, s0: 1, a0: 1, a1: 0.8, vr: rnd(-12, 12), bounce: true });
+    } else if (v) {
+      fx.spawn({ tex: v.body.texture, x: e.x, y: e.y, ay: EGG_FOOT, life: 0.6, s0: 1, s1: 0.9, sy: 1, a0: 1, a1: 0, z: 0, vz: 260, grav: 900, vr: 10 });
     }
-    this.fx.burst(e.x, e.y - e.height() * 0.4, e.T.color, e.type === 'boss' ? 40 : 14);
-    if (e.type !== 'egg') {
-      this.fx.spawn({ tex: e.body.texture, x: e.x, y: e.y, ay: 0.96, life: 0.35, s0: e.T.scale, s1: e.T.scale * 0.2, flip: Math.sign(e.body.scale.x), a0: 1, a1: 0, tint: 0xffffff, sy: 1 });
-      this.fx.spawn({ tex: this.art.guns[e.T.gun], x: e.x, y: e.y - 20, z: 20, vz: 200, grav: 700, vx: rnd(-80, 80), life: 1.2, s0: 1, a0: 1, a1: 0.8, vr: rnd(-12, 12), bounce: true });
-    } else {
-      this.fx.spawn({ tex: e.body.texture, x: e.x, y: e.y, ay: EGG_FOOT, life: 0.6, s0: 1, s1: 0.9, sy: 1, a0: 1, a1: 0, z: 0, vz: 260, grav: 900, vr: 10 });
-    }
-    sfx.play(e.type === 'egg' ? 'egg' : 'die', this.volumeAt(e.x, e.y));
-    if (e.type === 'boss') {
+    sfx.play(e.enemyType === 'egg' ? 'egg' : 'die', this.volumeAt(e.x, e.y));
+    if (e.enemyType === 'boss') {
       this.shake(22);
-      this.fx.explosion(e.x, e.y, 160);
+      fx.explosion(e.x, e.y, 160);
       sfx.play('explosion');
-      this.hud.banner(t('game.bossDown'), `+${pts}`, 3, 0xffd23f);
-      for (let i = 0; i < 4; i++) this.spawnPickup(i % 2 ? 'health' : 'ammo', e.x + rnd(-60, 60), e.y + rnd(-40, 40));
-      this.dropWeapon(e.x, e.y);
-      this.boss = null;
-    } else {
-      const P = this.player;
-      const r = Math.random();
-      const healChance = P.hp < 40 ? 0.2 : 0.09;
-      if (r < healChance) this.spawnPickup('health', e.x, e.y);
-      else if (r < healChance + 0.1 && Object.keys(P.arsenal).length > 1) this.spawnPickup('ammo', e.x, e.y);
-      else if (Math.random() < (e.type === 'heavy' ? 0.25 : 0.04)) this.dropWeapon(e.x, e.y);
+      this.hud.banner(t('game.bossDown'), `+${e.pts}`, 3, 0xffd23f);
     }
-    this.after(0, () => {
-      e.destroy();
-      const i = this.enemies.indexOf(e);
-      if (i >= 0) this.enemies.splice(i, 1);
-    });
   }
 
-  onPlayerDeath() {
-    this.state = 'dead';
+  onDied(e) {
     this.timeScale = 0.3;
-    const P = this.player;
-    P.root.visible = false;
-    P.shadow.visible = false;
-    this.fx.burst(P.x, P.y - 40, 0xffd23f, 30);
+    this.hero.hide();
+    this.fx.burst(e.x, e.y - 40, 0xffd23f, 30);
     this.shake(20);
     sfx.play('gameover');
     laugh.stop();
     this.hud.banner(t('game.fell'), '', 2, 0xff6b6b);
-    this.after(0.6, () => {
-      this.onGameOver({ score: this.score, wave: this.wave, kills: this.kills });
-    });
+    this.overT = 0.6;
   }
 
-  // Conveyor belts carry whoever stands on them.
-  applyDrift(dt) {
-    const isl = this.island;
-    for (const e of [this.player, ...this.enemies]) {
-      if (e.dead || e.spawnT > 0) continue;
-      const v = isl.drift(e.x, e.y);
-      if (v) moveBody(e, v * dt, 0);
+  // ---------- Sprites for the sim's things ----------
+  // Creates a view for each new item of `list`, updates every one, and destroys the views
+  // whose item has gone.
+  reconcile(views, list, create, update, destroy) {
+    const stamp = ++this.stamp;
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      let v = views.get(item.id);
+      if (!v) views.set(item.id, (v = create(item)));
+      v.stamp = stamp;
+      update(v, item, i);
+    }
+    for (const [id, v] of views) {
+      if (v.stamp !== stamp) { destroy(v); views.delete(id); }
     }
   }
 
+  syncProps(dt) {
+    this.reconcile(this.propViews, this.sim.props, (p) => {
+      const sprite = makeSprite(p.kind === 'crate' ? this.art.crate : this.art.barrel);
+      sprite.position.set(p.x, p.y);
+      sprite.zIndex = p.y;
+      if (p.kind === 'crate' && Math.random() < 0.5) sprite.scale.x = -1;
+      this.layers.objects.addChild(sprite);
+      return { sprite, shakeT: 0 };
+    }, (v, p) => {
+      if (v.shakeT > 0) {
+        v.shakeT -= dt;
+        v.sprite.x = p.x + (v.shakeT > 0 ? Math.sin(v.shakeT * 90) * 2.5 : 0);
+      }
+    }, (v) => v.sprite.destroy());
+  }
+
+  syncPickups(dt) {
+    this.reconcile(this.pickupViews, this.sim.pickups, (p) => {
+      const root = new Container();
+      const glow = new Sprite(this.art.glow);
+      glow.anchor.set(0.5);
+      glow.blendMode = 'add';
+      glow.tint = PICKUP_TINT[p.kind];
+      glow.scale.set(1.1, 0.55);
+      glow.alpha = 0.7;
+      const tex = p.kind === 'health' ? this.art.medkit : p.kind === 'ammo' ? this.art.ammo : this.art.guns[p.weapon];
+      const icon = makeSprite(tex);
+      if (p.kind === 'weapon') icon.anchor.set(0.5, 0.5);
+      root.addChild(glow, icon);
+      root.position.set(p.x, p.y);
+      root.zIndex = p.y;
+      this.layers.objects.addChild(root);
+      return { root, icon, glow, t: Math.random() * 6 };
+    }, (v, p) => {
+      v.t += dt;
+      v.icon.y = (p.kind === 'weapon' ? -22 : -6) + Math.sin(v.t * 3) * 4;
+      v.icon.rotation = p.kind === 'weapon' ? Math.sin(v.t * 1.5) * 0.15 : 0;
+      v.glow.alpha = 0.5 + Math.sin(v.t * 4) * 0.2;
+      v.root.visible = p.life > 4 || Math.floor(v.t * 8) % 2 === 0;
+    }, (v) => v.root.destroy({ children: true }));
+  }
+
+  syncBullets(alpha) {
+    this.reconcile(this.bulletViews, this.sim.bullets, (b) => {
+      let s = this.bulletPool.pop();
+      if (!s) { s = new Sprite(); this.layers.bullets.addChild(s); }
+      s.texture = b.orb ? this.art.orb : this.art.bullet;
+      s.anchor.set(...s.texture.anchorHint);
+      s.tint = b.tint;
+      s.blendMode = 'add';
+      s.scale.set(b.scale);
+      s.visible = true;
+      s.rotation = b.ang;
+      return { s, b };
+    }, (v, b, i) => {
+      const [x, y] = lerpPos(v, b.x, b.y, alpha);
+      v.s.position.set(x, y - b.h);
+      if (b.orb) v.s.scale.set(b.scale * (1 + Math.sin(this.time * 30 + i) * 0.12));
+    }, (v) => { v.s.visible = false; this.bulletPool.push(v.s); });
+  }
+
+  syncEnemies(dt, alpha) {
+    this.reconcile(this.enemyViews, this.sim.enemies, (e) => new EnemyView(this, e), (v) => v.update(dt, alpha), (v) => v.destroy());
+  }
+
+  // Positions before a step, so a frame can be drawn between two steps.
+  rememberPositions() {
+    const P = this.sim.player;
+    this.hero.px = P.x; this.hero.py = P.y;
+    for (const v of this.enemyViews.values()) { v.px = v.e.x; v.py = v.e.y; }
+    for (const v of this.bulletViews.values()) { v.px = v.b.x; v.py = v.b.y; }
+  }
+
   togglePause() {
-    if (this.demo || this.state === 'dead') return;
+    if (this.demo || this.sim.state === 'dead') return;
     this.paused = !this.paused;
     this.onPause(this.paused);
   }
@@ -499,35 +397,40 @@ export class Game {
     if (input.wasPressed('escape') || input.wasPressed('p')) this.togglePause();
     if (input.wasPressed('m')) this.toggleMute();
     if (this.paused) { input.endFrame(); return; }
+    this.collectPresses();
 
     if (this.timeScale < 1) this.timeScale = Math.min(1, this.timeScale + rawDt * 0.6);
     const dt = Math.min(rawDt, 1 / 30) * this.timeScale;
     this.time += dt;
-
-    for (let i = this.timers.length - 1; i >= 0; i--) {
-      const t = this.timers[i];
-      t.t -= rawDt;
-      if (t.t <= 0) { this.timers.splice(i, 1); t.fn(); }
+    if (this.overT > 0) {
+      this.overT -= rawDt;
+      if (this.overT <= 0) this.onGameOver({ score: this.sim.score, wave: this.sim.wave, kills: this.sim.kills });
     }
 
+    // Whole steps until the sim has caught up with the frame; the frame is then drawn between
+    // the last two steps (alpha), which only matters on screens faster than 60 Hz. Rounding
+    // leftovers (1/30 - 2/60 isn't exactly 0) don't start a step.
     const mouseWorld = this.screenToWorld(input.mouse.x, input.mouse.y);
-    this.player.update(dt, input, mouseWorld);
-    for (const e of this.enemies) if (!e.dead) e.update(dt);
-    this.applyDrift(dt);
-    this.updateBullets(dt);
-    this.updatePickups(dt);
-    this.updateWaves(dt);
-    for (const p of this.props) {
-      if (p.shakeT > 0) {
-        p.shakeT -= dt;
-        p.sprite.x = p.x + (p.shakeT > 0 ? Math.sin(p.shakeT * 90) * 2.5 : 0);
-      }
+    this.hero.tick(dt);
+    for (const v of this.enemyViews.values()) v.tick(dt);
+    this.acc += dt;
+    while (this.acc > 1e-9) {
+      this.rememberPositions();
+      this.sim.step(STEP, this.command(mouseWorld));
+      this.acc -= STEP;
+      for (const e of this.sim.takeEvents()) this.onEvent(e);
     }
-    this.comboT -= dt;
+    const alpha = 1 + this.acc / STEP;
+
+    this.hero.update(dt, alpha);
+    this.syncEnemies(dt, alpha);
+    this.syncBullets(alpha);
+    this.syncPickups(dt);
+    this.syncProps(dt);
     this.fx.update(dt);
 
     // Camera
-    const P = this.player;
+    const P = this.hero;
     let lx = 0, ly = 0;
     if (!input.touch) {
       lx = (mouseWorld.x - P.x) * 0.2; ly = (mouseWorld.y - P.y) * 0.2;
@@ -546,10 +449,10 @@ export class Game {
     this.world.position.set(Math.round(sw / 2 - this.cam.x * this.zoom + shx), Math.round(sh / 2 - this.cam.y * this.zoom + shy));
     const hw = sw / 2 / this.zoom, hh = sh / 2 / this.zoom;
     const view = { x0: this.cam.x - hw, x1: this.cam.x + hw, y0: this.cam.y - hh, y1: this.cam.y + hh };
-    const focus = [P, ...this.enemies];
-    this.env.update(dt, view, focus);
+    this.env.update(dt, view, [P, ...this.enemyViews.values()]);
 
-    const low = P.hp / P.maxHp;
+    const S = this.sim.player;
+    const low = S.hp / S.maxHp;
     this.hurtVignette.alpha = low < 0.35 ? (0.35 - low) * 1.6 * (0.75 + Math.sin(this.time * 6) * 0.25) : 0;
     this.hud.update(rawDt, mouseWorld);
     input.endFrame();
@@ -563,14 +466,14 @@ export class Game {
     const tx = isl.village.x + Math.cos(a) * 500, ty = isl.village.y + Math.sin(a) * 380;
     this.cam.x += (tx - this.cam.x) * Math.min(1, dt * 0.8);
     this.cam.y += (ty - this.cam.y) * Math.min(1, dt * 0.8);
-    this.player.animT += dt * 2.2;
-    this.player.sync();
+    this.hero.animT += dt * 2.2;
+    this.hero.sync(1);
     this.fx.update(dt);
     const sw = this.app.screen.width, sh = this.app.screen.height;
     this.world.scale.set(this.zoom);
     this.world.position.set(Math.round(sw / 2 - this.cam.x * this.zoom), Math.round(sh / 2 - this.cam.y * this.zoom));
     const hw = sw / 2 / this.zoom, hh = sh / 2 / this.zoom;
-    this.env.update(dt, { x0: this.cam.x - hw, x1: this.cam.x + hw, y0: this.cam.y - hh, y1: this.cam.y + hh }, [this.player]);
+    this.env.update(dt, { x0: this.cam.x - hw, x1: this.cam.x + hw, y0: this.cam.y - hh, y1: this.cam.y + hh }, [this.hero]);
   }
 
   destroy() {

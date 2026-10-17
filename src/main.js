@@ -125,7 +125,8 @@ async function boot() {
     setLoading(t(paintMsg), 55);
     await nextFrame();
     const terrainTex = buildTerrainTextures(island, maxTex);
-    built = { key: choiceKey(choice), choice, island, terrainTex };
+    const layout = findTheme(choice.theme).layout(island);
+    built = { key: choiceKey(choice), choice, island, layout, terrainTex };
     setLoading(t('loading.ready'), 100);
     await nextFrame();
   };
@@ -133,9 +134,9 @@ async function boot() {
   const newGame = (isDemo) => {
     if (game) game.destroy();
     demo = isDemo;
-    const { island, terrainTex, choice } = built;
+    const { island, layout, terrainTex, choice } = built;
     game = new Game({
-      app, art, skins, island, terrainTex, input, demo: isDemo, Scene: findTheme(choice.theme).scene,
+      app, art, skins, island, layout, terrainTex, input, demo: isDemo, Scene: findTheme(choice.theme).scene,
       onPause: (p) => show(p ? 'pause' : null),
       onMute: (m) => $('btn-mute').classList.toggle('muted', m),
       onGameOver: ({ score, wave, kills }) => {
