@@ -30,6 +30,15 @@ Status: **planned, nothing built yet.** This is the agreed design; build it in t
 | TLS and a public address | `cloudflared` or Caddy | anything in our code |
 | Distribution | Docker image, plus `npx naiwa-server` | an installer |
 
+**Keep it light.** Measured 2026-10-17:
+
+- **Server:** don't install the `colyseus` meta-package. It pulls in uWebSockets binaries for every
+  platform, plus Redis, auth and pm2 (180 MB, 159 packages). `@colyseus/core` + `@colyseus/ws-transport`
+  + `@colyseus/schema` is 20 MB and 84 packages, and idles at about 80 MB of memory on Node 24 (bare
+  Node is 44 MB). Add `@colyseus/monitor` only if the admin page is wanted.
+- **Browser:** `@colyseus/sdk` with `Predict` adds about 69 KB gzipped (the game's JS is about 233 KB).
+  Load it on demand when ONLINE opens.
+
 The API names come from the 0.18 announcement (released 2026-08-20). Check them against the docs when
 building and pin the exact version: Colyseus is pre-1.0 and every minor release has had breaking
 changes.
