@@ -1,6 +1,6 @@
 // Player, enemies and weapon definitions.
 import { Container, Sprite, Graphics } from 'pixi.js';
-import { makeSprite } from './world.js';
+import { makeSprite } from './view/world.js';
 import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
 

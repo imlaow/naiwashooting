@@ -1,14 +1,14 @@
 // Game session: scene graph, camera, combat, waves and scoring.
 import { Container, Sprite } from 'pixi.js';
-import { WORLD } from './island.js';
-import { StaticWorld } from './physics.js';
+import { WORLD } from '../island.js';
+import { StaticWorld } from '../sim/physics.js';
 import { Fx } from './fx.js';
 import { Environment, makeSprite } from './world.js';
-import { Player, Enemy, ENEMY_TYPES, WEAPON_ORDER, EGG_FOOT, moveBody } from './entities.js';
+import { Player, Enemy, ENEMY_TYPES, WEAPON_ORDER, EGG_FOOT, moveBody } from '../entities.js';
 import { Hud } from './hud.js';
-import { sfx } from './audio.js';
-import { laugh } from './laugh.js';
-import { t } from './i18n.js';
+import { sfx } from '../audio.js';
+import { laugh } from '../laugh.js';
+import { t } from '../i18n.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 

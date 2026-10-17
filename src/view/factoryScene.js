@@ -3,12 +3,12 @@
 // in world.js. Its own seeded RNG only places decoration (cartons, lamp phases, the trees
 // outside, clouds, steam vents).
 import { Sprite, TilingSprite, Graphics } from 'pixi.js';
-import { WORLD } from './island.js';
-import { WALL0, WALL1, WALL_T, GATE, CANAL } from './factory.js';
-import { factoryArt, building } from './factoryArt.js';
+import { WORLD } from '../island.js';
+import { WALL0, WALL1, WALL_T, GATE, CANAL } from '../factory.js';
+import { factoryArt, building } from '../factoryArt.js';
 import { makeSprite } from './world.js';
-import { mulberry32 } from './noise.js';
-import { factoryLayout } from './sim/layoutFactory.js';
+import { mulberry32 } from '../noise.js';
+import { factoryLayout } from '../sim/layoutFactory.js';
 
 const WALL_H = 64; // how tall the perimeter wall stands
 const rnd = (r, a, b) => a + r() * (b - a);

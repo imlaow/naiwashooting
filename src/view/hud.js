@@ -1,8 +1,8 @@
 // Screen-space HUD: health, ammo, wave info, minimap, banners and crosshair.
 import { Container, Graphics, Sprite, Text } from 'pixi.js';
-import { WORLD } from './island.js';
-import { WEAPONS, WEAPON_ORDER } from './entities.js';
-import { t } from './i18n.js';
+import { WORLD } from '../island.js';
+import { WEAPONS, WEAPON_ORDER } from '../entities.js';
+import { t } from '../i18n.js';
 
 export const FONT = '"Lilita One", "ZCOOL KuaiLe", "Arial Black", sans-serif';
 

@@ -5,8 +5,8 @@
 // its scenery (see Environment in world.js), a `thumbnail(world, size)` that paints a preview
 // canvas and the two `loading` lines shown while it is built.
 import { THEMES as SIM_THEMES, makeChoice, mapKey, choiceKey } from './sim/maps.js';
-import { Environment } from './world.js';
-import { FactoryEnvironment } from './factoryScene.js';
+import { Environment } from './view/world.js';
+import { FactoryEnvironment } from './view/factoryScene.js';
 
 export { RANDOM_ID, randomSeed, makeChoice, mapKey, choiceKey } from './sim/maps.js';
 

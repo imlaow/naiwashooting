@@ -1,9 +1,9 @@
 import { Application } from 'pixi.js';
 import { buildArt } from './art.js';
 import { loadSkins, loadLaugh } from './skins.js';
-import { buildTerrainTextures } from './world.js';
+import { buildTerrainTextures } from './view/world.js';
 import { Input } from './input.js';
-import { Game } from './game.js';
+import { Game } from './view/game.js';
 import { sfx } from './audio.js';
 import { laugh } from './laugh.js';
 import { t, setLang, applyDom, CJK_TEXT } from './i18n.js';

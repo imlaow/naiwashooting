@@ -1,7 +1,7 @@
 // Builds the island scene: water, terrain, props, vegetation and ambient life.
 import { Container, Sprite, TilingSprite, Graphics, Texture, CanvasSource } from 'pixi.js';
-import { WORLD, H_DEEP } from './island.js';
-import { islandLayout, ROCK_SIZES } from './sim/layoutIsland.js';
+import { WORLD, H_DEEP } from '../island.js';
+import { islandLayout, ROCK_SIZES } from '../sim/layoutIsland.js';
 
 export function makeSprite(tex) {
   const s = new Sprite(tex);

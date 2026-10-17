@@ -84,7 +84,7 @@ function islandArt() {
 // Builds a map's scene against a fake Game and records what it registered.
 async function viaScene(choice) {
   const { findTheme, worldFor } = await import('../src/maps.js');
-  const { StaticWorld } = await import('../src/physics.js');
+  const { StaticWorld } = await import('../src/sim/physics.js');
   const { Container } = await import('pixi.js');
   const island = worldFor(choice);
   const statics = new StaticWorld();
