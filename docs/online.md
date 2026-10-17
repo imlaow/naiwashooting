@@ -1,6 +1,7 @@
 # Online play: self-hosted servers (design)
 
-Status: **planned, nothing built yet.** This is the agreed design; build it in the stages at the end.
+Status: **stage 1 of 7 done** (layout extraction, 2026-10-17). This is the agreed design; build it in
+the stages at the end.
 
 ## Decisions
 
@@ -103,17 +104,14 @@ the renderer, so it's still the biggest job.
 ## Code split (the big refactor)
 
 What already runs without Pixi: `island.js` and `factory.js` (only their `paint*` methods use
-`document`), `noise.js`, `physics.js`. Map layout is already seeded (`mulberry32(seed + …)` in
-`Environment` / `FactoryEnvironment`), so the server and every client can rebuild the same colliders
-from the map choice. Nothing about the map goes over the wire except `{ theme, id, seed }`.
+`document`), `noise.js`, `physics.js`, and since stage 1 everything in `src/sim/`. Map layout is
+seeded, so the server and every client rebuild the same colliders from the map choice:
+`buildMap(makeChoice(theme, id, seed))` from `src/sim/maps.js`. Nothing about the map goes over the
+wire except `{ theme, id, seed }`.
 
 What has to change:
 
-1. **Layout out of the scene builders.** `world.js` `placeVillage` / `placeVegetation` / `placeProps`
-   and `factoryScene.js` create sprites and colliders together. Split each into a pure
-   `layout(island) → { colliders, props, weaponSpots, occupied, … }` in `src/sim/layout*.js` that calls
-   the seeded RNG in exactly the same order, and a scene that only draws what the layout lists. Check:
-   for all seven maps the collider, prop and weapon-spot lists are identical before and after.
+1. **Layout out of the scene builders. Done.** See "Stage 1 as built" below.
 2. **Sim state classes without sprites.** `Player` / `Enemy` keep position, HP, timers and AI;
    `PlayerView` / `EnemyView` own the Pixi containers and `sync()`. Couplings to remove:
    - `Player.update` reads `laugh.time()` (the audio playback position). The sim uses a fixed
@@ -137,6 +135,43 @@ What has to change:
 
 `Math.random` inside the sim can stay: the server is authoritative, so clients never need to
 reproduce it. Only the map layout must stay seeded.
+
+### Stage 1 as built
+
+- `src/sim/layoutIsland.js` `islandLayout(island)` and `src/sim/layoutFactory.js`
+  `factoryLayout(factory)` return `{ colliders, objects, props, weaponSpots }`, plus `occupied` and
+  `decor` for the island. `colliders` are in the order they go into the `StaticWorld` (the order
+  decides which collider a bullet hits first). `props` are `{ kind, x, y }`.
+- `src/sim/maps.js` holds the map catalogue (themes, variants, `world`, `layout`, `makeChoice`) and
+  `buildMap(choice) → { world, layout }`. `src/maps.js` adds the browser parts (scene class,
+  thumbnail, loading lines, worlds cache, records) on top.
+- `Environment` and `FactoryEnvironment` call the layout, add its colliders and props to the game,
+  and draw `objects`. For now the scenes still do the adding; stage 2 moves that into the sim.
+- **Different from the plan:**
+  - The island layout also lists **what to draw** (`objects`: kind, position, texture variant,
+    scale, flip) and the **decoration** (`decor`: clouds, gulls, butterflies). On the island,
+    sprite choices are seeded rolls in the same stream as the placement (a palm's scale sets its
+    collider radius, flips are rolled between placements, and decoration is rolled after the props),
+    so they can't stay in the scene without changing the map. The server ignores both.
+  - The layout can't read `art.js` (it paints canvases), so the texture counts it rolls against are
+    constants: `ART_COUNTS` and `ROCK_SIZES` in `layoutIsland.js`. `art.js` paints its rocks from
+    `ROCK_SIZES`; changing a count reshuffles every island.
+  - The factory needed less: `Factory.plan()` was already a seeded layout. `factoryLayout` adds the
+    perimeter wall colliders. The factory scene's own seeded RNG only places decoration (cartons,
+    lamp phases, trees outside the fence, clouds, steam vents) and stays in the scene.
+  - `island.js` and `factory.js` stay in `src/` and `src/sim/` imports them. Their `paint*` methods
+    are browser-only. Moving the pure parts into `src/sim/` can happen in stage 2.
+- **Check:** `node tools/dump-layouts.mjs --check` compares the layouts with
+  `tools/layout-baseline.txt`, recorded from the old scenes before the change (Pixi stubbed).
+  `--scene` records the same lists through the scene classes, and `--scene --draw` lists everything
+  the scenes drew. All three were identical before and after, and the browser showed the same
+  colliders, props and weapon pickups on all seven maps; crates still break and barrels still explode.
+- **Found, not fixed:** on every island the shotgun spot never appears. Hut slots 0 and 1 are at most
+  about 230 px from the village centre, but `isFree` needs 150 + 90 px, so those huts and the shotgun
+  by hut 1 are always skipped (only two huts are ever built). Fixing it changes every island and the
+  baseline, so it's a separate decision.
+- Cost on the server: building an island world takes 110–200 ms, the island layout another 8–19 ms,
+  the factory under 3 ms in total.
 
 ## Several players in the sim
 
@@ -272,7 +307,7 @@ server/
 
 Each stage leaves single-player working and is pushed on its own.
 
-1. **Layout extraction.** Pure layout for island and factory, scenes draw from it. Check: identical
+1. **Layout extraction. Done.** Pure layout for island and factory, scenes draw from it. Check: identical
    collider / prop / weapon-spot lists for all seven maps (a small Node script).
 2. **Sim / view split.** `src/sim/` with commands, events and a fixed step; the view in `src/view/`.
    Check: single-player plays the same; a Node script runs the sim headless for 10 minutes of waves

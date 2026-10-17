@@ -1,7 +1,7 @@
 // Builds the island scene: water, terrain, props, vegetation and ambient life.
 import { Container, Sprite, TilingSprite, Graphics, Texture, CanvasSource } from 'pixi.js';
-import { WORLD, H_GRASS, H_ROCK, H_DEEP } from './island.js';
-import { mulberry32 } from './noise.js';
+import { WORLD, H_DEEP } from './island.js';
+import { islandLayout, ROCK_SIZES } from './sim/layoutIsland.js';
 
 export function makeSprite(tex) {
   const s = new Sprite(tex);
@@ -28,23 +28,22 @@ export function buildTerrainTextures(island, maxTextureSize) {
   return tex;
 }
 
-const rnd = (r, a, b) => a + r() * (b - a);
-
+// Draws an island from its layout (sim/layoutIsland.js), which also supplies the colliders, props
+// and weapon spots.
 export class Environment {
   constructor(game, terrainTex) {
     this.game = game;
     const { island, art, layers } = game;
     this.island = island;
     this.art = art;
-    this.rand = mulberry32(island.seed + 1234);
+    this.layout = islandLayout(island);
+    this.weaponSpots = this.layout.weaponSpots;
     this.t = 0;
     this.cullables = [];
     this.tall = [];
     this.swayers = [];
     this.emitters = [];
     this.lights = [];
-    this.occupied = [];
-    this.weaponSpots = [];
 
     this.buildWater(layers.ocean, terrainTex);
     const terrain = new Sprite(terrainTex.terrain);
@@ -55,9 +54,9 @@ export class Environment {
     this.boat.position.set(island.boat.x, island.boat.y);
     layers.ground.addChild(this.boat);
 
-    this.placeVillage();
-    this.placeVegetation();
-    this.placeProps();
+    for (const c of this.layout.colliders) game.statics.add({ ...c });
+    this.placeObjects();
+    for (const p of this.layout.props) game.addProp(p.kind, p.x, p.y);
     this.buildAmbient();
   }
 
@@ -95,29 +94,7 @@ export class Environment {
     }
   }
 
-  // ---------- Placement helpers ----------
-  isFree(x, y, r) {
-    for (const o of this.occupied) {
-      const dx = o.x - x, dy = o.y - y, m = o.r + r;
-      if (dx * dx + dy * dy < m * m) return false;
-    }
-    const isl = this.island;
-    const d = isl.dock;
-    if (x > d.x - 60 - r && x < d.x + d.w + 60 + r && y > d.y - 40 - r && y < d.y + d.h + r) return false;
-    if (Math.hypot(x - isl.spawn.x, y - isl.spawn.y) < 140 + r) return false;
-    return true;
-  }
-
-  find(pred, r, tries = 200) {
-    const R = this.rand;
-    for (let i = 0; i < tries; i++) {
-      const x = rnd(R, 100, WORLD - 100), y = rnd(R, 100, WORLD - 100);
-      const h = this.island.heightAt(x, y);
-      if (pred(x, y, h) && this.isFree(x, y, r)) return { x, y };
-    }
-    return null;
-  }
-
+  // ---------- Objects ----------
   addObject(sprite, x, y, opts = {}) {
     sprite.position.set(x, y);
     sprite.zIndex = y;
@@ -135,62 +112,68 @@ export class Environment {
       this.tall.push({ s: sprite, x, y, x0: entry.x0 + 30, x1: entry.x1 - 30, y0: entry.y0 + 20, y1: y - (opts.footH ?? 10), alpha: 1 });
     }
     if (opts.sway) this.swayers.push({ s: sprite, amp: opts.sway, ph: x * 0.013 + y * 0.007 });
-    if (opts.occupy) this.occupied.push({ x, y, r: opts.occupy });
     return entry;
   }
 
-  addCollider(c) {
-    return this.game.statics.add(c);
-  }
-
-  // ---------- Village ----------
-  placeVillage() {
-    const { island, art } = this;
-    const v = island.village;
-    this.occupied.push({ x: v.x, y: v.y, r: 150 });
-    const angles = [-2.35, -1.25, -0.1, 3.0];
-    angles.forEach((a, i) => {
-      const x = v.x + Math.cos(a) * 255, y = v.y + Math.sin(a) * 200 + 40;
-      if (island.heightAt(x, y) < 0.08 || !this.isFree(x, y, 90)) return;
-      const hut = makeSprite(art.huts[i % art.huts.length]);
-      if (i % 2) hut.scale.x = -1;
-      this.addObject(hut, x, y, { tall: true, footH: 70, occupy: 110 });
-      this.addCollider({ kind: 'rect', x: x - 96, y: y - 82, w: 192, h: 76 });
-      if (i === 1) this.weaponSpots.push({ x: x + 20, y: y + 40, kind: 'shotgun' });
-    });
-    // Campfire
-    this.addCollider({ kind: 'circle', x: v.x, y: v.y, r: 26, blocksBullets: false });
-    this.emitters.push({ x: v.x, y: v.y - 6, size: 1.6, rate: 40, acc: 0 });
-    this.addLight(v.x, v.y - 14, 4.2, 0xff9c3a);
-    // Tiki torches around the plaza and the dock
-    const torchSpots = [];
-    for (let i = 0; i < 4; i++) {
-      const a = Math.PI / 4 + i * Math.PI / 2;
-      torchSpots.push([v.x + Math.cos(a) * 130, v.y + Math.sin(a) * 100]);
-    }
-    const d = island.dock;
-    torchSpots.push([d.x - 26, d.y - 10], [d.x + d.w + 26, d.y - 10]);
-    for (const [x, y] of torchSpots) {
-      this.addObject(makeSprite(art.torch), x, y, { occupy: 16 });
-      this.addCollider({ kind: 'circle', x, y: y - 4, r: 7, blocksBullets: false });
-      this.emitters.push({ x, y: y - 72, size: 0.65, rate: 22, acc: 0 });
-      this.addLight(x, y - 74, 1.8, 0xffa040);
-    }
-    // Lookout tower on the hill
-    const L = island.lookout;
-    if (L.h > 0.3) {
-      const tower = makeSprite(art.tower);
-      this.addObject(tower, L.x, L.y, { tall: true, footH: 40, occupy: 90 });
-      this.addCollider({ kind: 'rect', x: L.x - 52, y: L.y - 46, w: 104, h: 40 });
-      const pole = new Container();
-      pole.addChild(new Graphics().moveTo(0, 0).lineTo(0, -30).stroke({ width: 3, color: 0x4a2f17 }));
-      pole.position.set(L.x, L.y - 236);
-      pole.zIndex = L.y + 1;
-      this.flag = makeSprite(art.flag);
-      this.flag.position.set(1, -28);
-      pole.addChild(this.flag);
-      this.game.layers.objects.addChild(pole);
-      this.weaponSpots.push({ x: L.x, y: L.y + 40, kind: 'smg' });
+  // Draws the layout's objects: village, vegetation, rocks and driftwood.
+  placeObjects() {
+    const { art } = this;
+    for (const o of this.layout.objects) {
+      const { x, y } = o;
+      switch (o.kind) {
+        case 'hut': {
+          const hut = makeSprite(art.huts[o.variant]);
+          if (o.flip) hut.scale.x = -1;
+          this.addObject(hut, x, y, { tall: true, footH: 70 });
+          break;
+        }
+        case 'campfire':
+          this.emitters.push({ x, y: y - 6, size: 1.6, rate: 40, acc: 0 });
+          this.addLight(x, y - 14, 4.2, 0xff9c3a);
+          break;
+        case 'torch':
+          this.addObject(makeSprite(art.torch), x, y);
+          this.emitters.push({ x, y: y - 72, size: 0.65, rate: 22, acc: 0 });
+          this.addLight(x, y - 74, 1.8, 0xffa040);
+          break;
+        case 'tower': {
+          this.addObject(makeSprite(art.tower), x, y, { tall: true, footH: 40 });
+          const pole = new Container();
+          pole.addChild(new Graphics().moveTo(0, 0).lineTo(0, -30).stroke({ width: 3, color: 0x4a2f17 }));
+          pole.position.set(x, y - 236);
+          pole.zIndex = y + 1;
+          this.flag = makeSprite(art.flag);
+          this.flag.position.set(1, -28);
+          pole.addChild(this.flag);
+          this.game.layers.objects.addChild(pole);
+          break;
+        }
+        case 'palm': case 'tree': {
+          const tree = makeSprite((o.kind === 'palm' ? art.palms : art.trees)[o.variant]);
+          tree.scale.set(o.flip ? -o.scale : o.scale, o.scale);
+          this.addObject(tree, x, y, { tall: true, sway: o.kind === 'palm' ? 0.025 : 0.012 });
+          break;
+        }
+        case 'bush': case 'fern': {
+          const b = makeSprite((o.kind === 'bush' ? art.bushes : art.ferns)[o.variant]);
+          b.scale.set(o.scale);
+          this.addObject(b, x, y, { sway: o.kind === 'bush' ? 0.02 : 0.09 });
+          break;
+        }
+        case 'rock': {
+          const size = ROCK_SIZES[o.variant];
+          const r = makeSprite(art.rocks[o.variant]);
+          if (o.flip) r.scale.x = -1;
+          this.addObject(r, x, y, { tall: size > 35, footH: size * 0.5 });
+          break;
+        }
+        case 'driftwood': {
+          const d = makeSprite(art.driftwood[o.variant]);
+          if (o.flip) d.scale.x = -1;
+          this.addObject(d, x, y);
+          break;
+        }
+      }
     }
   }
 
@@ -206,134 +189,33 @@ export class Environment {
     this.lights.push({ s, base: scale, ph: Math.random() * 10 });
   }
 
-  // ---------- Vegetation ----------
-  placeVegetation() {
-    const { island, art } = this;
-    const R = this.rand;
-    const offPath = (x, y) => island.pathAt(x, y) < 0.2;
-
-    for (let i = 0; i < 95; i++) {
-      const p = this.find((x, y, h) => h > 0.03 && h < 0.32 && offPath(x, y), 38);
-      if (!p) continue;
-      const palm = makeSprite(art.palms[(R() * art.palms.length) | 0]);
-      const sc = rnd(R, 0.8, 1.15);
-      palm.scale.set(R() < 0.5 ? -sc : sc, sc);
-      this.addObject(palm, p.x, p.y, { tall: true, sway: 0.025, occupy: 38 });
-      this.addCollider({ kind: 'circle', x: p.x, y: p.y - 6, r: 11 * sc });
-    }
-    for (let i = 0; i < 80; i++) {
-      const p = this.find((x, y, h) => h > 0.22 && h < H_ROCK + 0.02 && island.moistAt(x, y) > 0.38 && offPath(x, y), 55);
-      if (!p) continue;
-      const tree = makeSprite(art.trees[(R() * art.trees.length) | 0]);
-      const sc = rnd(R, 0.85, 1.2);
-      tree.scale.set(R() < 0.5 ? -sc : sc, sc);
-      this.addObject(tree, p.x, p.y, { tall: true, sway: 0.012, occupy: 55 });
-      this.addCollider({ kind: 'circle', x: p.x, y: p.y - 8, r: 16 * sc });
-    }
-    for (let i = 0; i < 160; i++) {
-      const p = this.find((x, y, h) => h > H_GRASS && h < H_ROCK && offPath(x, y), 22);
-      if (!p) continue;
-      const b = makeSprite(art.bushes[(R() * art.bushes.length) | 0]);
-      b.scale.set(rnd(R, 0.8, 1.3));
-      this.addObject(b, p.x, p.y, { sway: 0.02, occupy: 22 });
-    }
-    for (let i = 0; i < 420; i++) {
-      const x = rnd(R, 100, WORLD - 100), y = rnd(R, 100, WORLD - 100);
-      const h = island.heightAt(x, y);
-      if (h < H_GRASS + 0.02 || h > H_ROCK || island.pathAt(x, y) > 0.35 || !this.isFree(x, y, 6)) continue;
-      const f = makeSprite(art.ferns[(R() * art.ferns.length) | 0]);
-      f.scale.set(rnd(R, 0.7, 1.2));
-      this.addObject(f, x, y, { sway: 0.09 });
-    }
-    // Rocks: bigger on the hill, pebbly near the shore.
-    for (let i = 0; i < 70; i++) {
-      const p = this.find((x, y, h) => h > 0.02 && offPath(x, y), 40);
-      if (!p) continue;
-      const h = island.heightAt(p.x, p.y);
-      const idx = h > H_ROCK - 0.08 ? 3 + ((R() * 4) | 0) : (R() * 4) | 0;
-      const rockTex = art.rocks[idx];
-      const size = [18, 22, 26, 34, 42, 30, 52][idx];
-      const r = makeSprite(rockTex);
-      if (R() < 0.5) r.scale.x = -1;
-      this.addObject(r, p.x, p.y, { occupy: size + 10, tall: size > 35, footH: size * 0.5 });
-      this.addCollider({ kind: 'circle', x: p.x, y: p.y - size * 0.5, r: size * 0.82 });
-    }
-    // Driftwood on the beach
-    for (let i = 0; i < 16; i++) {
-      const p = this.find((x, y, h) => h > 0.01 && h < 0.08, 50);
-      if (!p) continue;
-      const d = makeSprite(art.driftwood[i % 2]);
-      if (R() < 0.5) d.scale.x = -1;
-      this.addObject(d, p.x, p.y, { occupy: 50 });
-      this.addCollider({ kind: 'circle', x: p.x - 22, y: p.y - 4, r: 12, blocksBullets: false });
-      this.addCollider({ kind: 'circle', x: p.x + 18, y: p.y - 4, r: 12, blocksBullets: false });
-    }
-    // A rifle stashed on a remote beach.
-    const far = this.find((x, y, h) => h > 0.04 && h < 0.12 && Math.hypot(x - island.spawn.x, y - island.spawn.y) > 1300, 20, 600);
-    if (far) this.weaponSpots.push({ x: far.x, y: far.y, kind: 'rifle' });
-  }
-
-  // ---------- Destructible props ----------
-  placeProps() {
-    const { island } = this;
-    const R = this.rand;
-    const d = island.dock;
-    const spots = [
-      ['crate', d.x - 70, d.y - 30], ['crate', d.x - 105, d.y - 40], ['barrel', d.x + d.w + 70, d.y - 36],
-    ];
-    const v = island.village;
-    for (let i = 0; i < 6; i++) {
-      const a = R() * Math.PI * 2;
-      spots.push([R() < 0.7 ? 'crate' : 'barrel', v.x + Math.cos(a) * rnd(R, 180, 330), v.y + Math.sin(a) * rnd(R, 150, 280)]);
-    }
-    for (let i = 0; i < 34; i++) {
-      const p = this.find((x, y, h) => h > 0.03 && island.pathAt(x, y) < 0.4, 30);
-      if (p) spots.push([R() < 0.68 ? 'crate' : 'barrel', p.x, p.y]);
-    }
-    spots.forEach(([kind, x, y], i) => {
-      // The first three sit by the dock, inside the area isFree() reserves.
-      if (i >= 3 && !this.isFree(x, y, 22)) return;
-      if (!island.isWalkable(x, y)) return;
-      this.game.addProp(kind, x, y);
-      this.occupied.push({ x, y, r: 28 });
-    });
-  }
-
   // ---------- Ambient life ----------
   buildAmbient() {
-    const { art, island } = this;
-    const R = this.rand;
+    const { art } = this;
+    const { clouds, gulls, butterflies } = this.layout.decor;
     const L = this.game.layers;
-    this.clouds = [];
-    for (let i = 0; i < 9; i++) {
+    this.clouds = clouds.map((c) => {
       const s = makeSprite(art.cloud);
-      s.position.set(rnd(R, 0, WORLD), rnd(R, 0, WORLD));
-      s.scale.set(rnd(R, 1.8, 3.4), rnd(R, 1.5, 2.6));
+      s.position.set(c.x, c.y);
+      s.scale.set(c.sx, c.sy);
       s.alpha = 0.16;
       L.air.addChild(s);
-      this.clouds.push(s);
-    }
-    this.gulls = [];
-    for (let i = 0; i < 7; i++) {
+      return s;
+    });
+    this.gulls = gulls.map((g) => {
       const s = makeSprite(art.gull[0]);
       const sh = makeSprite(art.gull[0]);
       sh.tint = 0x000000; sh.alpha = 0.18;
       L.air.addChild(s);
       L.shadows.addChild(sh);
-      this.gulls.push({
-        s, sh, cx: rnd(R, 600, WORLD - 600), cy: rnd(R, 600, WORLD - 600), rx: rnd(R, 250, 700), ry: rnd(R, 200, 500),
-        a: R() * 6.28, w: rnd(R, 0.08, 0.2) * (R() < 0.5 ? -1 : 1), flap: 0, alt: rnd(R, 80, 140),
-      });
-    }
-    this.butterflies = [];
-    for (let i = 0; i < 26; i++) {
-      const p = this.find((x, y, h) => h > H_GRASS + 0.03 && h < H_ROCK, 0, 80);
-      if (!p) continue;
-      const frames = art.butterflies[i % art.butterflies.length];
+      return { s, sh, ...g, flap: 0 };
+    });
+    this.butterflies = butterflies.map((b) => {
+      const frames = art.butterflies[b.variant];
       const s = makeSprite(frames[0]);
       L.air.addChild(s);
-      this.butterflies.push({ s, frames, hx: p.x, hy: p.y, ph: R() * 100, sp: rnd(R, 0.4, 0.9) });
-    }
+      return { s, frames, hx: b.x, hy: b.y, ph: b.ph, sp: b.sp };
+    });
   }
 
   // ---------- Per-frame ----------

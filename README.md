@@ -46,15 +46,18 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 
 | File | Purpose |
 | --- | --- |
-| `src/maps.js` | Map catalogue: themes, their variants (seed + terrain knobs for islands) and per-map records. A new theme is one more entry here, see the file header |
+| `src/maps.js` | The browser side of the map catalogue: each theme's scene class, thumbnail and loading lines, the worlds cache and per-map records |
+| `src/sim/maps.js` | Map catalogue without Pixi: themes, their variants (seed + terrain knobs for islands), `makeChoice` and `buildMap` (world + layout from `{ theme, id, seed }`). A new theme is one more entry here, see the file header |
+| `src/sim/layoutIsland.js` | Island layout: huts, vegetation, rocks, props, weapon spots and their colliders, from the seeded RNG; no Pixi or DOM |
+| `src/sim/layoutFactory.js` | Factory layout: the perimeter wall plus `Factory.plan()`'s solids, props and weapon spots, as colliders in insertion order |
 | `src/dashboard.js` | The map dashboard: a section per theme, preview cards, random-seed card |
 | `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting; `DEFAULT_SHAPE` lists the knobs a map can turn |
 | `src/factory.js` | The factory map's layout (hall, belts, canal, tank farm, buildings, yard), its floor painting and minimap; same terrain interface as `Island` plus belt `drift` |
-| `src/factoryScene.js` | Builds the factory scene: perimeter wall, sprites and colliders, moving belts and cartons, smoke, steam, lamps |
+| `src/factoryScene.js` | Draws the factory from its layout: perimeter wall, sprites, moving belts and cartons, smoke, steam, lamps |
 | `src/factoryArt.js` | Painted factory textures (silos, water tower, chimney, machines, containers, lorry, buildings), built the first time a factory loads |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX) |
 | `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), builds recoloured rival skins |
-| `src/world.js` | Scene building: water, vegetation, props, ambient life |
+| `src/world.js` | Draws the island from its layout: water, vegetation, props, ambient life |
 | `src/entities.js` | Player, enemies, weapon stats |
 | `src/game.js` | Game loop, camera, bullets, waves, pickups, scoring |
 | `src/hud.js` | HUD, minimap, banners, crosshair |
@@ -62,6 +65,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/laugh.js` | Laugh sound for the 5th-kill laugh; the animation follows its playback position |
 | `src/fx.js` | Particles, decals, damage numbers |
 | `src/audio.js` | WebAudio-synthesised sound effects |
+| `tools/dump-layouts.mjs` | Dumps every preset map's colliders, props and weapon spots; `--check` compares them with `tools/layout-baseline.txt` (run it after touching layout code) |
 | `tools/extract-sprites.mjs` | Cuts the 2×2 character sheet into transparent PNG frames (`npm run sprites`) |
 | `tools/extract-laugh-frames.mjs` | Cuts Naiwa out of every frame of the laughing clip into `laugh-frames/` (see the file header for the ffmpeg step); `--masks` uses BiRefNet alpha masks, `--cropped` takes upscaled crops, `--grade` matches the fur colour to `public/assets/hero_*.png` |
 | `tools/build-laugh-sheets.mjs` | Packs `laugh-frames/` into the 15 fps hero-sized sprite sheets in `public/assets/laugh/` |

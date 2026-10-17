@@ -1,6 +1,7 @@
 // Procedurally painted textures (canvas 2D -> Pixi textures).
 import { Texture, CanvasSource } from 'pixi.js';
 import { mulberry32 } from './noise.js';
+import { ROCK_SIZES } from './sim/layoutIsland.js';
 
 const RES = 2;
 
@@ -518,11 +519,13 @@ function gun(kind) {
 
 export function buildArt() {
   const art = {};
+  // The island layout picks among these by count (ART_COUNTS in sim/layoutIsland.js), so adding
+  // or removing a variant reshuffles every island.
   art.palms = [11, 22, 33, 44, 55, 66].map(palmTree);
   art.trees = [1, 2, 3, 4, 5, 6].map(jungleTree);
   art.bushes = [1, 2, 3, 4, 5, 6, 7, 8].map(bush);
   art.ferns = [1, 2, 3, 4].map(fern);
-  art.rocks = [[1, 18], [2, 22], [3, 26], [4, 34], [5, 42], [6, 30], [7, 52]].map(([s, z]) => rock(s, z));
+  art.rocks = ROCK_SIZES.map((z, i) => rock(i + 1, z));
   art.driftwood = [1, 2].map(driftwood);
   art.crate = crate();
   art.barrel = barrel();

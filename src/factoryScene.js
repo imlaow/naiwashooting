@@ -1,11 +1,14 @@
-// Builds the factory scene from a Factory layout: floor, perimeter wall, machines, belts that
-// move, smoke, lamps and a milk canal. Plays the same role as Environment in world.js.
+// Builds the factory scene from its layout (sim/layoutFactory.js): floor, perimeter wall,
+// machines, belts that move, smoke, lamps and a milk canal. Plays the same role as Environment
+// in world.js. Its own seeded RNG only places decoration (cartons, lamp phases, the trees
+// outside, clouds, steam vents).
 import { Sprite, TilingSprite, Graphics } from 'pixi.js';
 import { WORLD } from './island.js';
 import { WALL0, WALL1, WALL_T, GATE, CANAL } from './factory.js';
 import { factoryArt, building } from './factoryArt.js';
 import { makeSprite } from './world.js';
 import { mulberry32 } from './noise.js';
+import { factoryLayout } from './sim/layoutFactory.js';
 
 const WALL_H = 64; // how tall the perimeter wall stands
 const rnd = (r, a, b) => a + r() * (b - a);
@@ -17,19 +20,21 @@ export class FactoryEnvironment {
     this.fac = fac;
     this.art = art;
     this.fa = factoryArt();
+    this.layout = factoryLayout(fac);
     this.rand = mulberry32(fac.seed + 1234);
     this.t = 0;
     this.cullables = [];
     this.fading = [];
     this.lights = [];
     this.lamps = [];
-    this.weaponSpots = fac.weaponSpots;
+    this.weaponSpots = this.layout.weaponSpots;
 
+    for (const c of this.layout.colliders) game.statics.add({ ...c });
     this.buildGround(layers, terrainTex);
     this.buildWalls(layers.objects);
     this.buildBelts(layers);
     this.placeObjects();
-    for (const [kind, x, y] of fac.props) game.addProp(kind, x, y);
+    for (const p of this.layout.props) game.addProp(p.kind, p.x, p.y);
     this.buildOutside();
     this.buildAmbient();
   }
@@ -93,12 +98,6 @@ export class FactoryEnvironment {
     south.zIndex = WALL1;
     layer.addChild(south);
     this.fading.push({ s: south, x0: WALL0, x1: WALL1, y0: sy - WALL_H - 90, y1: WALL1, alpha: 1 });
-
-    const add = (c) => this.game.statics.add(c);
-    add({ kind: 'rect', x: WALL0, y: WALL0, w: len, h: WALL_T });
-    add({ kind: 'rect', x: WALL0, y: sy, w: len, h: WALL_T });
-    add({ kind: 'rect', x: WALL0, y: WALL0, w: WALL_T, h: len });
-    add({ kind: 'rect', x: WALL1 - WALL_T, y: WALL0, w: WALL_T, h: len });
   }
 
   // Barbed wire along the top of a wall.
@@ -124,7 +123,7 @@ export class FactoryEnvironment {
         cartons.push({ s: c, u: x });
       }
       // Machines straddling this belt, by x: cartons inside one are hidden.
-      const machines = this.fac.objects.filter((o) => o.kind === 'machine' && o.foot.y < b.y && o.foot.y + o.foot.h > b.y + b.h).map((o) => o.x);
+      const machines = this.layout.objects.filter((o) => o.kind === 'machine' && o.foot.y < b.y && o.foot.y + o.foot.h > b.y + b.h).map((o) => o.x);
       this.belts.push({ b, s, cartons, machines });
     }
   }
@@ -147,8 +146,7 @@ export class FactoryEnvironment {
 
   placeObjects() {
     const { fac, fa } = this;
-    const add = (c) => this.game.statics.add({ ...c });
-    for (const o of fac.objects) {
+    for (const o of this.layout.objects) {
       let s = null, opts = { fade: true };
       switch (o.kind) {
         case 'pillar': s = makeSprite(fa.pillar); opts = { fade: true, footH: 10 }; break;
@@ -170,7 +168,6 @@ export class FactoryEnvironment {
           const b = o.kind === 'warehouse' ? fac.warehouse : fac.boiler;
           s = makeSprite(building(b.w, b.h, b.H, o.kind));
           this.addObject(s, b.x, b.y + b.h, { fade: true, footH: 30 });
-          add(o.foot);
           if (o.kind === 'boiler') {
             // The furnace mouth glows and flickers.
             const fx = b.x + b.w / 2, fy = b.y + b.h - 20;
@@ -182,7 +179,6 @@ export class FactoryEnvironment {
         default: continue;
       }
       this.addObject(s, o.x, o.y, opts);
-      add(o.foot);
     }
   }
 
@@ -323,7 +319,7 @@ export class FactoryEnvironment {
     this.sparkT -= dt;
     if (this.sparkT <= 0) {
       this.sparkT = rnd(Math.random, 0.6, 1.8);
-      const machines = this.fac.objects.filter((o) => o.kind === 'machine' && inView(o.x, o.y));
+      const machines = this.layout.objects.filter((o) => o.kind === 'machine' && inView(o.x, o.y));
       const m = machines[(Math.random() * machines.length) | 0];
       if (m) fx.sparks(m.x + rnd(Math.random, -60, 60), m.y - 10, -Math.PI / 2, 0xffe08a, 8);
     }
