@@ -13,5 +13,6 @@ See `README.md` for running the game, controls and the code map.
 ## Online play
 
 Planned, not built: self-hosted servers in the style of Minecraft (co-op and PvP, owners put
-a `wss://` tunnel or proxy in front). The agreed design and build stages are in `docs/online.md`. Keep
+a `wss://` tunnel or proxy in front), built on Colyseus 0.18 rather than our own netcode. The agreed
+design and build stages are in `docs/online.md`. Keep
 it up to date as stages land.

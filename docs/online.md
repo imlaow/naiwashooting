@@ -12,6 +12,37 @@ Status: **planned, nothing built yet.** This is the agreed design; build it in t
 | Co-op death | Downed, teammates revive. The run ends only when every player is down or dead. |
 | Player count | Owner sets `maxPlayers`, default 4. |
 | Authority | The server runs the game logic and the browser draws it. Clients send inputs, never positions or hits. |
+| Netcode | **Don't write our own: use [Colyseus](https://colyseus.io) 0.18** (MIT, Node). We write the game, not the networking. |
+
+## Off-the-shelf pieces
+
+| Need | Use | Instead of |
+| --- | --- | --- |
+| Rooms, joining, WebSocket transport, reconnects | `colyseus` server + `@colyseus/sdk` client | our own `ws` server and handshake |
+| State sync (delta-encoded, binary) | `@colyseus/schema` (`schema({ … })`, plain JS, no decorators) | hand-written snapshot JSON |
+| Fixed step and input buffering, clamping values | `setFixedTimestep()`, `defineInput()` with `sanitize` | our own tick loop and validation |
+| Own-player prediction and reconciliation | `Predict.get()`, `predict.reconciler()`, `predict.tick()` | our own replay buffer |
+| Interpolating other entities | `predict.attachAll({ mode: "lerp" })` | our own interpolation buffer |
+| Lag compensation for PvP hits | `allowRewindState()`, `rewind.lastSeenBy(sessionId)` | nothing (it was deferred) |
+| Refusing connections (wrong version, banned, bad origin) | `onAuth` / `beforeUpgrade` | custom checks |
+| Admin: player list, kick, inspect rooms | `@colyseus/monitor` / `@colyseus/admin` behind `basicAuth()` | a stdin console |
+| Headless tests and bot load tests | `@colyseus/testing`, `@colyseus/loadtest` | our own harness |
+| TLS and a public address | `cloudflared` or Caddy | anything in our code |
+| Distribution | Docker image, plus `npx naiwa-server` | an installer |
+
+The API names come from the 0.18 announcement (released 2026-08-20). Check them against the docs when
+building and pin the exact version: Colyseus is pre-1.0 and every minor release has had breaking
+changes.
+
+### Considered and rejected
+
+- **geckos.io** (WebRTC, UDP-like): its traffic doesn't pass through Cloudflare Tunnel or an HTTP
+  reverse proxy, which option 3 depends on.
+- **@geckos.io/snapshot-interpolation**, **Lance**: unmaintained (last pushes 2022 and earlier).
+- **nengi.js**: good netcode, but less active and lower-level than Colyseus.
+- **Nakama**: a Go server whose JS runtime isn't Node, so it couldn't import our game logic as is.
+  Heavy for one game.
+- **Hosted services** (Colyseus Cloud, Playroom, Rune …): the opposite of self-hosting.
 
 ## Why the address must be `wss://`
 
@@ -34,18 +65,20 @@ The join screen accepts `wss://…`, turns `https://…` into `wss://…`, allow
 ## Architecture
 
 ```
- browser (official site)                      naiwa-server (Node, owner's machine)
- ┌──────────────────────────┐   inputs 30/s   ┌──────────────────────────────┐
- │ Input → PlayerCommand ───┼────────────────▶│ Sim (src/sim, no Pixi)       │
- │ prediction (own player)  │                 │  fixed 60 Hz step            │
- │ View: sprites, fx, sfx,  │◀────────────────┼─ snapshots 20/s + events     │
- │ HUD, interpolation       │  wss (tunnel)   │ server.json, console, logs   │
+ browser (official site)                      naiwa-server (Node 22+, owner's machine)
+ ┌──────────────────────────┐  room.send(input)┌──────────────────────────────┐
+ │ Input → PlayerCommand ───┼────────────────▶│ Colyseus Room                │
+ │ @colyseus/sdk Predict    │                 │  setFixedTimestep → Sim.step │
+ │ View: sprites, fx, sfx,  │◀────────────────┼─ schema patches + broadcasts │
+ │ HUD                      │  wss (tunnel)   │ server.json, monitor         │
  └──────────────────────────┘                 └──────────────────────────────┘
- single-player = the same Sim + View in one page, no socket
+ single-player = the same Sim + View in one page, no Colyseus
 ```
 
 One copy of the game logic (`src/sim/`) runs in three places: the browser for single-player, the
-Node server, and the browser again for predicting the local player's movement.
+Colyseus room on the server, and the browser again inside `Predict` for the local player's movement.
+Colyseus doesn't remove this split. Every authoritative framework needs game logic that runs without
+the renderer, so it's still the biggest job.
 
 ## Code split (the big refactor)
 
@@ -72,13 +105,15 @@ What has to change:
 3. **Events instead of direct fx/sfx/HUD calls.** Game logic currently calls `game.fx.*`, `sfx.play`,
    `game.hud.*`, `game.shake` inline. The sim pushes events instead (`shot`, `hit`, `kill`, `explode`,
    `pickup`, `hurt`, `laugh`, `wave`, `waveCleared`, `downed`, `revived`, …) and the view turns them
-   into particles, sounds, banners and shake. Same events in single-player and online.
+   into particles, sounds, banners and shake. Online, the room broadcasts the same events.
 4. **Input as commands.** `Player.update(dt, input, mouseWorld)` becomes `update(dt, cmd)` with
-   `cmd = { seq, mx, my, aim, fire, dash, dashDir, reload, weapon, cycle, last }`. The browser builds
-   `cmd` from `Input`. Touch auto-aim (`nearestEnemy`) stays in the browser, so the server only sees
-   an aim angle.
+   `cmd = { mx, my, aim, fire, dash, dashDir, reload, weapon, cycle, last }`. The browser builds `cmd`
+   from `Input`. Online it goes through `defineInput()`, which also numbers commands for
+   reconciliation. Touch auto-aim (`nearestEnemy`) stays in the browser, so the server only sees an
+   aim angle.
 5. **Fixed time step.** The sim steps at 1/60 s (the current code clamps `dt` to 1/30 anyway). The
-   browser accumulates frame time and runs whole steps.
+   browser accumulates frame time and runs whole steps. On the server, `setFixedTimestep` drives
+   the steps.
 
 `Math.random` inside the sim can stay: the server is authoritative, so clients never need to
 reproduce it. Only the map layout must stay seeded.
@@ -118,66 +153,59 @@ chance, laugh), `applyDrift`, camera and `volumeAt` (view: follow the local play
 - Spawns: walkable points far from every living player (reuse `spawnPoint`'s checks). Respawn after
   3 s with a pistol and 1.5 s of spawn protection.
 - Round ends at `killLimit` or `timeLimit`, then results for 10 s and the next map.
-- Bullets from players hit other players. Explosions hurt everyone.
+- Bullets from players hit other players, checked against `rewind.lastSeenBy(shooter)` so hits match
+  what the shooter saw. Explosions hurt everyone.
 - Laugh: **open question.** 12 s of invulnerability is too strong if the laughing player can shoot.
   Proposal: in PvP the laugh is 4 s, untouchable and unable to shoot.
 
-## Protocol
+## Networking with Colyseus
 
-JSON messages over one WebSocket. Switch to a binary format only if bandwidth turns out to matter.
+One room type, `NaiwaRoom`, one room per server (the server *is* the room). The map choice, mode and
+config are room metadata.
+
+**State (`@colyseus/schema`), patched to every client automatically:**
 
 ```
-client → server
-  hello    { protocol, name, password?, token? }
-  input    { seq, cmds: [cmd, …] }            // ~30/s, batches the frames since the last send
-  chat     { text }
-  ping     { t }
-
-server → client
-  welcome  { protocol, id, token, server: { name, motd, mode, maxPlayers },
-             map: { theme, id, seed }, tick, state }
-  reject   { reason: 'protocol' | 'full' | 'password' | 'banned', serverProtocol }
-  snapshot { tick, ack, players:[…], enemies:[…], pickups:[…], props:[changed], wave, score }  // 20/s
-  events   { tick, list:[…] }                 // fx/sfx/HUD events, plus bullet spawns
-  map      { theme, id, seed }                // map change: client rebuilds via prepare()
-  chat / pong / kicked
+NaiwaState { phase, mode, map: MapChoice, wave, score, timeLeft,
+             players: MapSchema<PlayerState>,   // x, y, aim, hp, weapon, flags, name, kills
+             enemies: MapSchema<EnemyState>,    // x, y, aim, hp, type, flags
+             pickups: MapSchema<PickupState>,
+             props:   MapSchema<PropState> }    // only hp / destroyed; positions come from the seeded layout
 ```
 
-- `PROTOCOL` is a constant in `src/sim/protocol.js`. Bump it whenever the sim or the messages change.
-  The official site updates on every push and servers don't, so on a mismatch the client says
-  "server runs version N, this site needs M" instead of misbehaving.
-- **Bullets** aren't in snapshots. The server sends a spawn event `{ id, x, y, ang, speed, life, kind }`,
-  clients move it in a straight line, and the server sends `bulletEnd { id }` when it hits.
-- **Props** come from the seeded layout with stable ids. Snapshots only carry HP changes and
-  destroyed / respawned ids.
-- **Entities** in snapshots: id, x, y, vx, vy, aim, hp, state flags (dash, laugh, downed, spawnT),
-  weapon. Positions rounded to 0.1 px. About 3–5 KB per snapshot with 20 enemies, so 60–100 KB/s per
-  player. Fine at first; add deltas and quantization if phones struggle.
+Fields that are only drawn (animation time, flash, recoil) stay off the schema; the view works them
+out locally. Schema allows at most 63 fields per type, far more than these need.
 
-### Making it feel responsive
+**Messages (broadcasts), for things that happen once:**
 
-- **Own player:** predicted. The client runs the same movement code (`moveBody` on the same island
-  and colliders), keeps unacknowledged commands, and when a snapshot arrives with `ack` it resets to
-  the server position and replays the rest. Corrections smaller than ~8 px are smoothed over 100 ms.
-- **Own shots:** muzzle flash, shell and sound play immediately. Bullets and damage come from the
-  server.
-- **Everyone else:** drawn 100 ms in the past, interpolated between the two snapshots around that
-  time.
-- **Lag compensation:** none in v1 (AI enemies in co-op forgive it). Consider rewinding player hitboxes
-  for PvP if hits feel unfair.
+- `events`: the sim's fx/sfx/HUD events for that tick.
+- `bullet` / `bulletEnd`: bullets aren't in the state. The server sends `{ id, x, y, ang, speed, life,
+  kind }` and clients move each one in a straight line until `bulletEnd`.
+- `chat`.
+
+**Joining:** `client.joinOrCreate("naiwa", { protocol, name, password })`. `onAuth` rejects a wrong
+`PROTOCOL` (from `src/sim/protocol.js`, bumped whenever the sim or state changes), a full server, a
+wrong password or a ban, and the reason is shown to the player ("server runs version N, this site
+needs M"). `beforeUpgrade` checks `Origin` against `allowedOrigins`. Colyseus handles reconnecting
+after a drop. `allowReconnection(client, 60)` holds the player's slot.
+
+**Feel:** `Predict` runs the shared movement step for the local player and reconciles against the
+server. Other players and enemies are drawn with its lerp interpolation. The local player's muzzle
+flash, shell and sound play immediately, and bullets and damage come from the server.
+`@colyseus/sdk/debug` (drift telemetry and a latency simulator) is how we tune it.
 
 ## The server program
 
 ```
 server/
-  index.js        entry: load config, build world, run sim, accept sockets, console
-  room.js         players, join/leave, reconnect, mode rules, map rotation
-  net.js          ws handling, rate limits, message validation
+  index.js        defineServer(): NaiwaRoom, monitor behind basicAuth, port from server.json
+  room.js         NaiwaRoom: onAuth, onJoin/onLeave, fixed step → Sim, mode rules, map rotation
+  schema.js       NaiwaState and friends
   server.example.json
   Dockerfile
 ```
 
-- Node 20+, one dependency (`ws`). Imports `src/sim/` directly, so map and rule changes reach the
+- Node 22+ (Colyseus 0.18's minimum). Imports `src/sim/` directly, so map and rule changes reach the
   server with no copying. Run from the repo with `npm run server`. Later publish a bundled
   `naiwa-server` package (`npx naiwa-server`) and a Docker image.
 - `server.json`:
@@ -190,6 +218,7 @@ server/
     "mode": "coop",
     "maxPlayers": 4,
     "password": "",
+    "adminPassword": "",
     "maps": ["island/cove", "island/twins", "factory/dairy", "island/random"],
     "pvp": { "killLimit": 25, "timeLimit": 600 },
     "allowedOrigins": ["https://<official site>", "http://localhost:5173"]
@@ -199,18 +228,18 @@ server/
 - Lifecycle: waiting lobby (the run starts 10 s after the first player joins), then the run, results,
   next map. Late joiners in co-op drop in at the dock with a pistol at the next wave break, or right
   away if the run is still in wave 1.
-- Reconnect: the client keeps `token` in localStorage, and the server holds the player's slot for 60 s.
-- Console commands on stdin: `list`, `kick <name>`, `ban <name>`, `say <text>`, `map <theme/id>`,
-  `restart`, `mode coop|pvp`.
-- Safety: validate every message, clamp command values (aim, move length), cap inputs at 120/s and
-  chat at 1/s, check `Origin` against `allowedOrigins`, limit names to 16 characters.
+- Admin: the Colyseus monitor/admin page at `/admin`, protected by `adminPassword`. Kick, ban, `say`,
+  map change and restart are room messages only an admin session may send.
+- Safety: `sanitize` clamps every command field. Also cap chat at 1/s and names at 16 characters.
 
 ## Client changes
 
 - Title screen: a **联机 / ONLINE** button opens a panel with the server address, player name and
   recently joined servers (localStorage). `?server=wss://…` opens straight into it, so owners can
   share a link.
-- Connecting reuses `prepare(choice)` with the map the server sends, behind the loading screen.
+- Connecting reuses `prepare(choice)` with the map from the room state, behind the loading screen.
+- `@colyseus/sdk` is only loaded when the player opens ONLINE (dynamic `import()`), so single-player
+  downloads nothing extra.
 - In game: names over heads, teammates tinted with the recoloured skins `skins.js` already builds,
   teammates on the minimap and as edge arrows when off screen, revive ring, spectate banner,
   scoreboard on Tab (and a button on touch), ping, chat (Enter), a "connection lost, reconnecting…"
@@ -230,12 +259,14 @@ Each stage leaves single-player working and is pushed on its own.
    with a scripted bot and no errors.
 3. **Several players in the sim.** Targeting, spawns, scaling, downed/revive, per-player laugh.
    Check: a headless run with 2–4 bots.
-4. **Server and join screen.** `server/`, protocol, handshake, snapshots without prediction. Check:
-   two browsers play co-op through `ws://localhost` and through a quick tunnel.
-5. **Feel.** Prediction, interpolation, reconnect, scoreboard, names, chat.
-6. **PvP mode.**
+4. **Colyseus server and join screen.** `server/`, schema, `NaiwaRoom`, `onAuth` version check, the
+   ONLINE panel. No prediction yet. Check: `@colyseus/testing` room tests; two browsers play co-op
+   through `ws://localhost` and through a quick tunnel.
+5. **Feel.** `Predict` reconciliation and interpolation, tuned with the SDK debug panel. Reconnect,
+   scoreboard, names, chat.
+6. **PvP mode,** with rewind-checked hits.
 7. **Packaging and docs.** `docs/hosting.md` (tunnel and Caddy recipes in Chinese and English),
-   Docker image, npm package.
+   Docker image, npm package, a `@colyseus/loadtest` run at `maxPlayers`.
 
 ## Open questions
 
