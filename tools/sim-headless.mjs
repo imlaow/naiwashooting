@@ -1,19 +1,21 @@
-// Runs the game headless in plain Node (no Pixi, no DOM, no stubs) with a scripted bot on every
-// preset map, and reports how far it got. A check that src/sim runs on its own, as a server will
-// run it.
+// Runs the game headless in plain Node (no Pixi, no DOM, no stubs) with scripted bots
+// (src/sim/bot.js) on every preset map, and reports how far they got. A check that src/sim runs
+// on its own, as a server will run it.
 //
 //   node tools/sim-headless.mjs                 10 minutes of game time on every preset map
 //   node tools/sim-headless.mjs --minutes 2 --map island/cove --seed 7
+//   node tools/sim-headless.mjs --players 3     co-op with 3 bots (1–4)
 //   node tools/sim-headless.mjs --trace > a.txt  also prints the state once per game second, so
 //                                                two versions of the sim can be compared with diff
 //
-// The bot moves, aims at the nearest enemy, shoots, dashes away from eggs, reloads, switches to
-// its best gun and walks over pickups. When it dies a new run starts on the same map. Exits with
-// code 1 on any error: an exception, a position that isn't a number, the player off walkable
-// ground, or a fight with no kill for STALL seconds.
+// When the run is over (every bot down or dead) a new one starts on the same map. In co-op, each
+// run starts with one bot fewer and the last one joins 5 s into wave 2, so it waits for the wave
+// break; with 3 or more, one bot also leaves when wave 4 starts and a new one joins 10 s later.
+// Exits with code 1 on any error: an exception, a position that isn't a number, a player off
+// walkable ground, or a fight with no kill for STALL seconds.
 import { THEMES, makeChoice, buildMap } from '../src/sim/maps.js';
 import { Sim, STEP } from '../src/sim/sim.js';
-import { WEAPONS } from '../src/sim/entities.js';
+import { Bot } from '../src/sim/bot.js';
 import { mulberry32 } from '../src/noise.js';
 
 const args = process.argv.slice(2);
@@ -22,106 +24,65 @@ const MINUTES = Number(opt('minutes', 10));
 const ONLY = opt('map', null);
 const SEED = Number(opt('seed', 1));
 const TRACE = args.includes('--trace');
+const PLAYERS = Math.max(1, Math.min(4, Number(opt('players', 1))));
 const STALL = 120;
 
 // The sim may use Math.random; seed it so a run can be repeated.
 Math.random = mulberry32(SEED);
 
-class Bot {
-  constructor(sim) {
-    this.sim = sim;
-    this.rand = mulberry32(SEED + 99);
-    this.stuckT = 0; this.detourT = 0; this.detour = 0;
-    this.lastX = sim.player.x; this.lastY = sim.player.y; this.checkT = 1;
-  }
-
-  wants(p) {
-    const P = this.sim.player;
-    if (p.kind === 'health') return P.hp < P.maxHp && P.laughT < 0;
-    if (p.kind === 'ammo') return Object.keys(P.arsenal).length > 1;
-    return true;
-  }
-
-  // The best gun it has ammo for at this range.
-  pickWeapon(dist) {
-    const P = this.sim.player;
-    const has = (k) => P.arsenal[k] && P.arsenal[k].mag + P.arsenal[k].reserve > 0;
-    if (dist < 260 && has('shotgun')) return 'shotgun';
-    for (const k of ['rifle', 'smg', 'shotgun']) if (has(k)) return k;
-    return 'pistol';
-  }
-
-  command(dt) {
-    const sim = this.sim, P = sim.player;
-    let target = null, td = Infinity;
-    for (const e of sim.enemies) {
-      if (e.dead || e.spawnT > 0) continue;
-      const d = Math.hypot(e.x - P.x, e.y - P.y);
-      if (d < td) { td = d; target = e; }
-    }
-    const seen = target && sim.statics.clearLine(P.x, P.y, target.x, target.y, 6);
-    let pick = null, pd = 700;
-    for (const p of sim.pickups) {
-      const d = Math.hypot(p.x - P.x, p.y - P.y);
-      if (d < pd && this.wants(p)) { pd = d; pick = p; }
-    }
-
-    let dx = 0, dy = 0, dash = false;
-    if (target && td < 200) {
-      // Back off, sideways a little so it doesn't run into a wall in a straight line.
-      dx = (P.x - target.x) / td - (target.y - P.y) / td * 0.5;
-      dy = (P.y - target.y) / td + (target.x - P.x) / td * 0.5;
-      dash = td < 90 && P.dashCd <= 0;
-    } else if (pick) {
-      dx = pick.x - P.x; dy = pick.y - P.y;
-    } else if (target && (!seen || td > 420)) {
-      dx = target.x - P.x; dy = target.y - P.y;
-    } else if (target) {
-      dx = -(target.y - P.y); dy = target.x - P.x;
-    }
-    // Detour when it has been trying to move but hasn't got anywhere for a second.
-    this.checkT -= dt;
-    if (this.checkT <= 0) {
-      const moved = Math.hypot(P.x - this.lastX, P.y - this.lastY);
-      if ((dx || dy) && moved < 40) { this.detourT = 0.8 + this.rand(); this.detour = this.rand() * Math.PI * 2; }
-      this.lastX = P.x; this.lastY = P.y; this.checkT = 1;
-    }
-    if (this.detourT > 0) { this.detourT -= dt; dx = Math.cos(this.detour); dy = Math.sin(this.detour); }
-    const l = Math.hypot(dx, dy);
-    if (l > 0) { dx /= l; dy /= l; }
-
-    const slot = P.slot;
-    const weapon = this.pickWeapon(target ? td : Infinity);
-    return {
-      mx: dx, my: dy,
-      aim: target ? Math.atan2(target.y - P.y, target.x - P.x) : P.aim,
-      fire: !!target && seen && td < 650,
-      dash, dashDir: null,
-      reload: slot.mag === 0 || (!seen && slot.mag < WEAPONS[P.weapon].mag / 2),
-      weapon: weapon !== P.weapon ? weapon : null,
-      cycle: 0, last: false,
-    };
-  }
-}
-
 function playMap(choice) {
   const t0 = performance.now();
   const { world, layout } = buildMap(choice);
   const buildMs = performance.now() - t0;
-  const r = { map: `${choice.theme}/${choice.id}`, buildMs, runs: [], deaths: 0, kills: 0, errors: [], events: {}, maxEnemies: 0, longestQuiet: 0 };
+  const r = {
+    map: `${choice.theme}/${choice.id}`, buildMs, runs: [], deaths: 0, kills: 0, errors: [], events: {}, maxEnemies: 0, longestQuiet: 0,
+    bots: [], joins: [],
+  };
   const steps = Math.round((MINUTES * 60) / STEP);
-  let sim = null, bot = null, quietT = 0, stepMs = 0;
+  let sim = null, bots = null, added = 0, quietT = 0, stepMs = 0, plan = null;
+  // Bots are numbered in the order they joined over the whole session (n); each run's k-th bot
+  // gets the same random stream.
+  const addBot = () => {
+    const P = sim.addPlayer(), n = r.bots.length;
+    const b = new Bot(sim, P.id, mulberry32(SEED + 99 + added++));
+    b.n = n;
+    r.bots.push({ kills: 0, downs: 0, revives: 0, deaths: 0, respawns: 0 });
+    bots.set(P.id, b);
+    return b;
+  };
   const newRun = () => {
     sim = new Sim(world, layout);
-    bot = new Bot(sim);
+    bots = new Map();
+    added = 0;
+    for (let i = 0; i < (PLAYERS > 1 ? PLAYERS - 1 : 1); i++) addBot();
+    // Co-op: who joins and leaves during the run (seconds into a wave).
+    plan = PLAYERS > 1 ? [{ wave: 2, at: 5, join: true }] : [];
+    if (PLAYERS > 2) plan.push({ wave: 4, at: 0, leave: true }, { wave: 4, at: 10, join: true });
     quietT = 0;
   };
   const endRun = () => r.runs.push({ wave: sim.wave, kills: sim.kills, score: sim.score, seconds: Math.round(sim.time) });
+  let waveT = 0;
   newRun();
   for (let i = 0; i < steps; i++) {
+    waveT = sim.state === 'fight' ? waveT + STEP : 0;
+    while (plan.length && sim.wave >= plan[0].wave && sim.state === 'fight' && waveT >= plan[0].at) {
+      const p = plan.shift();
+      if (p.join) {
+        const b = addBot();
+        r.joins.push({ n: b.n, t: sim.time, wave: sim.wave, waiting: sim.players.get(b.id).dead });
+      } else {
+        // The first bot that is up leaves.
+        const b = [...bots.values()].find((x) => sim.players.get(x.id).up) ?? bots.values().next().value;
+        sim.removePlayer(b.id);
+        bots.delete(b.id);
+        r.joins.push({ n: b.n, t: sim.time, wave: sim.wave, left: true });
+      }
+    }
+    const cmds = {};
     try {
+      for (const b of bots.values()) cmds[b.id] = b.command(STEP);
       const s0 = performance.now();
-      sim.step(STEP, bot.command(STEP));
+      sim.step(STEP, cmds);
       stepMs += performance.now() - s0;
     } catch (err) {
       r.errors.push(`t=${sim.time.toFixed(2)} ${err.stack}`);
@@ -133,11 +94,23 @@ function playMap(choice) {
       const key = e.type === 'propBroken' ? e.kind : e.type === 'kill' && e.enemyType === 'boss' ? 'boss' : e.type;
       r.events[key] = (r.events[key] ?? 0) + 1;
       if (e.type === 'kill' || e.type === 'wave') quietT = 0;
+      const st = (id) => r.bots[bots.get(id)?.n];
+      if (e.type === 'kill' && e.by != null && st(e.by)) st(e.by).kills++;
+      else if (e.type === 'downed') st(e.id).downs++;
+      else if (e.type === 'revived') st(e.by).revives++;
+      else if (e.type === 'died' && PLAYERS > 1) st(e.id).deaths++;
+      else if (e.type === 'respawned' && !e.joined) st(e.id).respawns++;
+      else if (e.type === 'respawned') {
+        const j = r.joins.findLast((x) => x.n === bots.get(e.id).n && !x.left);
+        if (e.joined && j && j.waiting && j.entered == null) j.entered = { t: sim.time, wave: sim.wave + 1 };
+      }
     }
-    const P = sim.player;
     r.maxEnemies = Math.max(r.maxEnemies, sim.enemies.length);
-    if (!Number.isFinite(P.x + P.y + P.hp) || sim.enemies.some((e) => !Number.isFinite(e.x + e.y + e.hp))) r.errors.push(`t=${sim.time.toFixed(2)} position or hp is not a number`);
-    if (!P.dead && !world.isWalkable(P.x, P.y)) r.errors.push(`t=${sim.time.toFixed(2)} player off walkable ground at ${P.x.toFixed(0)},${P.y.toFixed(0)}`);
+    for (const P of sim.players.values()) {
+      if (!Number.isFinite(P.x + P.y + P.hp)) r.errors.push(`t=${sim.time.toFixed(2)} player ${P.id} position or hp is not a number`);
+      if (!P.dead && !world.isWalkable(P.x, P.y)) r.errors.push(`t=${sim.time.toFixed(2)} player ${P.id} off walkable ground at ${P.x.toFixed(0)},${P.y.toFixed(0)}`);
+    }
+    if (sim.enemies.some((e) => !Number.isFinite(e.x + e.y + e.hp))) r.errors.push(`t=${sim.time.toFixed(2)} position or hp is not a number`);
     if (sim.state === 'fight') {
       quietT += STEP;
       r.longestQuiet = Math.max(r.longestQuiet, quietT);
@@ -148,12 +121,15 @@ function playMap(choice) {
     }
     if (TRACE && i % 60 === 59) {
       const f = (v) => v.toFixed(4);
+      const [P, ...mates] = sim.players.values();
       console.log(`${r.map} t=${f(sim.time)} wave=${sim.wave} ${sim.state} score=${sim.score} kills=${sim.kills} hp=${f(P.hp)} ` +
         `at=${f(P.x)},${f(P.y)} ${P.weapon} ${P.slot.mag}/${P.slot.reserve} enemies=${sim.enemies.length} queue=${sim.queue.length} ` +
-        `props=${sim.props.length} pickups=${sim.pickups.length} bullets=${sim.bullets.length}`);
+        `props=${sim.props.length} pickups=${sim.pickups.length} bullets=${sim.bullets.length}` +
+        mates.map((o) => ` | p${o.id} ${o.dead ? 'dead' : o.down ? `down ${o.bleedT.toFixed(1)} rev ${o.reviveT.toFixed(2)}` : 'up'} hp=${f(o.hp)} at=${f(o.x)},${f(o.y)} k=${o.kills}`).join('') +
+        (PLAYERS > 1 && sim.enemies[0] ? ` | e0 ${sim.enemies[0].type} at=${f(sim.enemies[0].x)},${f(sim.enemies[0].y)} hp=${sim.enemies[0].hp} target=p${sim.enemies[0].target?.id}` : ''));
     }
     if (r.errors.length > 20) break;
-    if (P.dead) {
+    if (sim.state === 'dead') {
       r.deaths++;
       endRun();
       newRun();
@@ -170,13 +146,21 @@ for (const th of THEMES) for (const v of th.variants) maps.push(makeChoice(th.id
 const todo = ONLY ? maps.filter((c) => `${c.theme}/${c.id}` === ONLY) : maps;
 if (!todo.length) { console.error(`no preset map ${ONLY}`); process.exit(1); }
 
-console.log(`${MINUTES} min of game time per map, seed ${SEED}\n`);
+console.log(`${MINUTES} min of game time per map, seed ${SEED}${PLAYERS > 1 ? `, ${PLAYERS} bots (co-op)` : ''}\n`);
 let failed = 0;
 for (const choice of todo) {
   const r = playMap(choice);
   const best = Math.max(...r.runs.map((x) => x.wave));
   const ev = r.events;
-  console.log(`${r.map.padEnd(16)} waves ${r.runs.map((x) => x.wave).join(', ').padEnd(12)} best ${String(best).padStart(2)}  kills ${String(r.kills).padStart(4)}  deaths ${r.deaths}  errors ${r.errors.length}`);
+  if (PLAYERS === 1) {
+    console.log(`${r.map.padEnd(16)} waves ${r.runs.map((x) => x.wave).join(', ').padEnd(12)} best ${String(best).padStart(2)}  kills ${String(r.kills).padStart(4)}  deaths ${r.deaths}  errors ${r.errors.length}`);
+  } else {
+    const sum = (k) => r.bots.reduce((s, b) => s + b[k], 0);
+    console.log(`${r.map.padEnd(16)} waves ${r.runs.map((x) => x.wave).join(', ').padEnd(12)} best ${String(best).padStart(2)}  kills ${String(r.kills).padStart(4)}  runs over ${r.deaths}  errors ${r.errors.length}`);
+    console.log(`${''.padEnd(16)} kills per bot ${r.bots.map((b, i) => `b${i + 1} ${b.kills}`).join(', ')}`);
+    console.log(`${''.padEnd(16)} downs ${sum('downs')}, revives ${sum('revives')}, deaths (bled out) ${sum('deaths')}, respawns ${sum('respawns')}`);
+    console.log(`${''.padEnd(16)} joined / left mid-run: ${r.joins.map((j) => j.left ? `b${j.n + 1} left (wave ${j.wave})` : `b${j.n + 1} joined in wave ${j.wave}${j.waiting ? `, in at ${j.entered ? `wave ${j.entered.wave}` : 'run end: never'}` : ', in at once'}`).join('; ') || 'none'}`);
+  }
   console.log(`${''.padEnd(16)} shots ${ev.shot ?? 0}, crates ${ev.crate ?? 0}, barrels ${ev.barrel ?? 0}, pickups ${ev.pickup ?? 0}, laughs ${ev.laugh ?? 0}, ` +
     `King Naiwa ${ev.boss ?? 0}, most enemies ${r.maxEnemies}, longest fight without a kill ${r.longestQuiet.toFixed(0)} s`);
   // Timings change from run to run, so a trace leaves them out.

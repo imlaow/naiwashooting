@@ -1,9 +1,9 @@
-// Draws the sim's player and enemies (sim/entities.js): sprites, walk cycle, recoil, hit flash,
-// footstep dust, dash ghosts, the boss's crown and enemy health bars. Each view reads its sim
-// object every frame and keeps only what is drawn.
+// Draws the sim's players and enemies (sim/entities.js): sprites, walk cycle, recoil, hit flash,
+// footstep dust, dash ghosts, the downed look and revive ring, the boss's crown and enemy health
+// bars. Each view reads its sim object every frame and keeps only what is drawn.
 import { Container, Sprite, Graphics } from 'pixi.js';
 import { makeSprite } from './world.js';
-import { GUN_H } from '../sim/entities.js';
+import { GUN_H, REVIVE_RANGE, REVIVE_SECONDS, BLEED_SECONDS } from '../sim/entities.js';
 import { sfx } from '../audio.js';
 import { laugh } from '../laugh.js';
 
@@ -30,10 +30,13 @@ function stepFx(v, e, dt, moving, splashSound) {
   }
 }
 
+// The local player's view (`local`) also follows the laugh sound and splashes audibly; recoil and
+// the hurt flash are only ever set on it (view/game.js).
 export class PlayerView {
-  constructor(game, player) {
+  constructor(game, player, local = true) {
     this.game = game;
     this.p = player;
+    this.local = local;
     this.fadePad = 60; // trees fade once he's this close to walking behind them
     this.animT = 0; this.stepT = 0; this.recoil = 0; this.flash = 0;
     this.dashLeft = 0; this.ghostT = 0;
@@ -48,6 +51,12 @@ export class PlayerView {
     this.shadow = makeSprite(game.art.shadow);
     this.shadow.scale.set(0.8, 0.9);
     game.layers.shadows.addChild(this.shadow);
+    // On the ground around a downed player: how far away a teammate can revive from, the bleed-out
+    // time left (red) and the revive so far (green).
+    this.ring = new Graphics();
+    this.ring.scale.y = 0.5;
+    this.ring.visible = false;
+    game.layers.shadows.addChild(this.ring);
     this.sync(1);
   }
 
@@ -73,14 +82,16 @@ export class PlayerView {
 
   update(dt, alpha) {
     const P = this.p;
-    if (P.dead) return;
+    // Out of play (bled out, or a late joiner waiting for the wave break).
+    this.root.visible = !P.dead;
+    if (P.dead) { this.shadow.visible = this.ring.visible = false; return; }
     // Dash ghosts, dropped where he was before the last step.
     if (this.dashLeft > 0) {
       this.dashLeft -= dt;
       this.ghostT -= dt;
       if (this.ghostT <= 0) { this.ghostT = 0.025; this.ghost(); }
     }
-    stepFx(this, P, dt, P.moving, true);
+    stepFx(this, P, dt, P.moving, this.local);
     this.animT += dt * (P.moving ? 9 : 2.2);
     this.sync(alpha);
   }
@@ -101,7 +112,7 @@ export class PlayerView {
     // sync with the audio; the sim's own clock otherwise.
     const L = P.laughT >= 0 && game.skins.laugh;
     if (L) {
-      const lt = laugh.time() ?? P.laughT;
+      const lt = (this.local ? laugh.time() : null) ?? P.laughT;
       const tex = L.frames[Math.min(L.frames.length - 1, Math.floor(lt * L.fps))];
       this.body.texture = tex;
       this.body.anchor.copyFrom(tex.defaultAnchor);
@@ -110,16 +121,19 @@ export class PlayerView {
       this.body.anchor.copyFrom(HERO_ANCHOR);
     }
     if (this.weapon !== P.weapon) { this.weapon = P.weapon; this.gun.texture = game.art.guns[P.weapon]; }
-    // The walk bob and lean are for the walk cycle; the laugh clip plays upright.
-    const walk = P.moving && !L;
+    // The walk bob and lean are for the walk cycle; the laugh clip plays upright. Downed, he lies
+    // on his side, greyed out.
+    const down = P.down;
+    const walk = P.moving && !L && !down;
     const bob = walk ? -Math.abs(Math.sin(this.animT * Math.PI)) * 6 : 0;
-    const breathe = P.moving || L ? 1 : 1 + Math.sin(game.time * 3) * 0.018;
+    const breathe = P.moving || L || down ? 1 : 1 + Math.sin(game.time * 3) * 0.018;
     const wading = game.island.isWading(P.x, P.y);
-    this.body.y = bob + (wading ? 8 : 0);
+    this.body.y = bob + (wading ? 8 : 0) + (down ? -6 : 0);
     this.body.scale.set(HERO_SCALE * facing, HERO_SCALE * breathe);
-    this.body.rotation = walk ? (P.vx / 265) * 0.07 : 0;
-    this.body.tint = this.flash > 0 ? 0xff6b6b : 0xffffff;
-    this.root.alpha = P.invuln > 0 && P.dashT <= 0 ? (Math.floor(game.time * 20) % 2 ? 0.45 : 1) : 1;
+    this.body.rotation = down ? facing * 1.35 : walk ? (P.vx / 265) * 0.07 : 0;
+    this.body.tint = this.flash > 0 ? 0xff6b6b : down ? 0x8f9bb0 : 0xffffff;
+    this.gun.visible = !down;
+    this.root.alpha = P.invuln > 0 && P.dashT <= 0 && !down ? (Math.floor(game.time * 20) % 2 ? 0.45 : 1) : 1;
     const cos = Math.cos(P.aim), sin = Math.sin(P.aim);
     this.gun.position.set(cos * (12 - this.recoil), -GUN_H + bob * 0.5 + sin * 4 - this.recoil * sin);
     this.gun.rotation = P.aim;
@@ -134,16 +148,23 @@ export class PlayerView {
     this.root.zIndex = y;
     this.shadow.position.set(x + 2, y - 2);
     this.shadow.visible = !wading;
+    this.ring.visible = down;
+    if (down) this.drawRing(x, y);
   }
 
-  hide() {
-    this.root.visible = false;
-    this.shadow.visible = false;
+  drawRing(x, y) {
+    const P = this.p, g = this.ring.clear(), top = -Math.PI / 2;
+    const arc = (r, f) => g.moveTo(Math.cos(top) * r, Math.sin(top) * r).arc(0, 0, r, top, top + f * Math.PI * 2);
+    this.ring.position.set(x, y);
+    g.circle(0, 0, REVIVE_RANGE).fill({ color: 0x000000, alpha: 0.18 }).stroke({ width: 3, color: 0xffffff, alpha: 0.4 });
+    arc(REVIVE_RANGE + 7, Math.max(0, P.bleedT / BLEED_SECONDS)).stroke({ width: 4, color: 0xef4444, alpha: 0.85 });
+    if (P.reviveT > 0) arc(REVIVE_RANGE, Math.min(1, P.reviveT / REVIVE_SECONDS)).stroke({ width: 8, color: 0x4ade80 });
   }
 
   destroy() {
     this.root.destroy({ children: true });
     this.shadow.destroy();
+    this.ring.destroy();
   }
 }
 

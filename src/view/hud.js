@@ -137,9 +137,9 @@ export class Hud {
   // A touch on the weapon panel switches weapon (slot row) or reloads (ammo area).
   tap(x, y) {
     if (!this.ui.visible || !this.w) return false;
-    const P = this.game.sim.player, p = this.wpPanel, s = p.scale.x;
+    const P = this.game.me, p = this.wpPanel, s = p.scale.x;
     const lx = (x - p.x) / s, ly = (y - p.y) / s;
-    if (lx < 0 || lx > 270 || ly < 0 || ly > 118 || P.dead) return false;
+    if (lx < 0 || lx > 270 || ly < 0 || ly > 118 || !P.up) return false;
     if (ly >= 64) {
       const k = WEAPON_ORDER[Math.max(0, Math.min(WEAPON_ORDER.length - 1, Math.floor((lx - 11) / 62)))];
       this.game.presses.weapon = k;
@@ -235,7 +235,7 @@ export class Hud {
   }
 
   update(dt, mouseWorld) {
-    const g = this.game, S = g.sim, P = S.player, input = g.input;
+    const g = this.game, S = g.sim, P = g.me, input = g.input;
     if (input.touch !== this.touchLayout) this.resize(this.w, this.h);
     // Health
     const hpFrac = Math.max(0, P.hp / P.maxHp);
@@ -249,7 +249,8 @@ export class Hud {
       .roundRect(78, 39, 204 * hpFrac, 4, 2).fill({ color: 0xffffff, alpha: 0.3 })
       .roundRect(76, 56, 90, 6, 3).fill({ color: 0x000000, alpha: 0.5 })
       .roundRect(76, 56, 90 * dashFrac, 6, 3).fill(dashFrac >= 1 ? 0x7dd3fc : 0x3b6b85);
-    this.setText(this.hpText, 'hp', `${Math.ceil(P.hp)} / ${P.maxHp}`);
+    this.setText(this.hpText, 'hp', P.down ? t('hud.down', { n: Math.ceil(P.bleedT) }) : P.dead && S.state !== 'dead' ? t('hud.out') : `${Math.ceil(P.hp)} / ${P.maxHp}`);
+    this.hpText.tint = P.down ? 0xff8a8a : 0xffffff;
     this.portrait.texture = g.skins.hero[Math.floor(g.time * 1.5) % 4];
 
     // Weapon
@@ -279,8 +280,8 @@ export class Hud {
     const remaining = S.queue.length + S.enemies.filter((e) => !e.dead).length;
     this.setText(this.enemyText, 'enemies', st === 'break' ? t('hud.nextWave', { n: Math.ceil(S.stateT) }) : st === 'intro' ? t('hud.starting', { n: Math.ceil(S.stateT) }) : t('hud.left', { n: remaining }));
     this.setText(this.scoreText, 'score', S.score.toLocaleString());
-    const mult = 1 + Math.min(3, Math.floor(S.combo / 3) * 0.5);
-    this.setText(this.comboText, 'combo', S.comboT > 0 && S.combo > 1 ? t('hud.combo', { n: S.combo, m: mult }) : '');
+    const mult = 1 + Math.min(3, Math.floor(P.combo / 3) * 0.5);
+    this.setText(this.comboText, 'combo', P.comboT > 0 && P.combo > 1 ? t('hud.combo', { n: P.combo, m: mult }) : '');
 
     // Boss bar
     const boss = S.boss && !S.boss.dead ? S.boss : null;
@@ -304,8 +305,12 @@ export class Hud {
     }
     const hw = this.w / 2 / g.zoom, hh = this.h / 2 / g.zoom;
     d.rect((g.cam.x - hw) * k, (g.cam.y - hh) * k, hw * 2 * k, hh * 2 * k).stroke({ width: 1, color: 0xffffff, alpha: 0.5 });
+    for (const o of S.players.values()) {
+      if (o === P || o.dead) continue;
+      d.circle(o.x * k, o.y * k, 3).fill(o.down ? 0xff6b6b : 0x7dd3fc).stroke({ width: 1.5, color: 0x000000 });
+    }
     const pulse = 3.5 + Math.sin(g.time * 6) * 0.8;
-    d.circle(P.x * k, P.y * k, pulse).fill(0xffd23f).stroke({ width: 1.5, color: 0x000000 });
+    if (!P.dead) d.circle(P.x * k, P.y * k, pulse).fill(0xffd23f).stroke({ width: 1.5, color: 0x000000 });
 
     // Banner & toast
     if (this.bannerT > 0) this.bannerT -= dt;
@@ -323,7 +328,7 @@ export class Hud {
     // Crosshair
     const c = this.cross.clear();
     const r = this.reloadArc.clear();
-    if (!input.touch && !P.dead) {
+    if (!input.touch && P.up) {
       const mx = input.mouse.x, my = input.mouse.y;
       const spread = 9 + W.spread * 60 + g.hero.recoil * 2;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {

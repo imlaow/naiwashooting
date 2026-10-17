@@ -20,6 +20,14 @@ const muzzleReach = (gun, scale = 1) => 12 + (GUN_SIZES[gun][0] - GUN_GRIP) * sc
 export const GUN_H = 36; // height bullets fly at above the ground
 // The laugh clip is 180 frames at 15 fps (public/assets/laugh/index.json).
 export const LAUGH_SECONDS = 12;
+// Co-op: a downed player crawls at DOWN_SPEED and bleeds out after BLEED_SECONDS, unless a
+// teammate stays within REVIVE_RANGE for REVIVE_SECONDS.
+export const DOWN_SPEED = 0.3;
+export const BLEED_SECONDS = 30;
+export const REVIVE_RANGE = 60;
+export const REVIVE_SECONDS = 3;
+// A player without a command this step stands still and holds fire.
+const idle = (aim) => ({ mx: 0, my: 0, aim, fire: false, dash: false, dashDir: null, reload: false, weapon: null, cycle: 0, last: false });
 
 // Shared movement: axis-separated so characters slide along shorelines,
 // then pushed out of obstacles.
@@ -50,6 +58,27 @@ export class Player {
     this.invuln = 0;
     this.moving = false;
     this.laughT = -1; // seconds into the laugh, -1 when not laughing
+    this.kills = 0; this.combo = 0; this.comboT = 0;
+    // Co-op: down (crawling, bleedT seconds left, reviveT seconds of a teammate's revive so far,
+    // by `reviver`) and dead (out until the next wave break).
+    this.down = false; this.bleedT = 0; this.reviveT = 0; this.reviver = null;
+    this.dead = false;
+  }
+
+  // In play and able to fight: not dead, not down.
+  get up() { return !this.dead && !this.down; }
+
+  // Back at (x, y) with full health and only the pistol (a respawn, or a late joiner entering).
+  respawn(x, y) {
+    this.x = x; this.y = y; this.vx = 0; this.vy = 0;
+    this.hp = this.maxHp;
+    this.arsenal = { pistol: { mag: WEAPONS.pistol.mag, reserve: Infinity } };
+    this.weapon = this.lastWeapon = 'pistol';
+    this.cooldown = 0; this.reloading = 0;
+    this.dashT = 0; this.dashCd = 0;
+    this.invuln = 1;
+    this.laughT = -1; this.combo = 0; this.comboT = 0;
+    this.down = false; this.bleedT = 0; this.reviveT = 0; this.reviver = null;
     this.dead = false;
   }
 
@@ -98,7 +127,7 @@ export class Player {
   // Naiwa laughs his head off: untouchable and ignored by enemies for LAUGH_SECONDS
   // (he can still move and shoot), then back to full health.
   laugh() {
-    if (this.laughT >= 0 || this.dead) return false;
+    if (this.laughT >= 0 || !this.up) return false;
     this.laughT = 0;
     return true;
   }
@@ -108,9 +137,11 @@ export class Player {
   //   aim      angle the gun points at; fire: trigger held
   //   dash     dash this step, towards (mx, my), else dashDir (the way it was just moving), else aim
   //   reload, weapon (switch to), cycle (±n through owned weapons), last (back to the previous one)
-  update(dt, cmd) {
+  // A downed player only crawls and aims.
+  update(dt, cmd = idle(this.aim)) {
     if (this.dead) return;
     const sim = this.sim;
+    if (this.down) { this.crawl(dt, cmd); return; }
     if (this.laughT >= 0) {
       this.laughT += dt;
       if (this.laughT >= LAUGH_SECONDS) {
@@ -175,6 +206,19 @@ export class Player {
     this.invuln -= dt;
   }
 
+  crawl(dt, cmd) {
+    this.bleedT -= dt;
+    if (this.bleedT <= 0) { this.sim.onPlayerBledOut(this); return; }
+    this.aim = cmd.aim;
+    const speed = 265 * DOWN_SPEED * (this.sim.island.isWading(this.x, this.y) ? 0.62 : 1);
+    const k = Math.min(1, dt * 14);
+    this.vx += (cmd.mx * speed - this.vx) * k;
+    this.vy += (cmd.my * speed - this.vy) * k;
+    moveBody(this, this.vx * dt, this.vy * dt);
+    this.moving = Math.hypot(this.vx, this.vy) > 40;
+    this.invuln -= dt;
+  }
+
   shoot() {
     const sim = this.sim, W = this.def;
     const cos = Math.cos(this.aim), sin = Math.sin(this.aim);
@@ -184,7 +228,7 @@ export class Player {
       const a = this.aim + (Math.random() - 0.5) * 2 * W.spread;
       sim.fireBullet({
         x: mx, y: my, ang: a, speed: W.speed * (W.pellets > 1 ? 0.85 + Math.random() * 0.25 : 1),
-        dmg: W.dmg, life: W.life * (W.pellets > 1 ? 0.8 + Math.random() * 0.3 : 1), team: 'player',
+        dmg: W.dmg, life: W.life * (W.pellets > 1 ? 0.8 + Math.random() * 0.3 : 1), team: 'player', owner: this.id,
         pierce: W.pierce ?? 0, knock: W.knock, tint: this.weapon === 'rifle' ? 0x9be7ff : 0xffe28a,
         scale: this.weapon === 'rifle' ? 1.6 : 1,
       });
@@ -195,14 +239,16 @@ export class Player {
     sim.emit({ type: 'shot', id: this.id, weapon: this.weapon, x: mx, y: my, ang: this.aim, px: this.x, py: this.y });
   }
 
+  // A downed player can't be hurt any more; the bleed-out timer is all that's left.
   hurt(dmg, fromX, fromY) {
-    if (this.invuln > 0 || this.dead || this.laughT >= 0) return false;
+    if (this.invuln > 0 || !this.up || this.laughT >= 0) return false;
     this.hp -= dmg;
     this.invuln = 0.45;
     const a = Math.atan2(this.y - fromY, this.x - fromX);
     this.vx += Math.cos(a) * 260; this.vy += Math.sin(a) * 260;
     this.sim.emit({ type: 'hurt', id: this.id, x: this.x, y: this.y, dmg });
-    if (this.hp <= 0) { this.hp = 0; this.dead = true; this.sim.onPlayerDeath(this); }
+    this.sim.onPlayerHurt(this);
+    if (this.hp <= 0) { this.hp = 0; this.sim.onPlayerDown(this); }
     return true;
   }
 }
@@ -217,16 +263,18 @@ export const ENEMY_TYPES = {
 };
 
 export class Enemy {
-  constructor(sim, type, x, y, level = 1) {
+  // hpMul: co-op makes King Naiwa tougher.
+  constructor(sim, type, x, y, level = 1, hpMul = 1) {
     const T = ENEMY_TYPES[type];
     this.sim = sim; this.type = type; this.T = T;
     this.id = sim.newId();
     this.x = x; this.y = y; this.r = T.r;
-    this.maxHp = this.hp = Math.round(T.hp * (1 + (level - 1) * 0.12));
+    this.maxHp = this.hp = Math.round(T.hp * (1 + (level - 1) * 0.12) * hpMul);
     this.speedMul = 1 + Math.min(0.35, (level - 1) * 0.03);
     this.vx = 0; this.vy = 0; this.kx = 0; this.ky = 0;
     this.aim = 0; this.cd = 1 + Math.random(); this.biteCd = 0;
-    this.losT = 0; this.los = false;
+    // The player it goes for, re-picked with the line-of-sight check (los: can it see them).
+    this.target = null; this.losT = 0; this.los = false;
     this.strafe = Math.random() < 0.5 ? 1 : -1; this.strafeT = 1 + Math.random() * 2;
     // The walk cycle's phase. Drawn, but the egg's waddle steers by it too.
     this.animT = Math.random() * 4; this.moving = false;
@@ -234,25 +282,44 @@ export class Enemy {
     this.phase = 'chase'; this.phaseT = 3; this.sweep = 0;
   }
 
+  // The nearest player it can go for (up and not laughing), preferring one in sight. With
+  // nobody to go for it keeps its target, or takes the nearest player, and mills around (update).
+  pickTarget() {
+    const sim = this.sim;
+    let best = null, rank = Infinity, bd = Infinity;
+    for (const P of sim.players.values()) {
+      const d = Math.hypot(P.x - this.x, P.y - this.y);
+      const ok = P.up && P.laughT < 0;
+      const r = ok ? (d < 900 && sim.statics.clearLine(this.x, this.y, P.x, P.y) ? 0 : 1) : P.dead ? 3 : 2;
+      if (r < rank || (r === rank && d < bd)) { best = P; rank = r; bd = d; }
+    }
+    if (rank >= 2 && this.target) best = this.target;
+    this.target = best;
+    // Seen from where it stands now, so it knows the moment its target is worth chasing again.
+    this.los = rank === 0 || (rank >= 2 && !!best && Math.hypot(best.x - this.x, best.y - this.y) < 900 && sim.statics.clearLine(this.x, this.y, best.x, best.y));
+  }
+
   update(dt) {
-    const sim = this.sim, P = sim.player;
+    const sim = this.sim;
     if (this.spawnT > 0) {
       this.spawnT -= dt;
       return;
     }
-    const dx = P.x - this.x, dy = P.y - this.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    const tx = dx / dist, ty = dy / dist;
     this.losT -= dt;
     if (this.losT <= 0) {
       this.losT = 0.2 + Math.random() * 0.15;
-      this.los = dist < 900 && sim.statics.clearLine(this.x, this.y, P.x, P.y);
+      this.pickTarget();
     }
+    const P = this.target;
+    const dx = P ? P.x - this.x : 0, dy = P ? P.y - this.y : 0;
+    const dist = Math.hypot(dx, dy) || 1;
+    const tx = dx / dist, ty = dy / dist;
     let wx = 0, wy = 0, speed = this.T.speed * this.speedMul;
     const T = this.T;
 
-    if (P.laughT >= 0) {
-      // Enemies lose track of a laughing Naiwa and mill around until he stops.
+    if (!P || P.laughT >= 0 || P.down) {
+      // Enemies lose track of a laughing (or downed) Naiwa and mill around until they can
+      // pick someone else.
       this.wanderT -= dt;
       if (!(this.wanderT > 0)) { this.wanderT = 1.2 + Math.random() * 1.8; this.wanderA = Math.random() * Math.PI * 2; }
       wx = Math.cos(this.wanderA); wy = Math.sin(this.wanderA); speed *= 0.35;
@@ -262,7 +329,7 @@ export class Enemy {
       wx = tx - ty * wob; wy = ty + tx * wob;
       this.biteCd -= dt;
       if (dist < this.r + P.r + 8 && this.biteCd <= 0 && !P.dead) {
-        if (P.hurt(T.bite, this.x, this.y)) sim.emit({ type: 'bite', id: this.id, x: this.x, y: this.y });
+        if (P.hurt(T.bite, this.x, this.y)) sim.emit({ type: 'bite', id: this.id, target: P.id, x: this.x, y: this.y });
         this.biteCd = 0.9;
         this.kx -= tx * 220; this.ky -= ty * 220;
       }
@@ -383,7 +450,7 @@ export class Enemy {
   }
 
   fire(pellets, spread, speed, dmg, orb = false) {
-    const sim = this.sim, P = sim.player, T = this.T;
+    const sim = this.sim, P = this.target, T = this.T;
     const dist = Math.hypot(P.x - this.x, P.y - this.y);
     const lead = (dist / speed) * 0.45;
     const ax = P.x + P.vx * lead, ay = P.y + P.vy * lead;
@@ -403,13 +470,14 @@ export class Enemy {
     sim.emit({ type: 'enemyShot', id: this.id, x: mx, y: my, h, ang: base, ex: this.x, ey: this.y });
   }
 
-  hit(dmg, ang, knock) {
+  // `by`: the id of the player whose bullet or barrel it was, if any.
+  hit(dmg, ang, knock, by = null) {
     if (this.dead) return;
     this.hp -= dmg;
     const kb = this.type === 'boss' ? 0.15 : this.type === 'heavy' ? 0.5 : 1;
     this.kx += Math.cos(ang) * knock * kb; this.ky += Math.sin(ang) * knock * kb;
-    this.sim.emit({ type: 'hit', id: this.id, x: this.x, y: this.y, dmg, h: this.height() });
-    if (this.hp <= 0) { this.dead = true; this.sim.onEnemyKilled(this); }
+    this.sim.emit({ type: 'hit', id: this.id, x: this.x, y: this.y, dmg, h: this.height(), by });
+    if (this.hp <= 0) { this.dead = true; this.sim.onEnemyKilled(this, by); }
   }
 
   // How tall it stands, for floating text above it.

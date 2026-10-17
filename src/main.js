@@ -131,18 +131,25 @@ async function boot() {
     await nextFrame();
   };
 
+  // Debug only: ?debug&bots=N plays with N - 1 bot teammates, to see co-op without a server.
+  const q = new URLSearchParams(location.search);
+  const bots = q.has('debug') ? Math.max(1, Math.min(4, Number(q.get('bots')) || 1)) : 1;
+
   const newGame = (isDemo) => {
     if (game) game.destroy();
     demo = isDemo;
     const { island, layout, terrainTex, choice } = built;
     game = new Game({
-      app, art, skins, island, layout, terrainTex, input, demo: isDemo, Scene: findTheme(choice.theme).scene,
+      app, art, skins, island, layout, terrainTex, input, demo: isDemo, Scene: findTheme(choice.theme).scene, bots: isDemo ? 1 : bots,
       onPause: (p) => show(p ? 'pause' : null),
       onMute: (m) => $('btn-mute').classList.toggle('muted', m),
-      onGameOver: ({ score, wave, kills }) => {
-        const best = Math.max(readBest(), score);
-        writeBest(best);
-        recordRun(choice, { score, wave, kills });
+      onGameOver: ({ score, wave, kills, coop }) => {
+        // Co-op runs don't count for the records.
+        const best = coop ? readBest() : Math.max(readBest(), score);
+        if (!coop) {
+          writeBest(best);
+          recordRun(choice, { score, wave, kills });
+        }
         $('go-score').textContent = score.toLocaleString();
         $('go-wave').textContent = wave;
         $('go-kills').textContent = kills;
@@ -203,7 +210,7 @@ async function boot() {
   });
 
   app.renderer.on('resize', () => game && game.resize());
-  if (new URLSearchParams(location.search).has('debug')) window.__naiwa = { app, get game() { return game; } };
+  if (q.has('debug')) window.__naiwa = { app, get game() { return game; } };
   app.ticker.add((t) => game && game.update(t.deltaMS / 1000));
 }
 

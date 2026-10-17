@@ -1,7 +1,7 @@
 # Online play: self-hosted servers (design)
 
-Status: **stages 1–2 of 7 done** (layout extraction and the sim/view split, 2026-10-17). This is the
-agreed design; build it in the stages at the end.
+Status: **stages 1–3 of 7 done** (layout extraction, the sim/view split and several players in the
+sim, 2026-10-17). This is the agreed design; build it in the stages at the end.
 
 ## Decisions
 
@@ -239,6 +239,8 @@ reproduce it. Only the map layout must stay seeded.
 
 ## Several players in the sim
 
+**Done in stage 3**, see "Stage 3 as built" below.
+
 `sim.player` becomes `players` (a map by id) plus `localId` on the client. Places that assume one
 player today (since stage 2 all in `src/sim/` unless marked): enemy targeting and `fire()` leading
 (`entities.js`), `spawnPoint`, `explode`, `updateBullets`, `updatePickups`, `updateWaves` (heal and
@@ -280,7 +282,107 @@ Found in stage 2:
 - Every player downed or dead → run over, results for 10 s, then the next map in the rotation.
 - With a single player on the server, downed = dead, as in single-player.
 
-### PvP deathmatch
+#### Stage 3 as built
+
+- **API.** `sim.players` is a `Map` by id. `sim.addPlayer()` returns the new `Player`;
+  `sim.removePlayer(id)` takes one out (enemies drop it as a target, a revive it was doing stops,
+  and the run ends if nobody left is up). `sim.step(STEP, cmds)` takes a plain object
+  `{ [player id]: cmd }`. A player with no command stands still and holds fire (it doesn't keep its
+  last command). The browser adds its player first and keeps `game.localId`; ids are the sim's
+  shared counter, so the player's id now comes after the props' and weapon spots'.
+- **Player state** (`sim/entities.js`): `up` (not down, not dead), `down`, `bleedT`, `reviveT`,
+  `reviver`, `dead`, `joining`, and per player `kills`, `combo`, `comboT`. `sim.kills` and
+  `sim.score` are the team's. Constants: `DOWN_SPEED`, `BLEED_SECONDS`, `REVIVE_RANGE`,
+  `REVIVE_SECONDS`.
+- **Events.** New: `downed`, `revived` (`by`), `respawned` (`joined` for a late joiner entering)
+  and `over` (every player down or dead). `died` now means "out": alone at HP 0, or bled out.
+  The view's game over hangs off `over`, not `died`. Fields added: `kill.by`, `hit.by`, `pickup.id`,
+  `bite.target`, `explode.by`, and `waveCleared.heals: [{ id, heal, x, y }]` instead of one heal.
+- **Different from the plan, or decided while building:**
+  - **Targeting** is re-picked on the `losT` timer, but a target that starts laughing or goes down
+    is dropped at once: the enemy mills around until the next pick. When nobody can be targeted,
+    it keeps its target (or takes the nearest player) and keeps checking line of sight to it. That
+    is exactly what one player did before, which keeps single-player identical.
+  - **One random roll more only when there is a choice.** `spawnPoint` picks the player to spawn
+    around with `Math.random` only when more than one is up, so with one player the random
+    sequence is unchanged. Spawns stay at least 680 px (pass 3: 400 px, last resort 300 px) from
+    every player who isn't dead.
+  - **Kills nobody made** (an enemy's bullet set off a barrel) go to the nearest player who is up,
+    with that player's combo; the same player is who a crate broken by an enemy drops a gun for.
+    Bullets carry `owner`, barrels pass it on through chain reactions.
+  - **`dropWeapon(x, y, P)`** picks a gun that `P` lacks, where `P` is the player it drops for
+    (the killer, or whoever broke the crate), decided when it drops, because the pickup shows its
+    gun on the ground.
+  - **Barrels still hurt every player in range,** teammates and the shooter included, as they
+    hurt the player in single-player. "No friendly fire" applies to bullets.
+  - **Downed** players can't be hurt (bullets pass through them), can aim and crawl but not
+    shoot, dash, switch, reload or pick up, and can't start a laugh, so a 5th kill made while down
+    (a bullet still in flight) doesn't laugh. The revive goes to the first teammate who is up and
+    within 60 px. Its progress resets when that teammate steps out of range, takes damage, or
+    leaves. A laughing teammate can revive.
+  - **Respawn and late joiners:** at the wave break, after the wave-clear heal and the supply
+    crates, every dead player is put back at the dock with full HP, a pistol and 1 s of
+    invulnerability (spawn protection, not in the plan). Players stand at the spawn and beside it
+    (`dockSpot`). A late joiner is added `dead` + `joining` during a fight in wave 2 or later, and
+    enters right away during the intro, wave 1 or a break.
+  - **Co-op scaling** uses `players.size` when the wave starts (counting dead and waiting players)
+    and rounds the scaled counts. Boss HP scales when King Naiwa spawns. The wave-clear heal and
+    the supply crate are per player who is up (one crate each).
+  - **Records:** co-op game overs (`?bots`) don't update the best score or the map cards.
+  - **The bot** moved to `src/sim/bot.js` (`new Bot(sim, id, rand)`). In co-op it also walks to a
+    downed teammate and waits by them, crawls to a teammate when it is down, and gives up on a
+    pickup it can't reach (2 s within 80 px without getting it): four bots once all stood at an
+    ammo box behind a wall while the last egg was stuck across the map. That last rule is off with
+    one player so the old traces stay comparable.
+- **View.** `Game.playerViews` by id (the `reconcile` pattern), `Game.hero` is the local one,
+  `Game.me` the local sim player. Recoil, the hurt flash, shake, toasts and the laugh sound are
+  only for the local player. Other players' shots, hurts, dashes and pickups sound with distance,
+  and gun handling (switch, reload, empty) is local only. A downed player lies on his side, greyed,
+  with a ring on the ground: the revive range, the bleed-out time left (red) and revive progress
+  (green). The HUD shows `DOWN n s` and, while out, "Waiting to respawn", and the camera follows a
+  teammate. Teammates are dots on the minimap (red while down). `?debug&bots=N` adds N − 1 bot
+  teammates driven by `sim/bot.js`.
+- **Checks.**
+  - **Same behaviour, exactly:** `node tools/sim-headless.mjs --trace` with one bot is
+    byte-identical to the trace recorded before the change, for seeds 1, 2 and 3 (all seven maps,
+    10 min each). The browser traces from stage 2's harness (headless Chromium, ticker stopped,
+    `game.update(1/60)` by hand, `Math.random` seeded, view randomness on its own stream, mouse
+    aimed 36 px above the target) are byte-identical on `island/cove`, `factory/dairy` and
+    `island/twins` (5 min each) and in the run where the bot doesn't shoot and dies.
+  - `node tools/sim-headless.mjs --players N` (2–4; one bot joins 5 s into wave 2, and with 3+ one
+    leaves at wave 4 and another joins 10 s later), 10 min on all seven maps, seeds 1–3: no errors.
+    Best waves 10–13 (single-player bots reach 8–10); every late joiner waited and came in at the
+    next break. 0–4 downs per map, most of them revived; the rest are runs where the whole team
+    went down together. Nobody bled out in these runs, so `sim-rules.mjs` and the browser check
+    cover bleed-out and respawn.
+  - `node tools/sim-rules.mjs` sets up each co-op rule by hand and checks it (alone = dead, downed,
+    crawl speed, revive, interrupt, bleed-out, respawn, run over, late joiners, removePlayer,
+    targeting, per-player laugh, team and player kills, pickups, no friendly fire, `dropWeapon`,
+    spawn distance, scaling).
+  - In the browser, both themes, `?bots=1` and `?bots=3`: one player, one view, and a death ends
+    the run with the results panel and updated records; with 3, downed (ring, lying down, HUD
+    countdown), a bot walking over to revive, bleed-out (hidden, camera on a teammate, "Waiting to
+    respawn"), respawn at the dock with a pistol at the wave break, a bot's 5th kill making only it
+    laugh (no laugh sound), enemies switching from a laughing or downed player to the one who is
+    up and milling around when nobody is, everyone down → "EVERYONE IS DOWN" and results, records
+    left alone. No page errors.
+  - Layout check, `--scene` and `--scene --draw` dumps unchanged.
+- **Cost:** a step is about 36 µs with one bot and 70 µs with four (factory, Neoverse-N1).
+- **For stage 4:**
+  - The room maps `sessionId` → player id, calls `addPlayer()` in `onJoin` (late joiners need
+    nothing more) and `removePlayer(id)` when a seat is given up. While `allowReconnection` holds
+    a seat, the player stays in the sim with no command, so it stands still and can be downed.
+  - `over` is the room's cue for results and the next map; the sim only sets `state = 'dead'`.
+  - What the view reads, so it has to be in the schema (or worked out on the client): players
+    `x, y, aim, hp, weapon, moving, vx, laughT, invuln, dashT, down, bleedT, reviveT, dead,
+    kills, combo, comboT`, and the arsenal for the local HUD; enemies `x, y, aim, hp, maxHp, type,
+    moving, animT, vx, spawnT`; sim `state, stateT, wave, score, kills, queue.length, boss`. Today
+    `Game` owns its `Sim`; online it needs a mode that reads this state instead.
+  - Events carry the ids clients need to filter on (`id`, `by`, `target`), and they can be
+    broadcast as they are.
+  - Not done here: weapon spots respawning 20 s after pickup ("online" in the plan).
+
+## PvP deathmatch
 
 - No AI waves. Crates and barrels respawn 30 s after being destroyed, weapon spots after 20 s.
 - Spawns: walkable points far from every living player (reuse `spawnPoint`'s checks). Respawn after
@@ -390,7 +492,7 @@ Each stage leaves single-player working and is pushed on its own.
 2. **Sim / view split. Done.** `src/sim/` with commands, events and a fixed step; the view in `src/view/`.
    Check: single-player plays the same; a Node script runs the sim headless for 10 minutes of waves
    with a scripted bot and no errors.
-3. **Several players in the sim.** Targeting, spawns, scaling, downed/revive, per-player laugh.
+3. **Several players in the sim. Done.** Targeting, spawns, scaling, downed/revive, per-player laugh.
    Check: a headless run with 2–4 bots.
 4. **Colyseus server and join screen.** `server/`, schema, `NaiwaRoom`, `onAuth` version check, the
    ONLINE panel. No prediction yet. Check: `@colyseus/testing` room tests; two browsers play co-op

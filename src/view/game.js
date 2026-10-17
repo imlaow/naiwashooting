@@ -1,9 +1,13 @@
 // Game session in the browser: runs the Sim (sim/sim.js) at its fixed step and draws it. Turns
-// keyboard, mouse and touch input into the sim's commands and its events into particles, sounds,
-// banners and screen shake. Also owns the camera, pause and the title-screen demo.
+// keyboard, mouse and touch input into the local player's commands (localId) and the sim's events
+// into particles, sounds, banners and screen shake. Also owns the camera, pause and the
+// title-screen demo. Every player is drawn; recoil, the hurt flash, shake, toasts and the laugh
+// sound are only for the local one.
 import { Container, Sprite } from 'pixi.js';
 import { WORLD } from '../island.js';
+import { mulberry32 } from '../noise.js';
 import { Sim, STEP } from '../sim/sim.js';
+import { Bot } from '../sim/bot.js';
 import { WEAPONS, WEAPON_ORDER, ENEMY_TYPES, GUN_H } from '../sim/entities.js';
 import { Fx } from './fx.js';
 import { Environment, makeSprite } from './world.js';
@@ -21,7 +25,8 @@ const noPresses = () => ({ dash: false, reload: false, weapon: null, cycle: 0, l
 export class Game {
   // `island` is the map's terrain (an Island or a Factory, see maps.js), `layout` its colliders,
   // props and weapon spots, and Scene the class that draws its scenery (Environment by default).
-  constructor({ app, art, skins, island, layout, terrainTex, input, onGameOver, onPause, onMute, demo = false, Scene = Environment }) {
+  // `bots` > 1 (debug only) adds bots - 1 scripted teammates (sim/bot.js) to see co-op locally.
+  constructor({ app, art, skins, island, layout, terrainTex, input, onGameOver, onPause, onMute, demo = false, Scene = Environment, bots = 1 }) {
     this.demo = demo;
     this.app = app; this.art = art; this.skins = skins; this.island = island; this.input = input;
     this.onGameOver = onGameOver; this.onPause = onPause; this.onMute = onMute;
@@ -52,8 +57,12 @@ export class Game {
     this.root.addChild(this.hurtVignette);
 
     this.sim = new Sim(island, layout);
+    this.localId = this.sim.addPlayer().id;
+    this.bots = [];
+    for (let i = 1; i < bots; i++) this.bots.push(new Bot(this.sim, this.sim.addPlayer().id, mulberry32(1000 + i)));
     this.fx = new Fx(art, this.layers);
     // Sprites for the sim's things, by id.
+    this.playerViews = new Map();
     this.propViews = new Map();
     this.pickupViews = new Map();
     this.enemyViews = new Map();
@@ -63,7 +72,8 @@ export class Game {
 
     this.env = new Scene(this, terrainTex, layout);
     this.syncProps(0);
-    this.hero = new PlayerView(this, this.sim.player);
+    this.syncPlayers(0, 1);
+    this.hero = this.playerViews.get(this.localId);
     this.syncPickups(0);
 
     const sp = island.spawn;
@@ -85,10 +95,13 @@ export class Game {
     this.hud.resize(w, h);
   }
 
+  // The local player in the sim.
+  get me() { return this.sim.players.get(this.localId); }
+
   shake(n) { this.shakeAmt = Math.min(22, this.shakeAmt + n); }
 
   volumeAt(x, y) {
-    const P = this.sim.player;
+    const P = this.me;
     const d = Math.hypot(x - P.x, y - P.y);
     return Math.max(0, 1 - d / 1300);
   }
@@ -112,7 +125,7 @@ export class Game {
   // The sim's command for the next step. Touch play aims at the nearest enemy in sight unless
   // the aim stick is held.
   command(mouseWorld) {
-    const P = this.sim.player, input = this.input;
+    const P = this.me, input = this.input;
     let aim = P.aim, fire = false;
     if (input.touch) {
       if (input.aimStick.active) {
@@ -136,14 +149,16 @@ export class Game {
   // ---------- Sim events → effects ----------
   onEvent(e) {
     const fx = this.fx;
+    // Player events: is it about the local player? Others' sounds fade with distance.
+    const mine = e.id === this.localId;
+    const vol = mine ? 1 : this.volumeAt(e.x, e.y);
     switch (e.type) {
       case 'shot': {
         const W = WEAPONS[e.weapon];
-        this.hero.recoil = W.kick;
-        this.shake(W.shake);
+        if (mine) { this.hero.recoil = W.kick; this.shake(W.shake); }
         fx.muzzle(e.x, e.y - GUN_H, e.ang);
         fx.shell(e.px, e.py, e.ang);
-        sfx.play(W.sound);
+        sfx.play(W.sound, vol);
         break;
       }
       case 'enemyShot':
@@ -169,28 +184,49 @@ export class Game {
         break;
       case 'bite': sfx.play('egg'); break;
       case 'hurt':
-        this.hero.flash = 0.15;
-        this.shake(9);
+        if (mine) { this.hero.flash = 0.15; this.shake(9); }
         fx.burst(e.x, e.y - 40, 0xffd23f, 6);
         fx.text(e.x, e.y - 100, `-${Math.round(e.dmg)}`, 0xff5a5a, 0.9);
-        sfx.play('hurt');
+        sfx.play('hurt', vol);
         break;
-      case 'died': this.onDied(e); break;
-      case 'dash':
-        this.hero.dashLeft = 0.17;
-        sfx.play('dash');
+      case 'downed':
+        if (mine) { this.shake(14); this.hud.toast(t('game.downed')); }
+        else this.hud.toast(t('game.mateDown'));
+        fx.burst(e.x, e.y - 40, 0xff6b6b, 16);
+        fx.text(e.x, e.y - 110, t('game.down'), 0xff6b6b, 1.2);
+        sfx.play('die', vol);
+        break;
+      case 'revived':
+        if (mine) this.hud.toast(t('game.revived'));
+        fx.burst(e.x, e.y - 40, 0x4ade80, 14);
+        fx.text(e.x, e.y - 100, '+30', 0x4ade80, 1.1);
+        sfx.play('heal', mine || e.by === this.localId ? 1 : vol);
+        break;
+      case 'died':
+        fx.burst(e.x, e.y - 40, 0xffd23f, 30);
+        if (mine && this.sim.players.size > 1 && this.sim.state !== 'dead') this.hud.toast(t('game.bledOut'));
+        break;
+      case 'respawned':
+        if (mine) this.hud.toast(t('game.respawned'));
+        fx.dust(e.x, e.y, 10, 0xffffff);
+        break;
+      case 'over': this.onOver(); break;
+      case 'dash': {
+        const v = this.playerViews.get(e.id);
+        if (v) v.dashLeft = 0.17;
+        sfx.play('dash', vol);
         fx.dust(e.x, e.y, 5);
         break;
+      }
       case 'laugh':
-        laugh.play(sfx.muted);
+        if (mine) { laugh.play(sfx.muted); this.hud.toast(t('game.laughToast')); }
         fx.text(e.x, e.y - 120, t('game.laugh'), 0xffd23f, 1.4);
-        this.hud.toast(t('game.laughToast'));
         break;
       case 'laughEnd':
-        if (e.heal > 0) { fx.text(e.x, e.y - 100, `+${e.heal}`, 0x4ade80, 1.2); sfx.play('heal'); }
+        if (e.heal > 0) { fx.text(e.x, e.y - 100, `+${e.heal}`, 0x4ade80, 1.2); if (mine) sfx.play('heal'); }
         break;
-      case 'switch': case 'reload': case 'reloaded': sfx.play('reload'); break;
-      case 'empty': sfx.play('empty'); break;
+      case 'switch': case 'reload': case 'reloaded': if (mine) sfx.play('reload'); break;
+      case 'empty': if (mine) sfx.play('empty'); break;
       case 'bulletHit': {
         const color = e.target === 'enemy' ? ENEMY_TYPES[e.enemyType].color : e.target === 'crate' ? 0xd9a866 : 0xffe2a0;
         fx.sparks(e.x, e.y - e.h, e.ang, color, 5);
@@ -232,7 +268,7 @@ export class Game {
         }
         break;
       case 'waveCleared':
-        if (e.heal > 0) fx.text(e.x, e.y - 100, `+${e.heal}`, 0x4ade80, 1);
+        for (const h of e.heals) if (h.heal > 0) fx.text(h.x, h.y - 100, `+${h.heal}`, 0x4ade80, 1);
         this.hud.banner(t('game.cleared'), t('game.bonus', { n: e.bonus }), 2.4, 0x4ade80);
         sfx.play('pickup');
         break;
@@ -240,18 +276,18 @@ export class Game {
   }
 
   onPickup(e) {
-    const fx = this.fx;
+    const fx = this.fx, mine = e.id === this.localId, vol = mine ? 1 : this.volumeAt(e.x, e.y);
     if (e.kind === 'health') {
       fx.text(e.px, e.py - 100, `+${Math.round(e.heal)}`, 0x4ade80, 1);
-      sfx.play('heal');
+      sfx.play('heal', vol);
     } else if (e.kind === 'ammo') {
       fx.text(e.px, e.py - 100, t('game.ammo'), 0xffd23f, 0.9);
-      sfx.play('pickup');
+      sfx.play('pickup', vol);
     } else {
       const name = t(`weapon.${e.weapon}`);
       fx.text(e.px, e.py - 100, e.had ? t('game.weaponAmmo', { w: name }) : name.toUpperCase(), 0x7dd3fc, 1.1);
-      if (!e.had) this.hud.toast(t(this.input.touch ? 'game.pickedUpTouch' : 'game.pickedUp', { w: name, n: WEAPON_ORDER.indexOf(e.weapon) + 1 }));
-      sfx.play('pickup');
+      if (!e.had && mine) this.hud.toast(t(this.input.touch ? 'game.pickedUpTouch' : 'game.pickedUp', { w: name, n: WEAPON_ORDER.indexOf(e.weapon) + 1 }));
+      sfx.play('pickup', vol);
     }
     fx.burst(e.x, e.y, PICKUP_TINT[e.kind], 8);
   }
@@ -275,14 +311,13 @@ export class Game {
     }
   }
 
-  onDied(e) {
+  // Every player is down or dead (alone: the player died).
+  onOver() {
     this.timeScale = 0.3;
-    this.hero.hide();
-    this.fx.burst(e.x, e.y - 40, 0xffd23f, 30);
     this.shake(20);
     sfx.play('gameover');
     laugh.stop();
-    this.hud.banner(t('game.fell'), '', 2, 0xff6b6b);
+    this.hud.banner(t(this.sim.players.size > 1 ? 'game.allDown' : 'game.fell'), '', 2, 0xff6b6b);
     this.overT = 0.6;
   }
 
@@ -301,6 +336,10 @@ export class Game {
     for (const [id, v] of views) {
       if (v.stamp !== stamp) { destroy(v); views.delete(id); }
     }
+  }
+
+  syncPlayers(dt, alpha) {
+    this.reconcile(this.playerViews, [...this.sim.players.values()], (P) => new PlayerView(this, P, P.id === this.localId), (v) => v.update(dt, alpha), (v) => v.destroy());
   }
 
   syncProps(dt) {
@@ -370,8 +409,7 @@ export class Game {
 
   // Positions before a step, so a frame can be drawn between two steps.
   rememberPositions() {
-    const P = this.sim.player;
-    this.hero.px = P.x; this.hero.py = P.y;
+    for (const v of this.playerViews.values()) { v.px = v.p.x; v.py = v.p.y; }
     for (const v of this.enemyViews.values()) { v.px = v.e.x; v.py = v.e.y; }
     for (const v of this.bulletViews.values()) { v.px = v.b.x; v.py = v.b.y; }
   }
@@ -404,35 +442,37 @@ export class Game {
     this.time += dt;
     if (this.overT > 0) {
       this.overT -= rawDt;
-      if (this.overT <= 0) this.onGameOver({ score: this.sim.score, wave: this.sim.wave, kills: this.sim.kills });
+      if (this.overT <= 0) this.onGameOver({ score: this.sim.score, wave: this.sim.wave, kills: this.sim.kills, coop: this.sim.players.size > 1 });
     }
 
     // Whole steps until the sim has caught up with the frame; the frame is then drawn between
     // the last two steps (alpha), which only matters on screens faster than 60 Hz. Rounding
     // leftovers (1/30 - 2/60 isn't exactly 0) don't start a step.
     const mouseWorld = this.screenToWorld(input.mouse.x, input.mouse.y);
-    this.hero.tick(dt);
+    for (const v of this.playerViews.values()) v.tick(dt);
     for (const v of this.enemyViews.values()) v.tick(dt);
     this.acc += dt;
     while (this.acc > 1e-9) {
       this.rememberPositions();
-      this.sim.step(STEP, this.command(mouseWorld));
+      const cmds = { [this.localId]: this.command(mouseWorld) };
+      for (const b of this.bots) cmds[b.id] = b.command(STEP);
+      this.sim.step(STEP, cmds);
       this.acc -= STEP;
       for (const e of this.sim.takeEvents()) this.onEvent(e);
     }
     const alpha = 1 + this.acc / STEP;
 
-    this.hero.update(dt, alpha);
+    this.syncPlayers(dt, alpha);
     this.syncEnemies(dt, alpha);
     this.syncBullets(alpha);
     this.syncPickups(dt);
     this.syncProps(dt);
     this.fx.update(dt);
 
-    // Camera
-    const P = this.hero;
+    // Camera: on the local player, or on a teammate while he's out.
+    const P = this.focus();
     let lx = 0, ly = 0;
-    if (!input.touch) {
+    if (!input.touch && P === this.hero) {
       lx = (mouseWorld.x - P.x) * 0.2; ly = (mouseWorld.y - P.y) * 0.2;
       const l = Math.hypot(lx, ly);
       if (l > 150) { lx *= 150 / l; ly *= 150 / l; }
@@ -449,13 +489,19 @@ export class Game {
     this.world.position.set(Math.round(sw / 2 - this.cam.x * this.zoom + shx), Math.round(sh / 2 - this.cam.y * this.zoom + shy));
     const hw = sw / 2 / this.zoom, hh = sh / 2 / this.zoom;
     const view = { x0: this.cam.x - hw, x1: this.cam.x + hw, y0: this.cam.y - hh, y1: this.cam.y + hh };
-    this.env.update(dt, view, [P, ...this.enemyViews.values()]);
+    this.env.update(dt, view, [...this.playerViews.values(), ...this.enemyViews.values()]);
 
-    const S = this.sim.player;
-    const low = S.hp / S.maxHp;
+    const S = this.me;
+    const low = S.dead ? 1 : S.hp / S.maxHp;
     this.hurtVignette.alpha = low < 0.35 ? (0.35 - low) * 1.6 * (0.75 + Math.sin(this.time * 6) * 0.25) : 0;
     this.hud.update(rawDt, mouseWorld);
     input.endFrame();
+  }
+
+  focus() {
+    if (!this.me.dead) return this.hero;
+    for (const v of this.playerViews.values()) if (!v.p.dead) return v;
+    return this.hero;
   }
 
   // Title-screen backdrop: the camera drifts around the map.
