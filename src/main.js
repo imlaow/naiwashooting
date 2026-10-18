@@ -166,14 +166,18 @@ async function boot() {
     });
   };
 
+  // The title's demo behind the menus, unless it is already running. prepare() may have
+  // destroyed it for a map that is still loading; once that map is in, it is rebuilt there.
+  const toDemo = () => { if (built && (!demo || !game)) newGame(true); };
+
   const dashboard = new Dashboard({ root: $('map-themes'), onPlay: (choice) => start(choice) });
   dashboard.select(initialChoice(), { persist: false });
   dashboard.render();
 
   const showBest = () => { $('best-score').textContent = readBest() ? t('title.best', { n: readBest().toLocaleString() }) : ''; };
   const showCurrent = () => { $('current-map').textContent = t('title.current', { name: dashboard.name() }); };
-  const showTitle = () => { if (!demo) newGame(true); showBest(); showCurrent(); show('title'); };
-  const showMaps = () => { if (!demo) newGame(true); show('maps'); dashboard.open(); };
+  const showTitle = () => { toDemo(); showBest(); showCurrent(); show('title'); };
+  const showMaps = () => { toDemo(); show('maps'); dashboard.open(); };
 
   await prepare(dashboard.choice);
   newGame(true);
@@ -249,7 +253,7 @@ async function boot() {
   const loadOnline = () => (online ??= import('./net/online.js').catch((err) => { online = null; throw err; }));
   const showOnline = (address) => {
     loadOnline().catch(() => {});
-    if (!demo) newGame(true);
+    toDemo();
     if (address != null) $('net-address').value = address;
     $('net-name').value ||= readName();
     renderRecent();
@@ -269,6 +273,8 @@ async function boot() {
     const name = $('net-name').value.trim();
     joining = true;
     sfx.unlock();
+    // Before any await: the browser only allows fullscreen while the click still counts.
+    lockLandscape();
     let mod;
     try {
       setStatus(t('online.loading'));
@@ -288,7 +294,6 @@ async function boot() {
       room.onReconnect(() => { if (session?.room === room) reconnected(); else room.leave(); });
       room.onStateChange(mine(enterRun));
       room.onMessage('chat', mine(chatLine));
-      lockLandscape();
       await enterRun();
     } catch (err) {
       const refused = mod && err instanceof mod.JoinError;
@@ -311,7 +316,7 @@ async function boot() {
       const run = S.run;
       s.loading = true;
       try { await prepare(makeChoice(S.map.theme, S.map.id, S.map.seed)); } finally { s.loading = false; }
-      if (session !== s) return;
+      if (session !== s) { if (!session) toDemo(); return; }
       s.prepared = run;
       s.room.send('ready', run);
     }
@@ -357,7 +362,7 @@ async function boot() {
   };
   const lost = () => {
     endSession();
-    if (!demo) newGame(true);
+    toDemo();
     show('lost');
   };
   const toggleNetMenu = () => {

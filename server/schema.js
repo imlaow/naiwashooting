@@ -45,7 +45,7 @@ export const PlayerState = schema({
   dashA: t.angle(), // the dash's direction
   dashCd: timer(1, 16),
   invuln: timer(2),
-  laughT: t.quantized({ min: -1, max: 13 }),
+  laughT: t.quantized({ min: -1, max: 14 }), // a range of 15 keeps 0 (just started) exact
   down: t.boolean(),
   bleedT: timer(30, 16),
   reviveT: timer(3),

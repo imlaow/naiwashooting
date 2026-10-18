@@ -135,7 +135,7 @@ export class PlayerView {
       // The laugh clip has Naiwa's own colours: a teammate's is turned to theirs while it plays
       // (online, with the filter net/online.js brings along).
       const hue = P.colour ? TEAM[P.colour % TEAM.length].hue : 0;
-      if (hue && game.hueFilter && !this.body.filters?.length) this.body.filters = [game.hueFilter(hue)];
+      if (hue && game.hueFilter && !this.body.filters?.length) this.body.filters = [this.hueFilter ??= game.hueFilter(hue)];
     } else {
       if (this.body.filters?.length) this.body.filters = [];
       this.body.texture = this.frames[Math.floor(this.animT) % 4];
@@ -188,6 +188,7 @@ export class PlayerView {
     this.shadow.destroy();
     this.ring.destroy();
     this.tag?.destroy();
+    this.hueFilter?.destroy();
   }
 }
 

@@ -19,7 +19,10 @@
 // trip goes on the scoreboard).
 import { WEAPON_ORDER } from './entities.js';
 
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
+
+// How long a dropped player's seat is held, and the browser keeps reconnecting, in seconds.
+export const RECONNECT_SECONDS = 60;
 
 // Chat: one line a second at most, CHAT_MAX characters, control characters removed.
 export const CHAT_MAX = 80;

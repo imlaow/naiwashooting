@@ -89,6 +89,11 @@ const clearWave = (sim) => { sim.state = 'fight'; sim.queue = []; for (const e o
   check('a joiner in wave 1 enters right away', !s2.addPlayer().dead);
   sim.removePlayer(B.id);
   check('removePlayer takes the player out', !sim.players.has(B.id) && sim.players.size === 2);
+  const { sim: s3, ps: [D] } = setup(1);
+  s3.state = 'fight'; s3.wave = 3;
+  s3.removePlayer(D.id);
+  const E = s3.addPlayer();
+  check('a late joiner into a run everyone left ends it', E.dead && s3.state === 'dead' && types(s3.takeEvents()).includes('over'));
 }
 {
   const { sim, ps: [A, B] } = setup(2);

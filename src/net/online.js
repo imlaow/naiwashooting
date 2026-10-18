@@ -2,12 +2,9 @@
 // ONLINE panel opens (main.js imports it dynamically), so single-player downloads none of it.
 import { Client } from '@colyseus/sdk';
 import { ColorMatrixFilter } from 'pixi.js';
-import { PROTOCOL } from '../sim/protocol.js';
+import { PROTOCOL, RECONNECT_SECONDS } from '../sim/protocol.js';
 export { NetSim } from './netsim.js';
-export { PROTOCOL };
-
-// How long a dropped connection keeps trying (the server holds the seat for as long).
-export const RECONNECT_SECONDS = 60;
+export { PROTOCOL, RECONNECT_SECONDS };
 
 // A refused or failed join. `reason`: 'version' (`server` has the server's protocol),
 // 'full', 'password', 'origin', 'unreachable' or 'error' (`message` says more).

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { defineServer, defineRoom, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { THEMES } from '../src/sim/maps.js';
-import { NaiwaRoom } from './room.js';
+import { NaiwaRoom, originAllowed } from './room.js';
 
 const here = (f) => fileURLToPath(new URL(f, import.meta.url));
 
@@ -47,13 +47,12 @@ export function readConfig(path) {
 // site that isn't in allowedOrigins are refused before the handshake (programs without an
 // Origin header, like the bots in tools/, are let through).
 export function makeServer(config) {
-  const allowed = (origin) => !config.allowedOrigins.length || config.allowedOrigins.includes('*') || config.allowedOrigins.includes(origin);
   return defineServer({
     greet: false,
     transport: new WebSocketTransport({
       beforeUpgrade: (request) => {
         const origin = request.headers.get('origin');
-        if (origin && !allowed(origin)) return new Response('origin not allowed', { status: 403 });
+        if (origin && !originAllowed(config.allowedOrigins, origin)) return new Response('origin not allowed', { status: 403 });
       },
     }),
     rooms: { naiwa: defineRoom(NaiwaRoom, { config }) },

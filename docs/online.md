@@ -661,6 +661,11 @@ Found in stage 2:
   (`"log": false` in server.json turns it off).
 - **`PROTOCOL` 2:** the state's new fields, the `tick` message, `seq` on shots, `chat`,
   `ping` / `pong`, `away`.
+- **`PROTOCOL` 3 (review fixes after stage 5):** `laughT` is quantized over -1–14 so a laugh
+  that just started (0) arrives as 0, not -0.000015 (which read as not laughing); a late joiner
+  into a run nobody is up in any more ends it (the room had stayed in the run with the joiner
+  waiting for a wave break that never came). `RECONNECT_SECONDS` lives in `src/sim/protocol.js`
+  for both sides, and the origin rule in one `originAllowed` (server/room.js).
 - **Bundle.** Single-player: `index-*.js` 463.19 kB (146.13 kB gzipped), from 456.77 kB
   (143.85 kB) for the teammate skins, the online HUD, chat and scoreboard and their strings; CSS
   19.73 kB (5.69 kB). Online: `online-*.js` 234.45 kB (75.09 kB gzipped), from 167.87 kB

@@ -398,7 +398,8 @@ export class Hud {
       const sx = g.world.x + v.x * g.zoom, sy = g.world.y + (v.y - 40) * g.zoom;
       if (sx > E.L && sx < E.R && sy > E.T && sy < E.B) continue;
       const dx = sx - cx, dy = sy - cy;
-      const f = Math.min((E.R - cx) / Math.max(1, Math.abs(dx)), (E.B - cy) / Math.max(1, Math.abs(dy)));
+      const f = Math.min((dx < 0 ? cx - E.L : E.R - cx) / Math.max(1, Math.abs(dx)),
+        (dy < 0 ? cy - E.T : E.B - cy) / Math.max(1, Math.abs(dy)));
       const x = cx + dx * f, y = cy + dy * f, ang = Math.atan2(dy, dx);
       const size = o.down ? 15 + Math.sin(g.time * 8) * 3 : 11;
       const pts = [[size, 0], [-size * 0.7, size * 0.75], [-size * 0.35, 0], [-size * 0.7, -size * 0.75]]

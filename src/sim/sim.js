@@ -72,13 +72,14 @@ export class Sim {
 
   // ---------- Players ----------
   // A new player at the dock. Late joiners wait (dead) for the next wave break, unless the run
-  // is still in its first wave or between waves.
+  // is still in its first wave or between waves. If nobody is up to reach that break (everyone
+  // else left or is down), the run is over.
   addPlayer() {
     const P = new Player(this, 0, 0);
     const sp = this.dockSpot(this.players.size);
     P.x = sp.x; P.y = sp.y;
     this.players.set(P.id, P);
-    if (this.wave > 1 && this.state === 'fight' || this.state === 'dead') { P.dead = true; P.joining = true; }
+    if (this.wave > 1 && this.state === 'fight' || this.state === 'dead') { P.dead = true; P.joining = true; this.checkRunOver(); }
     else if (this.players.size > 1) this.emit({ type: 'respawned', id: P.id, x: P.x, y: P.y, joined: true });
     return P;
   }

@@ -31,12 +31,11 @@ import { Room, ServerError, ErrorCode, CloseCode, Protocol } from '@colyseus/cor
 import { makeChoice, buildMap, RANDOM_ID } from '../src/sim/maps.js';
 import { Sim, STEP } from '../src/sim/sim.js';
 import { idleCommand } from '../src/sim/entities.js';
-import { PROTOCOL, CHAT_MAX, CHAT_GAP, packBullet, packEvents, cleanText, sanitizeCommand, simCommand } from '../src/sim/protocol.js';
+import { PROTOCOL, RECONNECT_SECONDS, CHAT_MAX, CHAT_GAP, packBullet, packEvents, cleanText, sanitizeCommand, simCommand } from '../src/sim/protocol.js';
 import { NaiwaState, PlayerState, EnemyState, PickupState, PropState, Slot, Command } from './schema.js';
 
 export const LOBBY_SECONDS = 10;
 export const RESULTS_SECONDS = 10;
-export const RECONNECT_SECONDS = 60;
 export const NAME_MAX = 16;
 export const STALE_STEPS = 60; // 1 s: a slow phone still sends several commands a second
 // Commands waiting beyond BACKLOG_STEPS are folded into the step's command at once; a smaller
@@ -53,6 +52,10 @@ const MAY_RECONNECT = new Set([CloseCode.GOING_AWAY, CloseCode.NO_STATUS_RECEIVE
 
 // Why a join was refused; the browser turns these into messages (src/net/online.js).
 export const REFUSED = { version: 'version', full: 'full', password: 'password', origin: 'origin' };
+
+// Whether a browser from `origin` may play: an empty list or '*' lets any site in. Used by the
+// room's join check and the server's WebSocket upgrade alike.
+export const originAllowed = (list, origin) => !list?.length || list.includes('*') || list.includes(origin);
 
 // A display name: printable, trimmed, at most NAME_MAX characters.
 export const cleanName = (name) => cleanText(name, NAME_MAX) || 'Naiwa';
@@ -144,16 +147,11 @@ export class NaiwaRoom extends Room {
   refuse(options, origin) {
     const cfg = this.config;
     if (options.protocol !== PROTOCOL) return `${REFUSED.version}:${PROTOCOL}`;
-    if (origin && !this.originAllowed(origin)) return REFUSED.origin;
+    if (origin && !originAllowed(cfg.allowedOrigins, origin)) return REFUSED.origin;
     if (cfg.password && options.password !== cfg.password) return REFUSED.password;
     // A seat held for a dropped player counts too.
     if (this.hasReachedMaxClients()) return REFUSED.full;
     return null;
-  }
-
-  originAllowed(origin) {
-    const list = this.config.allowedOrigins;
-    return !list?.length || list.includes('*') || list.includes(origin);
   }
 
   // ---------- Maps and runs ----------
