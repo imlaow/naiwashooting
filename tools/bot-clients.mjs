@@ -10,9 +10,10 @@
 //   node tools/bot-clients.mjs --rtt 150 --jitter 30 --loss 0.01    over a bad network (tools/lag.mjs)
 //   node tools/bot-clients.mjs --wave 8 [--patch-ms 33]             runs start at wave 8 (a busy fight;
 //                                                                   tools/server-tweaks.mjs)
+//   node tools/bot-clients.mjs --pvp [--kill-limit 8 --time-limit 90]   PvP: the bots shoot each other
 //
 // Exits with code 1 on any error: an exception, a client dropped, a position that isn't a
-// number, or no wave progress.
+// number, or no wave progress (PvP: no kills, an enemy, or no round ending in time).
 import { spawn } from 'node:child_process';
 import { writeFileSync, readFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,11 +36,13 @@ const PORT = Number(opt('port', 7790));
 const MAPS = opt('maps', 'island/cove,factory/dairy,island/twins').split(',');
 const WAVE = Number(opt('wave', 0)), PATCH_MS = Number(opt('patch-ms', 0));
 const NET = { rtt: Number(opt('rtt', 0)), jitter: Number(opt('jitter', 0)), loss: Number(opt('loss', 0)) };
+const PVP = args.includes('--pvp');
+const LIMITS = { killLimit: Number(opt('kill-limit', 8)), timeLimit: Number(opt('time-limit', 90)) };
 
 // ---------- The server ----------
 const dir = mkdtempSync(joinPath(tmpdir(), 'naiwa-bots-'));
 const cfgFile = joinPath(dir, 'server.json');
-writeFileSync(cfgFile, JSON.stringify({ name: 'bots', port: PORT, mode: 'coop', maxPlayers: CLIENTS, password: '', maps: MAPS, allowedOrigins: [], stats: true }));
+writeFileSync(cfgFile, JSON.stringify({ name: 'bots', port: PORT, mode: PVP ? 'pvp' : 'coop', pvp: LIMITS, maxPlayers: CLIENTS, password: '', maps: MAPS, allowedOrigins: [], stats: true }));
 const tweaks = WAVE || PATCH_MS ? ['--import', fileURLToPath(new URL('./server-tweaks.mjs', import.meta.url))] : [];
 const server = spawn(process.execPath, [...tweaks, fileURLToPath(new URL('../server/index.js', import.meta.url)), cfgFile], {
   stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, BOT_WAVE: String(WAVE), BOT_PATCH_MS: String(PATCH_MS) },
@@ -69,11 +72,11 @@ const mapFor = (m) => {
   return maps.get(key);
 };
 
-const record = { runs: new Set(), bestWave: 0, maps: new Set(), over: 0 };
+const record = { runs: new Set(), bestWave: 0, maps: new Set(), over: 0, frags: 0, respawns: 0, winners: [] };
 class BotClient {
   constructor(n, room) {
     this.n = n; this.room = room;
-    this.kills = 0; this.downs = 0; this.revives = 0; this.deaths = 0; this.events = 0;
+    this.kills = 0; this.downs = 0; this.revives = 0; this.deaths = 0; this.events = 0; this.frags = 0;
     this.net = null; this.bot = null; this.ready = -1;
     room.onLeave((code) => { if (!done) errors.push(`client ${n} dropped (${code})`); });
   }
@@ -102,8 +105,11 @@ class BotClient {
       else if (e.type === 'downed' && e.id === this.id) this.downs++;
       else if (e.type === 'revived' && e.by === this.id) this.revives++;
       else if (e.type === 'died' && e.id === this.id) this.deaths++;
-      else if (e.type === 'over' && this.n === 0) record.over++;
+      else if (e.type === 'over' && this.n === 0) { record.over++; if (PVP) record.winners.push(e.winner ? net.players.get(e.winner)?.name ?? e.winner : 'draw'); }
+      if (e.type === 'died' && e.by === this.id) { this.frags++; record.frags++; }
+      if (e.type === 'respawned' && e.id === this.id && !e.joined) record.respawns++;
     }
+    if (PVP && net.enemies.length) errors.push(`client ${this.n}: an enemy in PvP`);
     for (const o of net.players.values()) if (!Number.isFinite(o.x + o.y)) errors.push(`client ${this.n}: player ${o.id} at ${o.x}, ${o.y}`);
     record.bestWave = Math.max(record.bestWave, net.wave);
   }
@@ -136,13 +142,23 @@ server.kill('SIGKILL');
 
 // ---------- Report ----------
 console.log(`${CLIENTS} clients, ${secs.toFixed(0)} s real time on ${MAPS.join(', ')}${NET.rtt || NET.jitter || NET.loss ? ` (rtt ${NET.rtt} ms, jitter ${NET.jitter} ms, loss ${NET.loss * 100} %)` : ''}`);
-console.log(`  runs ${record.runs.size} (maps ${[...record.maps].join(', ')}), runs ended ${record.over}, best wave ${record.bestWave}`);
-for (const b of bots) console.log(`  client ${b.n + 1}: kills ${b.kills}, downs ${b.downs}, revives ${b.revives}, bled out ${b.deaths}, events ${b.events}`);
+if (PVP) {
+  console.log(`  PvP to ${LIMITS.killLimit} kills or ${LIMITS.timeLimit} s: rounds ${record.runs.size} (maps ${[...record.maps].join(', ')}), rounds ended ${record.over} (won by ${record.winners.join(', ') || '-'}), kills ${record.frags}, respawns ${record.respawns}`);
+  for (const b of bots) console.log(`  client ${b.n + 1}: kills ${b.frags}, deaths ${b.deaths}, events ${b.events}`);
+} else {
+  console.log(`  runs ${record.runs.size} (maps ${[...record.maps].join(', ')}), runs ended ${record.over}, best wave ${record.bestWave}`);
+  for (const b of bots) console.log(`  client ${b.n + 1}: kills ${b.kills}, downs ${b.downs}, revives ${b.revives}, bled out ${b.deaths}, events ${b.events}`);
+}
 console.log(`  server CPU ${(cpu / secs * 100).toFixed(1)} % of one core over the run`);
-const busy = stats.filter((l) => / run wave [1-9]/.test(l));
+const busy = stats.filter((l) => (PVP ? / run wave 0/ : / run wave [1-9]/).test(l));
 for (const l of busy) console.log(`  ${l}`);
 if (!busy.length) for (const l of stats) console.log(`  ${l}`);
-if (record.bestWave < Math.max(2, WAVE)) errors.push(`no wave progress (best wave ${record.bestWave})`);
+if (PVP) {
+  if (!record.frags) errors.push('nobody killed anybody');
+  if (record.frags && !record.respawns) errors.push('nobody respawned');
+  // The lobby (10 s), a round, then results (10 s): at least one round should have ended.
+  if (secs > LIMITS.timeLimit + 30 && !record.over) errors.push('no round ended');
+} else if (record.bestWave < Math.max(2, WAVE)) errors.push(`no wave progress (best wave ${record.bestWave})`);
 if (errors.length) {
   console.log(`\n${errors.length} error(s):`);
   for (const e of errors.slice(0, 20)) console.log(`  ${e}`);

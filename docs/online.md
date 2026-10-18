@@ -749,9 +749,94 @@ Found in stage 2:
   3 s with a pistol and 1.5 s of spawn protection.
 - Round ends at `killLimit` or `timeLimit`, then results for 10 s and the next map.
 - Bullets from players hit other players, checked against `rewind.lastSeenBy(shooter)` so hits match
-  what the shooter saw. Explosions hurt everyone.
-- Laugh: **open question.** 12 s of invulnerability is too strong if the laughing player can shoot.
-  Proposal: in PvP the laugh is 4 s, untouchable and unable to shoot.
+  what the shooter saw (stage 6b; 6a checks them against the server's current positions).
+  Explosions hurt everyone.
+- Laugh: **decided** (it was an open question: 12 s of invulnerability is too strong if the
+  laughing player can shoot): in PvP the laugh is 4 s, untouchable and unable to shoot. Co-op is
+  unchanged.
+
+## Stage 6a as built
+
+The deathmatch rules, with hits checked against the server's current positions; the rewind is
+stage 6b. The prediction and the timeline are unchanged.
+
+- **Configuration.** `"mode": "pvp"` in server.json now starts a deathmatch server;
+  `"pvp": { "killLimit": 25, "timeLimit": 600 }` is in `server.example.json` and is merged over
+  those defaults key by key, so `"pvp": { "killLimit": 10 }` keeps the 600 s. `readConfig` checks
+  killLimit 1–999 and timeLimit 30–3600 s. The server's start-up line says which mode it runs.
+- **The sim** (`src/sim/sim.js`): `new Sim(world, layout, { mode: 'pvp', killLimit, timeLimit })`;
+  co-op and single-player pass nothing and run the code they ran before (single-player traces for
+  seeds 1–3 and the 4-player trace are byte-identical to those before the change). `sim.mode`,
+  `sim.pvp`, and two new states: `'pvp'` while the round runs, `'over'` once it has ended.
+  - No waves or enemies: `step` runs `updateWaves` only in co-op.
+  - HP 0 is dead (no downed state): `onPlayerDown(P, by)` sets `respawnT` to `RESPAWN_SECONDS` (3)
+    and emits `died` with `by`, the killer. The killer gets the kill and a combo (`onPlayerKilled`);
+    their own barrel or bullets from a player who has left credit nobody. `downs` counts deaths.
+  - Respawns (`updateRespawns`, only while the round runs): at `pvpSpawn()`, the best of 24 random
+    open spots (spawnPoint's checks, factored out as `openSpot`, plus not in the water) by
+    distance to the nearest living player, with `respawn()`'s pistol and full HP and
+    `SPAWN_PROTECT` (1.5 s) of `invuln`.
+  - Player bullets hit the other players who are up (not the shooter; a dash dodges them, as it
+    does enemy bullets). **Decided while building:** they give no hit i-frames (the co-op 0.45 s
+    would let only one SMG bullet or shotgun pellet in 0.45 s count) and push by 0.6 × the gun's
+    knockback rather than co-op's flat 260. `Player.hurt(dmg, fromX, fromY, by, push, iframes)`
+    carries both; co-op calls it as before.
+  - Explosions hurt everyone in range, the player who set them off included; `by` reaches
+    `hurt`, so a barrel's kills are its shooter's.
+  - Laugh: on every 5th kill of a player, `PVP_LAUGH_SECONDS` (4) long, untouchable and unable to
+    shoot (`Player.update` reads `sim.pvp`); it still ends with the full heal.
+  - Crates and barrels come back `PROP_RESPAWN` (30) s after breaking, with the id they had (the
+    browser numbers props by layout order) and full HP, a second later if a player stands there;
+    weapon spots (pickups marked `spot`) come back `SPOT_RESPAWN` (20) s after being taken.
+  - The round ends (`endRound`, the `over` event with `winner` and `why`) when a player reaches
+    killLimit or `roundT` runs out: most kills wins, then fewest deaths, still level is a draw
+    (`winner` null). Once over, guns still fire (as the browser predicts) but nobody is hurt, and
+    nobody respawns or comes in until the next map.
+- **New calls into older code, and the states they now meet** (also in those functions' comments):
+  - `addPlayer` in PvP may run in the room's lobby, mid-round, or during results, with others
+    alive, waiting to respawn, or nobody: it puts the player in at once at `pvpSpawn` with spawn
+    protection (`respawned`, `joined`), never at the dock and never waiting for a wave break;
+    during `'over'` they wait dead (`joining`) for the next map. It never ends a round.
+  - `removePlayer`: the leaver's bullets in flight and pending barrels still hit, and their kills
+    credit nobody; the round goes on even with nobody left in it (the room makes a new run when
+    the server empties).
+  - `checkRunOver` returns at once in PvP: players dead and waiting to respawn, or all of them
+    dead at once after a barrel, aren't the end of a round.
+  - `step` in PvP never sees an enemy; during the room's results it keeps moving players (their
+    guns fire harmlessly) and stops the clock, respawns and damage.
+  - The room's `ready` puts a PvP player into the sim in any phase (see `addPlayer`), the seat
+    flow is otherwise unchanged; a dropped player stands still and can be killed, as a dropped
+    co-op player can be downed. The `over` event comes only out of `step` (a kill or the clock),
+    never in the lobby, and starts the results as in co-op; `newRun` builds the next map's PvP
+    sim (`NaiwaRoom.rules()`), with a fresh clock and kill counts.
+- **State** (`server/schema.js`): `timeLeft` (quantized 0–3600 s, 16 bits), `killLimit`, `winner`
+  (the sim's player id, 0 for none or a draw) on `NaiwaState`, so someone who joins or reconnects
+  during the results sees the winner; `respawnT` on `PlayerState`; `state` can be `'pvp'` or
+  `'over'`. The mode was already in the state.
+- **Browser.** `NetSim` exposes `pvp`, `timeLeft`, `killLimit`, `winner` and each player's
+  `respawnT`, and gives the prediction's stand-in sim `pvp` (the only change to it: the
+  predicted `Player.update` reads it for the laugh). HUD: the round clock in the wave's place,
+  "Kills n / limit", the leader, "Respawn in n" while dead; opponents aren't on the minimap or
+  edge arrows. Toasts for your kills and deaths, the PvP laugh's own toast (and its sound cut at
+  4 s), a winner / draw banner. The results panel shows the winner and your deaths; the scoreboard
+  shows kills and deaths, most kills first. Not checked in a browser in this stage.
+- **`PROTOCOL` 4:** the rules above, the new state fields, `died.by`, `over.winner` / `why`.
+- **Checks.**
+  - `node tools/sim-rules.mjs`: 28 PvP checks, one or more per rule (no waves, hits and no
+    i-frames, not the shooter, dash dodges, death and kill credit, respawn after 3 s with a pistol
+    and protection, spawn protection, spawns far from the living and not the dead, the laugh, the
+    co-op laugh unchanged, explosions and own barrels, everyone dead at once, crates and weapon
+    spots coming back (and not in co-op), killLimit, timeLimit with tie-breaks, after the round,
+    late joiners, a killer who left), plus the co-op ones as before.
+  - `npm run test:server`: 21 tests, 3 new (the config's PvP checks; kills, respawns and late
+    joiners through a real room; killLimit → results with the winner → the next map, still PvP,
+    a joiner during results waiting).
+  - `tools/bot-clients.mjs --pvp` (bots shoot each other; the bot targets the nearest other
+    player it can hurt), 4 clients for 3 minutes to 8 kills
+    or 90 s: two rounds (`island/cove`, `factory/dairy`), one ended (won at the kill limit), 34
+    kills, 32 respawns, no enemies, no errors; ticks 0.10–0.16 ms, 1.8–3.6 KB/s per client, 4.0 %
+    CPU.
+  - `sim-headless` (1 and 4 players), the layout check and plain `bot-clients`: no errors.
 
 ## Networking with Colyseus
 
@@ -862,13 +947,13 @@ Each stage leaves single-player working and is pushed on its own.
    See "Stage 4 as built" below.
 5. **Feel. Done.** `Predict` reconciliation and interpolation, tuned with the SDK debug panel.
    Reconnect, scoreboard, names, chat. See "Stage 5 as built".
-6. **PvP mode,** with rewind-checked hits.
+6. **PvP mode,** with rewind-checked hits. **6a done:** the deathmatch rules, hits checked
+   against the server's current positions (see "Stage 6a as built"). 6b: the rewind.
 7. **Packaging and docs.** `docs/hosting.md` (tunnel and Caddy recipes in Chinese and English),
    Docker image, npm package, a `@colyseus/loadtest` run at `maxPlayers`.
 
 ## Open questions
 
-- The PvP laugh rule (see above).
 - Teammates have distinct colours by join order (stage 5); picking a skin is still open.
 - Chat is text, rate-limited and cleaned, with no moderation (stage 5); whether servers want a way
   to turn it off is open.

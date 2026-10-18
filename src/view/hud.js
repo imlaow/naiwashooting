@@ -263,7 +263,8 @@ export class Hud {
       .roundRect(78, 39, 204 * hpFrac, 4, 2).fill({ color: 0xffffff, alpha: 0.3 })
       .roundRect(76, 56, 90, 6, 3).fill({ color: 0x000000, alpha: 0.5 })
       .roundRect(76, 56, 90 * dashFrac, 6, 3).fill(dashFrac >= 1 ? 0x7dd3fc : 0x3b6b85);
-    this.setText(this.hpText, 'hp', P.down ? t('hud.down', { n: Math.ceil(P.bleedT) }) : P.dead && S.state !== 'dead' ? t('hud.out') : `${Math.ceil(P.hp)} / ${P.maxHp}`);
+    const out = P.dead && S.pvp && P.respawnT > 0 ? t('hud.respawnIn', { n: Math.ceil(P.respawnT) }) : t('hud.out');
+    this.setText(this.hpText, 'hp', P.down ? t('hud.down', { n: Math.ceil(P.bleedT) }) : P.dead && S.state !== 'dead' ? out : `${Math.ceil(P.hp)} / ${P.maxHp}`);
     this.hpText.tint = P.down ? 0xff8a8a : 0xffffff;
     this.portrait.texture = g.skins.hero[Math.floor(g.time * 1.5) % 4];
 
@@ -288,14 +289,23 @@ export class Hud {
       this.slotNums[i].position.set(x + 4, y + 1);
     });
 
-    // Wave & score
+    // Wave & score; in PvP the round's clock, your kills and the leader.
     const st = S.state;
-    this.setText(this.waveText, 'wave', S.wave ? t('hud.wave', { n: S.wave }) : t('hud.getReady'));
-    const remaining = S.queue.length + S.enemies.filter((e) => !e.dead).length;
     // Online, the room's lobby comes before the sim's own intro.
     const lobby = S.phase === 'lobby';
-    this.setText(this.enemyText, 'enemies', lobby ? t('hud.lobby', { n: Math.ceil(S.phaseT) }) : st === 'break' ? t('hud.nextWave', { n: Math.ceil(S.stateT) }) : st === 'intro' ? t('hud.starting', { n: Math.ceil(S.stateT) }) : t('hud.left', { n: remaining }));
-    this.setText(this.scoreText, 'score', S.score.toLocaleString());
+    if (S.pvp) {
+      const secs = Math.ceil(S.timeLeft);
+      this.setText(this.waveText, 'wave', lobby ? t('hud.deathmatch') : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`);
+      this.setText(this.enemyText, 'enemies', lobby ? t('hud.lobby', { n: Math.ceil(S.phaseT) }) : t('hud.frags', { n: P.kills, max: S.killLimit }));
+      let lead = null;
+      for (const o of S.players.values()) if (o.kills > (lead?.kills ?? 0)) lead = o;
+      this.setText(this.scoreText, 'score', lead ? t('hud.leader', { name: lead.name ?? '', n: lead.kills }) : '');
+    } else {
+      this.setText(this.waveText, 'wave', S.wave ? t('hud.wave', { n: S.wave }) : t('hud.getReady'));
+      const remaining = S.queue.length + S.enemies.filter((e) => !e.dead).length;
+      this.setText(this.enemyText, 'enemies', lobby ? t('hud.lobby', { n: Math.ceil(S.phaseT) }) : st === 'break' ? t('hud.nextWave', { n: Math.ceil(S.stateT) }) : st === 'intro' ? t('hud.starting', { n: Math.ceil(S.stateT) }) : t('hud.left', { n: remaining }));
+      this.setText(this.scoreText, 'score', S.score.toLocaleString());
+    }
     const mult = 1 + Math.min(3, Math.floor(P.combo / 3) * 0.5);
     this.setText(this.comboText, 'combo', P.comboT > 0 && P.combo > 1 ? t('hud.combo', { n: P.combo, m: mult }) : '');
 
@@ -321,9 +331,9 @@ export class Hud {
     }
     const hw = this.w / 2 / g.zoom, hh = this.h / 2 / g.zoom;
     d.rect((g.cam.x - hw) * k, (g.cam.y - hh) * k, hw * 2 * k, hh * 2 * k).stroke({ width: 1, color: 0xffffff, alpha: 0.5 });
-    // Teammates (online in their colours; red while down).
+    // Teammates (online in their colours; red while down). PvP opponents aren't shown.
     for (const o of S.players.values()) {
-      if (o === P || o.dead) continue;
+      if (o === P || o.dead || S.pvp) continue;
       const col = o.colour != null ? teamColour(o.colour).hex : 0x7dd3fc;
       if (o.colour == null) d.circle(o.x * k, o.y * k, 3).fill(o.down ? 0xff6b6b : col).stroke({ width: 1.5, color: 0x000000 });
       else d.circle(o.x * k, o.y * k, 3).fill(col).stroke({ width: 1.5, color: o.down ? 0xff3b3b : 0x000000 });
@@ -387,14 +397,14 @@ export class Hud {
     }
   }
 
-  // Arrows at the screen's edge towards teammates out of sight (a downed one bigger, pulsing red),
-  // who the camera follows while out, and the round trip.
+  // Arrows at the screen's edge towards teammates out of sight (a downed one bigger, pulsing red;
+  // none for PvP opponents), who the camera follows while out, and the round trip.
   updateOnline() {
     const g = this.game, P = g.me, a = this.arrows.clear(), E = this.edge;
     const cx = this.w / 2, cy = this.h / 2;
     for (const v of g.playerViews.values()) {
       const o = v.p;
-      if (o === P || o.dead) continue;
+      if (o === P || o.dead || g.sim.pvp) continue;
       const sx = g.world.x + v.x * g.zoom, sy = g.world.y + (v.y - 40) * g.zoom;
       if (sx > E.L && sx < E.R && sy > E.T && sy < E.B) continue;
       const dx = sx - cx, dy = sy - cy;

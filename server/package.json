@@ -2,7 +2,7 @@
   "name": "naiwa-server",
   "private": true,
   "version": "0.1.0",
-  "description": "Self-hosted co-op server for 奶蛙射击 (Naiwa Shootout)",
+  "description": "Self-hosted co-op and PvP server for 奶蛙射击 (Naiwa Shootout)",
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {

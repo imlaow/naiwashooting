@@ -4,6 +4,7 @@
   "mode": "coop",
   "maxPlayers": 4,
   "password": "",
+  "pvp": { "killLimit": 25, "timeLimit": 600 },
   "maps": ["island/cove", "island/twins", "factory/dairy", "island/random"],
   "allowedOrigins": [
     "https://naiwashootout.laow.dev",

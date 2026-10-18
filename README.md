@@ -42,7 +42,8 @@ npm run test:server                # the room tests
 | --- | --- |
 | `name` | Shown in the server's log |
 | `port` | Local port for plain `ws://` (default 7777) |
-| `mode` | `"coop"` (PvP comes later; the server refuses to start with `"pvp"`) |
+| `mode` | `"coop"` (waves of enemies) or `"pvp"` (deathmatch) |
+| `pvp` | `{ "killLimit": 25, "timeLimit": 600 }`: a PvP round ends when someone reaches killLimit kills (1–999) or after timeLimit seconds (30–3600) |
 | `maxPlayers` | Players at once (1–16, default 4) |
 | `password` | `""` for none |
 | `maps` | The rotation, e.g. `"island/cove"`, `"factory/dairy"`, `"island/random"` (a new island each time) |
@@ -53,6 +54,7 @@ npm run test:server                # the room tests
 The site is served over HTTPS, so browsers can only reach a server through a `wss://` address
 (`ws://localhost:7777` works from the same machine). A run starts 10 s after the first player is
 in, ends when everyone is down or dead, shows the results for 10 s and moves on to the next map.
+In PvP a round ends at the kill or time limit instead; the dead respawn 3 s later with a pistol.
 
 The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (remembered per browser) or add `?lang=en`.
 
@@ -115,7 +117,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/audio.js` | WebAudio-synthesised sound effects |
 | `tools/dump-layouts.mjs` | Dumps every preset map's colliders, props and weapon spots; `--check` compares them with `tools/layout-baseline.txt` (run it after touching layout code) |
 | `tools/sim-headless.mjs` | Plays 10 minutes of every preset map in plain Node with scripted bots and reports waves, kills, deaths and errors; `--players 2`–`4` plays co-op with bots joining and leaving mid-run (kills per bot, downs, revives, respawns); `--trace` prints the state every game second for diffing two versions (run it after touching `src/sim`) |
-| `tools/bot-clients.mjs` | Starts a server and plays it with 2–8 bot clients over real WebSockets (`sim/bot.js` through `NetSim`); reports waves, kills per client, errors and the server's tick time, memory, CPU and bytes per client. `--rtt/--jitter/--loss` for a bad network, `--wave 8` to start runs at a busy wave (`tools/server-tweaks.mjs`) |
+| `tools/bot-clients.mjs` | Starts a server and plays it with 2–8 bot clients over real WebSockets (`sim/bot.js` through `NetSim`); reports waves, kills per client, errors and the server's tick time, memory, CPU and bytes per client. `--rtt/--jitter/--loss` for a bad network, `--wave 8` to start runs at a busy wave (`tools/server-tweaks.mjs`), `--pvp` for bots shooting each other |
 | `tools/net-feel.mjs` | Online feel without a browser: a server and two lagged clients through `NetSim`, scripted walks, dashes, a belt, a crate and a fight; reports prediction errors and corrections, how smoothly the other player is drawn, and shots predicted vs the server's (0, 80, 150 and 250 ms by default) |
 | `tools/lag.mjs` | Delay, jitter and TCP-like loss for a joined SDK room in Node (as the SDK's debug latency simulator does in the browser) |
 | `tools/sim-rules.mjs` | Sets up each co-op rule by hand (downed, revive, bleed-out, respawn, late joiners, targeting, laugh, pickups, scaling) and checks it |

@@ -6,7 +6,8 @@
 //
 // It moves, aims at the nearest enemy, shoots, dashes away from eggs, reloads, switches to its
 // best gun and walks over pickups. In co-op it goes to a downed teammate and stands by them until
-// they are back up, and when it is down itself it crawls towards the nearest teammate.
+// they are back up, and when it is down itself it crawls towards the nearest teammate. In PvP
+// (sim.pvp) the other players are its targets, except those it can't hurt (laughing, protected).
 import { WEAPONS, idleCommand } from './entities.js';
 
 export class Bot {
@@ -63,6 +64,13 @@ export class Bot {
       const d = Math.hypot(e.x - P.x, e.y - P.y);
       if (d < td) { td = d; target = e; }
     }
+    if (sim.pvp) {
+      for (const o of sim.players.values()) {
+        if (o === P || !o.up || o.laughT >= 0 || o.invuln > 0.3) continue;
+        const d = Math.hypot(o.x - P.x, o.y - P.y);
+        if (d < td) { td = d; target = o; }
+      }
+    }
     const seen = target && sim.statics.clearLine(P.x, P.y, target.x, target.y, 6);
     const aim = target ? Math.atan2(target.y - P.y, target.x - P.x) : P.aim;
     if (P.down) {
@@ -75,7 +83,7 @@ export class Bot {
       const d = Math.hypot(p.x - P.x, p.y - P.y);
       if (d < pd && this.wants(p)) { pd = d; pick = p; }
     }
-    const mate = sim.players.size > 1 ? this.teammate(true, 900) : null;
+    const mate = sim.players.size > 1 && !sim.pvp ? this.teammate(true, 900) : null;
 
     let dx = 0, dy = 0, dash = false;
     if (target && td < 200) {

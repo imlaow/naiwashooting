@@ -20,6 +20,8 @@ const muzzleReach = (gun, scale = 1) => 12 + (GUN_SIZES[gun][0] - GUN_GRIP) * sc
 export const GUN_H = 36; // height bullets fly at above the ground
 // The laugh clip is 180 frames at 15 fps (public/assets/laugh/index.json).
 export const LAUGH_SECONDS = 12;
+// PvP: the laugh is short, and the laughing player can't shoot (still untouchable).
+export const PVP_LAUGH_SECONDS = 4;
 // Co-op: a downed player crawls at DOWN_SPEED and bleeds out after BLEED_SECONDS, unless a
 // teammate stays within REVIVE_RANGE for REVIVE_SECONDS.
 export const DOWN_SPEED = 0.3;
@@ -59,6 +61,7 @@ export class Player {
     this.invuln = 0;
     this.moving = false;
     this.laughT = -1; // seconds into the laugh, -1 when not laughing
+    this.respawnT = 0; // PvP: seconds until a dead player is back in
     this.kills = 0; this.combo = 0; this.comboT = 0;
     // For the scoreboard: teammates revived, times downed.
     this.revives = 0; this.downs = 0;
@@ -81,6 +84,7 @@ export class Player {
     this.dashT = 0; this.dashCd = 0;
     this.invuln = 1;
     this.laughT = -1; this.combo = 0; this.comboT = 0;
+    this.respawnT = 0;
     this.down = false; this.bleedT = 0; this.reviveT = 0; this.reviver = null;
     this.dead = false;
   }
@@ -129,7 +133,8 @@ export class Player {
   }
 
   // Naiwa laughs his head off: untouchable and ignored by enemies for LAUGH_SECONDS
-  // (he can still move and shoot), then back to full health.
+  // (he can still move and shoot), then back to full health. In PvP the laugh lasts
+  // PVP_LAUGH_SECONDS and he can't shoot through it.
   laugh() {
     if (this.laughT >= 0 || !this.up) return false;
     this.laughT = 0;
@@ -141,14 +146,15 @@ export class Player {
   //   aim      angle the gun points at; fire: trigger held
   //   dash     dash this step, towards (mx, my), else dashDir (the way it was just moving), else aim
   //   reload, weapon (switch to), cycle (±n through owned weapons), last (back to the previous one)
-  // A downed player only crawls and aims.
+  // A downed player only crawls and aims. Reads `sim.pvp` (the laugh's rules), so the browser's
+  // prediction stand-in (net/netsim.js) carries it too.
   update(dt, cmd = idleCommand(this.aim)) {
     if (this.dead) return;
     const sim = this.sim;
     if (this.down) { this.crawl(dt, cmd); return; }
     if (this.laughT >= 0) {
       this.laughT += dt;
-      if (this.laughT >= LAUGH_SECONDS) {
+      if (this.laughT >= (sim.pvp ? PVP_LAUGH_SECONDS : LAUGH_SECONDS)) {
         this.laughT = -1;
         const heal = Math.ceil(this.maxHp - this.hp);
         if (heal > 0) this.hp = this.maxHp;
@@ -156,7 +162,7 @@ export class Player {
       }
     }
     this.aim = cmd.aim;
-    const firing = !!cmd.fire;
+    const firing = !!cmd.fire && !(sim.pvp && this.laughT >= 0);
 
     // ----- Weapon switching / reload -----
     if (cmd.weapon) this.switchTo(cmd.weapon);
@@ -243,16 +249,19 @@ export class Player {
     sim.emit({ type: 'shot', id: this.id, weapon: this.weapon, x: mx, y: my, ang: this.aim, px: this.x, py: this.y });
   }
 
-  // A downed player can't be hurt any more; the bleed-out timer is all that's left.
-  hurt(dmg, fromX, fromY) {
-    if (this.invuln > 0 || !this.up || this.laughT >= 0) return false;
+  // A downed player can't be hurt any more; the bleed-out timer is all that's left. Nobody is
+  // hurt once a PvP round is over (sim.state 'over'). `by`: the player whose bullet or barrel it
+  // was (PvP kill credit), `push` the knockback, `iframes` how long the hit protects (PvP
+  // bullets give none, or only one SMG bullet or shotgun pellet in 0.45 s would count).
+  hurt(dmg, fromX, fromY, by = null, push = 260, iframes = 0.45) {
+    if (this.invuln > 0 || !this.up || this.laughT >= 0 || this.sim.state === 'over') return false;
     this.hp -= dmg;
-    this.invuln = 0.45;
+    this.invuln = iframes;
     const a = Math.atan2(this.y - fromY, this.x - fromX);
-    this.vx += Math.cos(a) * 260; this.vy += Math.sin(a) * 260;
+    this.vx += Math.cos(a) * push; this.vy += Math.sin(a) * push;
     this.sim.emit({ type: 'hurt', id: this.id, x: this.x, y: this.y, dmg });
     this.sim.onPlayerHurt(this);
-    if (this.hp <= 0) { this.hp = 0; this.sim.onPlayerDown(this); }
+    if (this.hp <= 0) { this.hp = 0; this.sim.onPlayerDown(this, by); }
     return true;
   }
 }

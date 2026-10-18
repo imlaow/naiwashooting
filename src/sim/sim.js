@@ -3,6 +3,7 @@
 // run it.
 //
 //   const sim = new Sim(world, layout);   // from buildMap(choice) in sim/maps.js
+//   new Sim(world, layout, { mode: 'pvp', killLimit, timeLimit })   // a deathmatch round instead
 //   const me = sim.addPlayer();           // any time; removePlayer(id) when someone leaves
 //   sim.step(STEP, { [me.id]: cmd });     // cmd: see Player.update; no command = stand still
 //   for (const e of sim.takeEvents()) …   // what happened during the step, for sounds and particles
@@ -14,6 +15,8 @@
 //   hurt, dash, laugh, laughEnd (heal)
 //   downed, revived (by), died, respawned (joined)  co-op: down, back up, bled out, back in at the dock
 //   over                             every player is down or dead: the run is over
+//   PvP: died (by: the killer, null for none or a player's own barrel), respawned (joined),
+//        over (winner: player id or null for a draw, why: 'kills' | 'time')
 //   switch, reload, reloaded, empty  the player's gun
 //   bulletHit (target: enemy / crate / barrel / wall), bulletEnd (ran out of range)
 //   propHit, propBroken, explode     crates and barrels
@@ -21,19 +24,37 @@
 //   wave (n, boss, count), waveCleared (n, bonus, heals: [{ id, heal, x, y }])
 //
 // With one player, downed is dead and the run ends, as in single-player.
+//
+// PvP (deathmatch; online only, the server's sim): no waves or enemies. state is 'pvp' while the
+// round runs and 'over' once a player reaches killLimit or roundT (timeLimit seconds) runs out.
+// HP 0 is dead; the dead respawn RESPAWN_SECONDS later far from every living player, with a
+// pistol and SPAWN_PROTECT seconds of invulnerability. Players' bullets hit other players (no hit
+// i-frames), explosions hurt everyone, crates and barrels come back PROP_RESPAWN seconds after
+// they break and weapon spots SPOT_RESPAWN seconds after they are taken. Once over, guns still
+// fire but nobody is hurt.
 import { WORLD } from '../island.js';
 import { StaticWorld } from './physics.js';
 import { Player, Enemy, WEAPON_ORDER, REVIVE_RANGE, REVIVE_SECONDS, BLEED_SECONDS, moveBody } from './entities.js';
 
 export const STEP = 1 / 60;
+// PvP (see the header).
+export const RESPAWN_SECONDS = 3;
+export const SPAWN_PROTECT = 1.5;
+export const PROP_RESPAWN = 30;
+export const SPOT_RESPAWN = 20;
+// A PvP bullet pushes the player it hits by this much of its gun's knockback.
+const PVP_PUSH = 0.6;
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class Sim {
   // `world` is the map's terrain (an Island or a Factory) and `layout` its colliders, props and
-  // weapon spots, both from buildMap (sim/maps.js).
-  constructor(world, layout) {
+  // weapon spots, both from buildMap (sim/maps.js). `rules`: { mode: 'pvp', killLimit,
+  // timeLimit } for a deathmatch round, null for co-op (and single-player).
+  constructor(world, layout, rules = null) {
     this.island = world;
+    this.mode = rules?.mode === 'pvp' ? 'pvp' : 'coop';
+    this.pvp = this.mode === 'pvp';
     this.time = 0;
     this.lastId = 0;
     this.events = [];
@@ -48,7 +69,7 @@ export class Sim {
     for (const c of layout.colliders) this.statics.add({ ...c });
     for (const p of layout.props) this.addProp(p.kind, p.x, p.y);
     this.players = new Map();
-    for (const w of layout.weaponSpots) this.spawnPickup('weapon', w.x, w.y, w.kind, Infinity);
+    for (const w of layout.weaponSpots) this.spawnPickup('weapon', w.x, w.y, w.kind, Infinity).spot = true;
 
     // Team score and kills; each player also counts their own kills and combo.
     this.score = 0; this.kills = 0;
@@ -56,6 +77,13 @@ export class Sim {
     this.queue = [];
     this.state = 'intro';
     this.stateT = 3;
+    if (this.pvp) {
+      this.state = 'pvp';
+      this.stateT = 0;
+      this.killLimit = rules.killLimit;
+      this.roundT = rules.timeLimit;
+      this.winner = null;
+    }
   }
 
   newId() { return ++this.lastId; }
@@ -74,8 +102,22 @@ export class Sim {
   // A new player at the dock. Late joiners wait (dead) for the next wave break, unless the run
   // is still in its first wave or between waves. If nobody is up to reach that break (everyone
   // else left or is down), the run is over.
+  //
+  // PvP: any time (the room's lobby, mid-round, its results), with others alive, dead and
+  // waiting to respawn, or nobody at all. While the round is on, the player enters at once at a
+  // spawn far from every living player (none: anywhere open), protected like a respawn; once
+  // it is over, they wait dead (joining, no respawnT) for the next map. Never ends the round.
   addPlayer() {
     const P = new Player(this, 0, 0);
+    if (this.pvp) {
+      const sp = this.pvpSpawn();
+      P.x = sp.x; P.y = sp.y;
+      this.players.set(P.id, P);
+      if (this.state === 'over') { P.dead = true; P.joining = true; return P; }
+      P.invuln = SPAWN_PROTECT;
+      this.emit({ type: 'respawned', id: P.id, x: P.x, y: P.y, joined: true });
+      return P;
+    }
     const sp = this.dockSpot(this.players.size);
     P.x = sp.x; P.y = sp.y;
     this.players.set(P.id, P);
@@ -84,6 +126,9 @@ export class Sim {
     return P;
   }
 
+  // PvP: the player may still have bullets in flight or a barrel about to go off; whoever those
+  // kill dies without a killer (onPlayerDown finds no player for `by`). The round goes on, even
+  // with nobody left in it (the room starts a new one when the server empties).
   removePlayer(id) {
     const P = this.players.get(id);
     if (!P) return;
@@ -117,8 +162,18 @@ export class Sim {
   }
 
   // HP 0. Alone, that's the end of the run; in co-op the player is down until revived or bled out.
-  onPlayerDown(P) {
+  // PvP: dead, back in RESPAWN_SECONDS later; `by` (who shot them or set off the barrel) gets the
+  // kill unless it was their own or that player has left. `downs` counts deaths.
+  onPlayerDown(P, by = null) {
     P.downs++;
+    if (this.pvp) {
+      P.dead = true; P.respawnT = RESPAWN_SECONDS;
+      P.reloading = 0; P.dashT = 0; P.laughT = -1; P.combo = 0; P.comboT = 0;
+      const K = by !== P.id ? this.players.get(by) : null;
+      this.emit({ type: 'died', id: P.id, x: P.x, y: P.y, by: K ? K.id : null });
+      if (K) this.onPlayerKilled(K);
+      return;
+    }
     if (this.players.size === 1) {
       P.dead = true;
       this.emit({ type: 'died', id: P.id, x: P.x, y: P.y });
@@ -136,8 +191,10 @@ export class Sim {
     this.checkRunOver();
   }
 
+  // Co-op only. PvP has players dead and waiting to respawn, all of them at once after a barrel,
+  // and that isn't the end of a round: only endRound ends one.
   checkRunOver() {
-    if (this.state === 'dead' || !this.players.size) return;
+    if (this.pvp || this.state === 'dead' || !this.players.size) return;
     for (const P of this.players.values()) if (P.up) return;
     this.state = 'dead';
     this.emit({ type: 'over' });
@@ -180,6 +237,59 @@ export class Sim {
     }
   }
 
+  // ---------- PvP ----------
+  // K killed another player: the kill, the combo, the laugh on every 5th, and the round's end
+  // at killLimit.
+  onPlayerKilled(K) {
+    this.kills++;
+    K.kills++;
+    K.combo = K.comboT > 0 ? K.combo + 1 : 1;
+    K.comboT = 2.6;
+    if (K.kills % 5 === 0 && K.laugh()) this.emit({ type: 'laugh', id: K.id, x: K.x, y: K.y });
+    if (this.state === 'pvp' && K.kills >= this.killLimit) this.endRound('kills');
+  }
+
+  // The most kills wins, then the fewest deaths; still level is a draw (no winner).
+  endRound(why) {
+    let best = null, tie = false;
+    for (const P of this.players.values()) {
+      const c = best ? P.kills - best.kills || best.downs - P.downs : 1;
+      if (c > 0) { best = P; tie = false; } else if (c === 0) tie = true;
+    }
+    this.state = 'over';
+    this.winner = best && !tie ? best.id : null;
+    this.emit({ type: 'over', winner: this.winner, why });
+  }
+
+  // Dead players back in once their respawnT runs out (not those who joined after the round).
+  updateRespawns(dt) {
+    for (const P of this.players.values()) {
+      if (!P.dead || P.joining) continue;
+      P.respawnT -= dt;
+      if (P.respawnT > 0) continue;
+      const sp = this.pvpSpawn();
+      P.respawn(sp.x, sp.y);
+      P.invuln = SPAWN_PROTECT;
+      this.emit({ type: 'respawned', id: P.id, x: P.x, y: P.y, joined: false });
+    }
+  }
+
+  // An open spot (spawnPoint's checks, and not in the water) as far as can be found from every
+  // living player: the best of up to 24 random ones.
+  pvpSpawn() {
+    const isl = this.island, up = [...this.players.values()].filter((p) => p.up);
+    let best = null, bd = -1;
+    for (let i = 0, found = 0; i < 400 && found < 24; i++) {
+      const x = rnd(40, WORLD - 40), y = rnd(40, WORLD - 40);
+      if (!this.openSpot(x, y) || isl.isWading(x, y)) continue;
+      found++;
+      let d = Infinity;
+      for (const o of up) d = Math.min(d, Math.hypot(x - o.x, y - o.y));
+      if (d > bd) { bd = d; best = { x, y }; }
+    }
+    return best ?? this.dockSpot(0);
+  }
+
   nearestEnemy(x, y, maxD) {
     let best = null, bd = maxD;
     for (const e of this.enemies) {
@@ -191,8 +301,9 @@ export class Sim {
   }
 
   // ---------- Props ----------
-  addProp(kind, x, y) {
-    const prop = { id: this.newId(), kind, x, y, hp: kind === 'crate' ? 45 : 22 };
+  // `id`: a PvP prop coming back keeps the id it had (clients key props by layout order).
+  addProp(kind, x, y, id = this.newId()) {
+    const prop = { id, kind, x, y, hp: kind === 'crate' ? 45 : 22 };
     prop.collider = this.statics.add({ kind: 'circle', x, y: y - 12, r: kind === 'crate' ? 22 : 17, owner: prop });
     this.props.push(prop);
     return prop;
@@ -211,6 +322,7 @@ export class Sim {
     this.statics.remove(p.collider);
     this.props.splice(this.props.indexOf(p), 1);
     this.emit({ type: 'propBroken', id: p.id, kind: p.kind, x: p.x, y: p.y });
+    if (this.pvp) this.after(PROP_RESPAWN, () => this.respawnProp(p));
     if (p.kind === 'crate') {
       const r = Math.random();
       if (r < 0.3) this.spawnPickup('health', p.x, p.y);
@@ -221,7 +333,18 @@ export class Sim {
     }
   }
 
-  // Hurts every player in range too (friendly fire is off for bullets, not for barrels).
+  // A broken PvP crate or barrel back where it was, unless a player is standing there: then a
+  // second later.
+  respawnProp(p) {
+    const cy = p.y - 12, r = p.kind === 'crate' ? 22 : 17;
+    for (const P of this.players.values()) {
+      if (!P.dead && Math.hypot(P.x - p.x, P.y - cy) < r + P.r) { this.after(1, () => this.respawnProp(p)); return; }
+    }
+    this.addProp(p.kind, p.x, p.y, p.id);
+  }
+
+  // Hurts every player in range too (friendly fire is off for bullets, not for barrels); in PvP
+  // the one who set it off (`by`) gets the kills.
   explode(x, y, R, dmg, by = null) {
     this.emit({ type: 'explode', x, y, r: R, by });
     for (const e of this.enemies) {
@@ -230,7 +353,7 @@ export class Sim {
     }
     for (const P of this.players.values()) {
       const pd = Math.hypot(P.x - x, P.y - y);
-      if (pd < R + P.r) P.hurt(dmg * 0.45 * (1 - (pd / (R + P.r)) * 0.5), x, y);
+      if (pd < R + P.r) P.hurt(dmg * 0.45 * (1 - (pd / (R + P.r)) * 0.5), x, y, by);
     }
     for (const p of [...this.props]) {
       if (p.dead) continue;
@@ -248,8 +371,11 @@ export class Sim {
   }
 
   // Health and ammo stay on the ground until picked up; dropped weapons fade after a while.
+  // The map's weapon spots are marked `spot` (in PvP they come back after SPOT_RESPAWN).
   spawnPickup(kind, x, y, weapon = null, life = kind === 'weapon' ? 22 : Infinity) {
-    this.pickups.push({ id: this.newId(), kind, weapon, x, y, life, delay: 0.4 });
+    const p = { id: this.newId(), kind, weapon, x, y, life, delay: 0.4 };
+    this.pickups.push(p);
+    return p;
   }
 
   // The first player to touch a pickup (and want it) takes it.
@@ -274,7 +400,11 @@ export class Sim {
           P.giveWeapon(p.weapon);
           take = true;
         }
-        if (take) { this.emit(ev); break; }
+        if (take) {
+          this.emit(ev);
+          if (p.spot && this.pvp) this.after(SPOT_RESPAWN, () => { this.spawnPickup('weapon', p.x, p.y, p.weapon, Infinity).spot = true; });
+          break;
+        }
       }
       if (take || p.life <= 0) this.pickups.splice(i, 1);
     }
@@ -290,6 +420,7 @@ export class Sim {
   }
 
   // Players' bullets hit enemies only (no friendly fire); enemies' bullets hit players who are up.
+  // PvP: players' bullets hit the other players too, with no hit i-frames; dashing dodges them.
   updateBullets(dt) {
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
@@ -316,6 +447,16 @@ export class Sim {
             this.emit({ type: 'bulletHit', x: b.x, y: b.y, h: b.h, ang: b.ang, target: 'enemy', enemyType: e.type });
             if (b.pierce > 0) { b.pierce--; (b.hits ??= new Set()).add(e); }
             else { alive = false; break; }
+          }
+          if (alive && this.pvp) {
+            for (const P of this.players.values()) {
+              if (!P.up || P.id === b.owner || (b.hits && b.hits.has(P))) continue;
+              const dx = P.x - b.x, dy = P.y - b.y, m = P.r + 4;
+              if (dx * dx + dy * dy >= m * m || P.dashT > 0) continue;
+              P.hurt(b.dmg, b.x - b.vx * 0.05, b.y - b.vy * 0.05, b.owner, b.knock * PVP_PUSH, 0);
+              if (b.pierce > 0) { b.pierce--; (b.hits ??= new Set()).add(P); }
+              else { alive = false; break; }
+            }
           }
         } else {
           for (const P of this.players.values()) {
@@ -354,9 +495,7 @@ export class Sim {
         const a = Math.random() * Math.PI * 2;
         const d = pass < 2 ? rnd(680, 1250) : rnd(400, 1600);
         const x = P.x + Math.cos(a) * d, y = P.y + Math.sin(a) * d;
-        if (!isl.isWalkable(x, y) || isl.inDock(x, y)) continue;
-        if (pass === 0 && !isl.goodSpawn(type, x, y)) continue;
-        if (this.statics.overlaps(x, y, 26)) continue;
+        if (!this.openSpot(x, y) || pass === 0 && !isl.goodSpawn(type, x, y)) continue;
         if (!far(x, y, pass < 2 ? 680 : 400)) continue;
         return { x, y };
       }
@@ -366,10 +505,15 @@ export class Sim {
     for (let i = 0; i < 200; i++) {
       const x = rnd(40, WORLD - 40), y = rnd(40, WORLD - 40);
       if (Math.hypot(x - P.x, y - P.y) < 300 || !far(x, y, 300)) continue;
-      if (!isl.isWalkable(x, y) || isl.inDock(x, y) || this.statics.overlaps(x, y, 26)) continue;
+      if (!this.openSpot(x, y)) continue;
       return { x, y };
     }
     return null;
+  }
+
+  // Walkable, off the dock and clear of colliders: where something can appear.
+  openSpot(x, y) {
+    return this.island.isWalkable(x, y) && !this.island.inDock(x, y) && !this.statics.overlaps(x, y, 26);
   }
 
   spawnEnemy(type, x, y) {
@@ -502,6 +646,9 @@ export class Sim {
 
   // ---------- Main step ----------
   // cmds: { [player id]: cmd }; a player without one stands still.
+  // PvP: no enemies or waves ever (updateWaves only acts on co-op states); the round clock and
+  // respawns only run while the round is on, and after it is over (the room's results) players
+  // still move and shoot but nobody is hurt.
   step(dt, cmds = {}) {
     this.time += dt;
     for (let i = this.timers.length - 1; i >= 0; i--) {
@@ -515,7 +662,13 @@ export class Sim {
     this.applyDrift(dt);
     this.updateBullets(dt);
     this.updatePickups(dt);
-    this.updateWaves(dt);
+    if (this.pvp) {
+      if (this.state === 'pvp') {
+        this.updateRespawns(dt);
+        this.roundT -= dt;
+        if (this.roundT <= 0) { this.roundT = 0; this.endRound('time'); }
+      }
+    } else this.updateWaves(dt);
     for (const P of this.players.values()) P.comboT -= dt;
   }
 }

@@ -40,7 +40,7 @@
     </div>
     <div id="scoreboard" class="scoreboard hidden">
       <table>
-        <thead><tr><th data-i18n="score.name">玩家</th><th data-i18n="score.kills">击杀</th><th data-i18n="score.revives">救援</th><th data-i18n="score.downs">倒地</th><th data-i18n="score.ping">延迟</th></tr></thead>
+        <thead><tr><th data-i18n="score.name">玩家</th><th data-i18n="score.kills">击杀</th><th class="co-only" data-i18n="score.revives">救援</th><th class="co-only" data-i18n="score.downs">倒地</th><th class="pvp-only" data-i18n="score.deaths">死亡</th><th data-i18n="score.ping">延迟</th></tr></thead>
         <tbody id="score-rows"></tbody>
       </table>
     </div>
@@ -112,10 +112,10 @@
     </div></div>
 
     <div id="netover" class="panel hidden"><div class="belly">
-      <h2 data-i18n="netover.title">本局结束</h2>
+      <h2 id="no-title" data-i18n="netover.title">本局结束</h2>
       <div class="stats">
-        <div><span data-i18n="over.score">得分</span><b id="no-score">0</b></div>
-        <div><span data-i18n="over.wave">波次</span><b id="no-wave">0</b></div>
+        <div><span id="no-score-l" data-i18n="over.score">得分</span><b id="no-score">0</b></div>
+        <div><span id="no-wave-l" data-i18n="over.wave">波次</span><b id="no-wave">0</b></div>
         <div><span data-i18n="over.kills">击杀</span><b id="no-kills">0</b></div>
         <div><span data-i18n="netover.mine">你的击杀</span><b id="no-mine">0</b></div>
       </div>

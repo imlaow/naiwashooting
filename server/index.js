@@ -1,4 +1,4 @@
-// naiwa-server: a self-hosted co-op server for 奶蛙射击. Runs one NaiwaRoom (room.js) on plain
+// naiwa-server: a self-hosted co-op or PvP server for 奶蛙射击. Runs one NaiwaRoom (room.js) on plain
 // ws:// at server.json's port; the owner puts a wss:// address in front of it.
 //
 //   npm install --prefix server        once
@@ -24,8 +24,11 @@ export function readConfig(path) {
   const own = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
   if (!own && path) throw new Error(`${path} not found`);
   const cfg = { ...DEFAULTS, ...own, file: own ? file : null };
-  if (cfg.mode === 'pvp') throw new Error('"mode": "pvp" isn\'t available yet. Only "coop" works in this version; change "mode" in server.json.');
-  if (cfg.mode !== 'coop') throw new Error(`"mode" must be "coop" (got ${JSON.stringify(cfg.mode)})`);
+  if (cfg.mode !== 'coop' && cfg.mode !== 'pvp') throw new Error(`"mode" must be "coop" or "pvp" (got ${JSON.stringify(cfg.mode)})`);
+  cfg.pvp = { ...DEFAULTS.pvp, ...own?.pvp };
+  const { killLimit, timeLimit } = cfg.pvp;
+  if (!Number.isInteger(killLimit) || killLimit < 1 || killLimit > 999) throw new Error('"pvp": "killLimit" must be 1–999 (kills that win a round)');
+  if (!Number.isInteger(timeLimit) || timeLimit < 30 || timeLimit > 3600) throw new Error('"pvp": "timeLimit" must be 30–3600 (seconds a round lasts at most)');
   if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) throw new Error(`"port" must be a port number (got ${JSON.stringify(cfg.port)})`);
   if (!Number.isInteger(cfg.maxPlayers) || cfg.maxPlayers < 1 || cfg.maxPlayers > 16) throw new Error('"maxPlayers" must be 1–16');
   if (typeof cfg.password !== 'string') throw new Error('"password" must be a string ("" for none)');
@@ -77,6 +80,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   }
   await start(config);
   console.log(`naiwa-server "${config.name}" on ws://localhost:${config.port} (${config.file ?? 'defaults: copy server/server.example.json to server/server.json to change them'})`);
-  console.log(`  co-op, ${config.maxPlayers} players, maps: ${config.maps.join(', ')}${config.password ? ', password set' : ''}`);
+  const mode = config.mode === 'pvp' ? `PvP deathmatch to ${config.pvp.killLimit} kills or ${config.pvp.timeLimit} s` : 'co-op';
+  console.log(`  ${mode}, ${config.maxPlayers} players, maps: ${config.maps.join(', ')}${config.password ? ', password set' : ''}`);
   console.log(`  allowed sites: ${config.allowedOrigins.join(', ') || 'any'}`);
 }

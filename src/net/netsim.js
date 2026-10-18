@@ -145,6 +145,13 @@ export class NetSim {
   get phase() { return this.room.state.phase; }
   get phaseT() { return this.room.state.phaseT; }
   get run() { return this.room.state.run; }
+  // PvP: the mode, the round's clock, its kill limit and winner (a player id, null: none yet or a
+  // draw).
+  get mode() { return this.room.state.mode; }
+  get pvp() { return this.room.state.mode === 'pvp'; }
+  get timeLeft() { return this.room.state.timeLeft; }
+  get killLimit() { return this.room.state.killLimit; }
+  get winner() { return this.room.state.winner || null; }
   // This client's player id, or undefined before the server has added it.
   get localId() { return this.room.state.players.get(this.room.sessionId)?.id; }
   // This client's player in the room state.
@@ -161,10 +168,12 @@ export class NetSim {
   // command steps at once; @colyseus/sdk's SimReconciler puts it back to the server's state on
   // each acknowledged command and replays the rest.
   predictor() {
-    const s = this.mine;
+    const s = this.mine, room = this.room;
     const live = { on: false, seq: 0 };
     const stand = {
       island: this.island, statics: this.statics,
+      // Player.update reads the mode (the PvP laugh); it is fixed for the room's life.
+      get pvp() { return room.state.mode === 'pvp'; },
       newId: () => s.id,
       // Only a command's first run makes sounds and sparks; replays are silent.
       emit: (e) => { if (live.on && PREDICTED.has(e.type)) this.predicted(e, live.seq); },
@@ -396,6 +405,7 @@ export class NetSim {
       if (l) {
         P.name = l.name; P.colour = l.colour; P.ping = l.ping;
         P.kills = l.kills; P.combo = l.combo; P.comboT = l.comboT; P.revives = l.revives; P.downs = l.downs;
+        P.respawnT = l.respawnT;
       }
     }
 

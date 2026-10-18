@@ -417,16 +417,19 @@ async function boot() {
   chatInput.addEventListener('blur', () => chatForm.classList.add('hidden'));
 
   // ---------- Scoreboard ----------
-  // While Tab is held (or toggled with the touch button): name, kills, revives, downs, ping.
+  // While Tab is held (or toggled with the touch button): name, kills, revives, downs, ping. PvP:
+  // name, kills, deaths, ping, most kills first.
   let scoresOpen = false, scoresT = 0;
   const renderScores = () => {
-    const S = session.room.state, rows = [];
+    const S = session.room.state, rows = [], pvp = S.mode === 'pvp';
     S.players.forEach((p, sid) => rows.push({ p, me: sid === session.room.sessionId }));
-    rows.sort((a, b) => a.p.colour - b.p.colour);
+    rows.sort(pvp ? (a, b) => b.p.kills - a.p.kills || a.p.downs - b.p.downs : (a, b) => a.p.colour - b.p.colour);
+    $('scoreboard').classList.toggle('pvp', pvp);
     $('score-rows').replaceChildren(...rows.map(({ p, me }) => {
       const tr = document.createElement('tr');
       tr.className = me ? 'me' : p.away ? 'out' : '';
-      const cells = [p.name, p.kills, p.revives, p.downs, p.away ? '—' : p.ping ? `${p.ping}` : '…'];
+      const ping = p.away ? '—' : p.ping ? `${p.ping}` : '…';
+      const cells = pvp ? [p.name, p.kills, p.downs, ping] : [p.name, p.kills, p.revives, p.downs, ping];
       for (const [i, v] of cells.entries()) {
         const td = document.createElement('td');
         td.textContent = String(v);
@@ -443,8 +446,15 @@ async function boot() {
     if (!s || s.loading || !game?.net) return;
     const S = s.room.state, results = S.phase === 'results';
     if (results && !open('netover') && !open('netmenu')) {
-      $('no-score').textContent = S.score.toLocaleString();
-      $('no-wave').textContent = S.wave;
+      // PvP: the winner and your deaths where co-op has the score and the wave.
+      const pvp = S.mode === 'pvp', label = (id, key) => { $(id).dataset.i18n = key; $(id).textContent = t(key); };
+      label('no-title', pvp ? 'netover.titlePvp' : 'netover.title');
+      label('no-score-l', pvp ? 'netover.winner' : 'over.score');
+      label('no-wave-l', pvp ? 'netover.deaths' : 'over.wave');
+      let winner = null;
+      if (pvp) S.players.forEach((p) => { if (p.id === S.winner) winner = p.name; });
+      $('no-score').textContent = pvp ? winner ?? (S.winner ? '—' : t('netover.draw')) : S.score.toLocaleString();
+      $('no-wave').textContent = pvp ? game.me?.downs ?? 0 : S.wave;
       $('no-kills').textContent = S.kills;
       $('no-mine').textContent = game.me?.kills ?? 0;
       show('netover');

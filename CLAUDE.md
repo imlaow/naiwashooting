@@ -14,9 +14,10 @@ See `README.md` for running the game, controls and the code map.
 
 ## Online play
 
-In progress (stages 1–5 of 7 done): self-hosted servers in the style of Minecraft (co-op and PvP,
-owners put a `wss://` tunnel or proxy in front), built on Colyseus 0.18 rather than our own netcode.
-The agreed design and build stages are in `docs/online.md`. Keep it up to date as stages land.
+In progress (stages 1–5 of 7 done, and 6a, the PvP deathmatch rules; 6b, rewind-checked hits, is
+next): self-hosted servers in the style of Minecraft (co-op and PvP, owners put a `wss://` tunnel
+or proxy in front), built on Colyseus 0.18 rather than our own netcode. The agreed design and build
+stages are in `docs/online.md`. Keep it up to date as stages land.
 
 All game logic is in `src/sim/` (no Pixi, DOM, audio or HUD imports); `src/view/` draws it. After
 touching `src/sim/`, run `node tools/sim-headless.mjs` and `node tools/sim-headless.mjs --players 4`
@@ -24,8 +25,9 @@ touching `src/sim/`, run `node tools/sim-headless.mjs` and `node tools/sim-headl
 `node tools/dump-layouts.mjs --check`.
 
 After touching `server/`, `src/net/`, `src/sim/protocol.js` or anything the room state carries,
-run `npm run test:server` (all pass) and `node tools/bot-clients.mjs` ("no errors"; it starts its
-own server on port 7790). After touching the prediction, the timeline or how the room takes
+run `npm run test:server` (all pass), `node tools/bot-clients.mjs` ("no errors"; it starts its
+own server on port 7790) and `node tools/bot-clients.mjs --pvp --port 7792` (bots shooting each
+other, "no errors"). After touching the prediction, the timeline or how the room takes
 commands, also run `node tools/net-feel.mjs` (port 7791, about 6 minutes): at 0 and 80 ms the
 prediction error should stay at the wire's rounding (p95 well under 1 px) and B be drawn without
 starving the timeline. The local player's prediction runs the sim's own `Player.update`, so a

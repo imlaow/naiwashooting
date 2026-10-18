@@ -214,13 +214,18 @@ export class Game {
         break;
       case 'died':
         fx.burst(e.x, e.y - 40, 0xffd23f, 30);
-        if (mine && this.sim.players.size > 1 && this.sim.state !== 'dead') this.hud.toast(t('game.bledOut'));
+        if (this.sim.pvp) {
+          // The killer's and the victim's names, for whichever of them is this player.
+          const name = (id) => this.sim.players.get(id)?.name ?? '';
+          if (mine) this.hud.toast(e.by ? t('game.fraggedBy', { name: name(e.by) }) : t('game.died'));
+          else if (e.by === this.localId) { this.hud.toast(t('game.frag', { name: name(e.id) })); fx.text(e.x, e.y - 110, '+1', 0xffd23f, 1.2); }
+        } else if (mine && this.sim.players.size > 1 && this.sim.state !== 'dead') this.hud.toast(t('game.bledOut'));
         break;
       case 'respawned':
-        if (mine) this.hud.toast(t('game.respawned'));
+        if (mine && !(this.sim.pvp && e.joined)) this.hud.toast(t(this.sim.pvp ? 'game.backIn' : 'game.respawned'));
         fx.dust(e.x, e.y, 10, 0xffffff);
         break;
-      case 'over': this.onOver(); break;
+      case 'over': this.onOver(e); break;
       case 'dash': {
         const v = this.playerViews.get(e.id);
         if (v) v.dashLeft = 0.17;
@@ -229,10 +234,12 @@ export class Game {
         break;
       }
       case 'laugh':
-        if (mine) { laugh.play(sfx.muted); this.hud.toast(t('game.laughToast')); }
+        if (mine) { laugh.play(sfx.muted); this.hud.toast(t(this.sim.pvp ? 'game.laughToastPvp' : 'game.laughToast')); }
         fx.text(e.x, e.y - 120, t('game.laugh'), 0xffd23f, 1.4);
         break;
       case 'laughEnd':
+        // The PvP laugh is cut short of the clip.
+        if (mine && this.sim.pvp) laugh.stop();
         if (e.heal > 0) { fx.text(e.x, e.y - 100, `+${e.heal}`, 0x4ade80, 1.2); if (mine) sfx.play('heal'); }
         break;
       case 'switch': case 'reload': case 'reloaded': if (mine) sfx.play('reload'); break;
@@ -321,13 +328,17 @@ export class Game {
     }
   }
 
-  // Every player is down or dead (alone: the player died).
-  onOver() {
+  // Every player is down or dead (alone: the player died). PvP: the round is over.
+  onOver(e) {
     if (!this.net) this.timeScale = 0.3;
     this.shake(20);
     sfx.play('gameover');
     laugh.stop();
-    this.hud.banner(t(this.sim.players.size > 1 ? 'game.allDown' : 'game.fell'), '', 2, 0xff6b6b);
+    if (this.sim.pvp) {
+      const w = e.winner ? this.sim.players.get(e.winner) : null;
+      const title = !w ? t('game.roundDraw') : w.id === this.localId ? t('game.roundWon') : t('game.roundWinner', { name: w.name ?? '' });
+      this.hud.banner(title, '', 2.5, w && w.id === this.localId ? 0xffd23f : 0xff6b6b);
+    } else this.hud.banner(t(this.sim.players.size > 1 ? 'game.allDown' : 'game.fell'), '', 2, 0xff6b6b);
     this.overT = 0.6;
   }
 

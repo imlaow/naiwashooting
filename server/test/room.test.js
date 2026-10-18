@@ -9,7 +9,7 @@ import http from 'node:http';
 import { boot } from '@colyseus/testing';
 import { matchMaker } from '@colyseus/core';
 import { Client } from '@colyseus/sdk';
-import { makeServer, DEFAULTS } from '../index.js';
+import { makeServer, DEFAULTS, readConfig } from '../index.js';
 import { NaiwaRoom, NAME_MAX, STALE_STEPS } from '../room.js';
 import { join, joinError, JoinError } from '../../src/net/online.js';
 import { PROTOCOL, CHAT_MAX } from '../../src/sim/protocol.js';
@@ -479,5 +479,89 @@ test('names, colours, ping and the scoreboard stats are in the state', async () 
   assert.equal(a.state.players.get(a.sessionId).revives, 0);
   // Its shots say which command they came from.
   assert.ok(shots.length && shots.every((e) => e.id === C.id && Number.isInteger(e.seq) && e.seq > 0), JSON.stringify(shots[0]));
+  assert.deepEqual(errors, []);
+});
+
+// ---------- PvP ----------
+// The room in PvP from its next run (before anyone joins).
+function pvpRoom(pvp = { killLimit: 25, timeLimit: 600 }) {
+  room.config = { ...CONFIG, mode: 'pvp', pvp };
+  room.state.mode = 'pvp';
+  room.loadMap();
+}
+// A stands 100 px left of B on open ground, neither protected; A's next bullet kills B.
+function lineUp(A, B) {
+  const sim = room.sim;
+  for (let i = 0; i < 20000; i++) {
+    const x = 100 + Math.random() * 3000, y = 100 + Math.random() * 3000;
+    if (!sim.openSpot(x, y) || !sim.openSpot(x + 100, y) || !sim.statics.clearLine(x, y, x + 100, y, 30)) continue;
+    Object.assign(A, { x, y, vx: 0, vy: 0, invuln: 0 });
+    Object.assign(B, { x: x + 100, y, vx: 0, vy: 0, invuln: 0, hp: 1 });
+    sim.fireBullet({ x: x + 24, y, ang: 0, speed: 980, dmg: 20, life: 0.5, team: 'player', owner: A.id, knock: 140 });
+    return;
+  }
+  throw new Error('no open ground');
+}
+
+test('server.json: "pvp" mode and its limits are checked', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(`${tmpdir()}/naiwa-cfg-`);
+  const write = (o) => { const f = `${dir}/s${Math.random()}.json`; writeFileSync(f, JSON.stringify(o)); return f; };
+  const cfg = readConfig(write({ mode: 'pvp', pvp: { killLimit: 10 } }));
+  assert.equal(cfg.mode, 'pvp');
+  assert.deepEqual(cfg.pvp, { killLimit: 10, timeLimit: 600 });
+  assert.throws(() => readConfig(write({ mode: 'pvp', pvp: { killLimit: 0 } })), /killLimit/);
+  assert.throws(() => readConfig(write({ mode: 'pvp', pvp: { timeLimit: 5 } })), /timeLimit/);
+  assert.throws(() => readConfig(write({ mode: 'ffa' })), /"coop" or "pvp"/);
+});
+
+test('pvp: players shoot each other, die and respawn; late joiners are in at once', async () => {
+  pvpRoom();
+  const a = await enter('Shooter');
+  const b = await enter('Target');
+  assert.equal(a.state.mode, 'pvp');
+  await startRun();
+  const A = simPlayer(a), B = simPlayer(b);
+  lineUp(A, B);
+  const died = [];
+  a.onMessage('tick', ([, ev]) => { for (const e of ev) if (e.type === 'died') died.push(e); });
+  await until(() => died.length, 'the kill');
+  assert.equal(died[0].id, B.id);
+  assert.equal(died[0].by, A.id);
+  const sb = () => a.state.players.get(b.sessionId);
+  await until(() => sb().dead && sb().respawnT > 0 && sb().downs === 1 && a.state.players.get(a.sessionId).kills === 1, 'the death in the state');
+  assert.equal(a.state.killLimit, 25);
+  assert.ok(a.state.timeLeft < 600 && a.state.timeLeft > 590, `${a.state.timeLeft}`);
+  assert.equal(a.state.state, 'pvp');
+  await until(() => !sb().dead, 'the respawn', 5000);
+  assert.ok(sb().invuln > 0, 'spawn protection in the state');
+  assert.equal(sb().respawnT, 0);
+  const c = await enter('Late');
+  assert.ok(!simPlayer(c).dead, 'in at once');
+  assert.equal(room.sim.enemies.length, 0);
+  assert.deepEqual(errors, []);
+});
+
+test('pvp: killLimit → results with the winner → the next map, still PvP; joiners during results wait', async () => {
+  pvpRoom({ killLimit: 1, timeLimit: 600 });
+  const a = await enter('Winner');
+  const b = await enter('Loser');
+  await startRun();
+  const run = room.state.run;
+  lineUp(simPlayer(a), simPlayer(b));
+  await until(() => a.state.phase === 'results', 'results');
+  assert.equal(a.state.state, 'over');
+  assert.equal(a.state.winner, simPlayer(a).id);
+  const c = await enter('TooLate');
+  assert.ok(simPlayer(c).dead, 'waits for the next map');
+  room.state.phaseT = 0.05;
+  await until(() => a.state.run === run + 1, 'the next run');
+  assert.equal(a.state.mode, 'pvp');
+  assert.equal(a.state.winner, 0);
+  assert.ok(room.sim.pvp);
+  for (const x of [a, b, c]) x.send('ready', x.state.run);
+  await until(() => a.state.players.size === 3, 'all back in');
+  assert.ok([a, b, c].every((x) => !simPlayer(x).dead));
   assert.deepEqual(errors, []);
 });

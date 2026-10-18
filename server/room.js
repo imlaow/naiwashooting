@@ -7,6 +7,9 @@
 // map of the rotation and its lobby. When the last player leaves, the room goes back to the
 // lobby with a fresh sim on the same map.
 //
+// PvP ("mode": "pvp"): the same lifecycle, with a deathmatch sim (src/sim/sim.js) whose round
+// ends at server.json's pvp.killLimit or pvp.timeLimit; that 'over' starts the results.
+//
 // A client is only put into the sim once it has loaded the run's map: it sends 'ready' with
 // the run number (state.run) after joining and again after every new run, so nobody stands
 // defenceless at the dock while their browser is still painting the island. The sim itself
@@ -99,12 +102,13 @@ export class NaiwaRoom extends Room {
 
   // options.config: the server.json settings (see server/index.js).
   onCreate({ config }) {
-    if (config.mode !== 'coop') throw new Error(`mode "${config.mode}" isn't supported yet (only "coop")`);
+    if (config.mode !== 'coop' && config.mode !== 'pvp') throw new Error(`mode "${config.mode}" isn't supported (only "coop" and "pvp")`);
     this.config = config;
     this.maxClients = config.maxPlayers;
     this.autoDispose = false;
     this.reconnectSeconds = RECONNECT_SECONDS;
     this.setState(new NaiwaState());
+    this.state.mode = config.mode;
     this.inputs = this.defineInput(Command, { sanitize: sanitizeCommand, idle: holdLast, bufferMaxSize: 240 });
     // sessionId → { id: sim player id (0 until ready), name, colour, cmd, … }
     this.seats = new Map();
@@ -165,11 +169,17 @@ export class NaiwaRoom extends Room {
     this.newRun();
   }
 
+  // The sim's rules for the configured mode (null: co-op).
+  rules() {
+    const { mode, pvp } = this.config;
+    return mode === 'pvp' ? { mode, killLimit: pvp.killLimit, timeLimit: pvp.timeLimit } : null;
+  }
+
   // A fresh sim on the current map and the lobby. Everyone here comes back in once they have
   // loaded it ('ready').
   newRun() {
     const S = this.state;
-    this.sim = new Sim(this.world, this.layout);
+    this.sim = new Sim(this.world, this.layout, this.rules());
     this.bulletIds = new Set();
     this.lastBullet = 0;
     S.run++;
@@ -211,7 +221,9 @@ export class NaiwaRoom extends Room {
     this.broadcast('chat', { k: 'join', n: seat.name, c: seat.colour }, { except: client });
   }
 
-  // The client has loaded run `run`'s map: into the sim (once per run).
+  // The client has loaded run `run`'s map: into the sim (once per run). In any phase: the lobby,
+  // the run (co-op makes late joiners wait for the wave break; PvP puts them in at once, far from
+  // everyone, protected) or the results (in PvP they wait dead for the next map).
   ready(client, run) {
     const seat = this.seats.get(client.sessionId);
     if (!seat || seat.id || run !== this.state.run) return;
@@ -350,6 +362,7 @@ export class NaiwaRoom extends Room {
     S.wave = sim.wave; S.score = sim.score; S.kills = sim.kills;
     S.queued = sim.queue.length;
     S.boss = sim.boss && !sim.boss.dead ? sim.boss.id : 0;
+    if (sim.pvp) { S.timeLeft = nonNeg(sim.roundT); S.killLimit = sim.killLimit; S.winner = sim.winner ?? 0; }
     for (const [sid, seat] of this.seats) {
       const P = sim.players.get(seat.id), ps = S.players.get(sid);
       if (P && ps) this.writePlayer(ps, P, seat);
@@ -376,6 +389,7 @@ export class NaiwaRoom extends Room {
     if (P.dashDir) s.dashA = Math.atan2(P.dashDir.y, P.dashDir.x);
     s.laughT = P.laughT;
     s.down = P.down; s.bleedT = P.down ? nonNeg(P.bleedT) : 0; s.reviveT = P.reviveT; s.dead = P.dead;
+    s.respawnT = P.dead ? nonNeg(P.respawnT) : 0;
     s.kills = P.kills; s.combo = P.combo; s.comboT = nonNeg(P.comboT);
     s.revives = P.revives; s.downs = P.downs;
   }

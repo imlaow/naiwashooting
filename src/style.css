@@ -595,6 +595,7 @@ body.touch .chat-line { align-self: flex-end; font-size: 12px; }
 .scoreboard table { border-collapse: collapse; font-size: 16px; font-weight: 700; }
 .scoreboard th { font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; opacity: 0.7; padding: 0 12px 6px; }
 .scoreboard td { padding: 4px 12px; text-align: center; }
+.scoreboard:not(.pvp) .pvp-only, .scoreboard.pvp .co-only { display: none; }
 .scoreboard td:first-child, .scoreboard th:first-child { text-align: left; }
 .scoreboard td:first-child { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scoreboard tr.me td { background: rgba(255, 255, 255, 0.1); }

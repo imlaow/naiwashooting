@@ -50,11 +50,12 @@ export const PlayerState = schema({
   bleedT: timer(30, 16),
   reviveT: timer(3),
   dead: t.boolean(),
+  respawnT: timer(3), // PvP: until a dead player is back in
   kills: t.uint16(),
   combo: t.uint16(),
   comboT: timer(3),
   revives: t.uint16(),
-  downs: t.uint16(),
+  downs: t.uint16(), // in PvP, deaths
 }, 'PlayerState');
 
 export const EnemyState = schema({
@@ -87,8 +88,8 @@ export const NaiwaState = schema({
   run: t.uint16().default(0),
   mode: t.string().default('coop'),
   map: MapChoice,
-  // The sim: its state ('intro', 'fight', 'break', 'dead') and timer, team score and kills,
-  // enemies still queued for the wave, King Naiwa's enemy id (0: none).
+  // The sim: its state ('intro', 'fight', 'break', 'dead'; PvP 'pvp', 'over') and timer, team
+  // score and kills, enemies still queued for the wave, King Naiwa's enemy id (0: none).
   state: t.string().default('intro'),
   stateT: timer(10, 16),
   wave: t.uint16(),
@@ -96,6 +97,11 @@ export const NaiwaState = schema({
   kills: t.uint32(),
   queued: t.uint16(),
   boss: t.uint32(),
+  // PvP: the round's time left (s), the kills that win it, and its winner's player id (0: none
+  // yet, or a draw).
+  timeLeft: t.quantized({ min: 0, max: 3600, bits: 16 }),
+  killLimit: t.uint16(),
+  winner: t.uint32(),
   players: t.map(PlayerState), // by sessionId
   enemies: t.map(EnemyState), // by enemy id
   pickups: t.map(PickupState), // by pickup id
