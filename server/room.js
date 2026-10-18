@@ -261,7 +261,10 @@ export class NaiwaRoom extends Room {
     this.stats?.bytes.delete(client.sessionId);
     this.log(`${seat.name} left${seat.dropped ? ' (did not come back)' : ''} (${this.seats.size}/${this.maxClients})`);
     this.broadcast('chat', { k: 'leave', n: seat.name, c: seat.colour });
-    if (!this.seats.size) this.newRun();
+    // A PvP round nobody is in any more, with the players left still loading it: a fresh one for
+    // them in the lobby, rather than its clock running out on nobody into a draw. (Co-op ends
+    // such a run when the first of them comes in, see Sim.addPlayer.)
+    if (!this.seats.size || this.sim.pvp && this.state.phase === 'run' && !this.sim.players.size) this.newRun();
   }
 
   // A chat line: one a second per player, CHAT_MAX characters, printable only.

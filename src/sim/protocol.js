@@ -19,7 +19,7 @@
 // trip goes on the scoreboard).
 import { WEAPON_ORDER } from './entities.js';
 
-export const PROTOCOL = 4;
+export const PROTOCOL = 5;
 
 // How long a dropped player's seat is held, and the browser keeps reconnecting, in seconds.
 export const RECONNECT_SECONDS = 60;

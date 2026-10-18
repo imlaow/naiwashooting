@@ -546,8 +546,10 @@ export class Game {
     for (const e of this.net.takeEvents()) this.onEvent(e);
   }
 
+  // Who the camera follows: this player, or while they are out a teammate who is up. In PvP the
+  // others are opponents, hidden from the minimap and the edge arrows, so the camera stays put.
   focus() {
-    if (!this.me.dead) return this.hero;
+    if (!this.me.dead || this.sim.pvp) return this.hero;
     for (const v of this.playerViews.values()) if (!v.p.dead) return v;
     return this.hero;
   }

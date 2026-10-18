@@ -777,7 +777,8 @@ stage 6b. The prediction and the timeline are unchanged.
     distance to the nearest living player, with `respawn()`'s pistol and full HP and
     `SPAWN_PROTECT` (1.5 s) of `invuln`.
   - Player bullets hit the other players who are up (not the shooter; a dash dodges them, as it
-    does enemy bullets). **Decided while building:** they give no hit i-frames (the co-op 0.45 s
+    does enemy bullets). They go through a player who can't be hurt (spawn protection, the
+    laugh, the round over), so nobody is a shield for the one behind. **Decided while building:** they give no hit i-frames (the co-op 0.45 s
     would let only one SMG bullet or shotgun pellet in 0.45 s count) and push by 0.6 × the gun's
     knockback rather than co-op's flat 260. `Player.hurt(dmg, fromX, fromY, by, push, iframes)`
     carries both; co-op calls it as before.
@@ -791,7 +792,8 @@ stage 6b. The prediction and the timeline are unchanged.
   - The round ends (`endRound`, the `over` event with `winner` and `why`) when a player reaches
     killLimit or `roundT` runs out: most kills wins, then fewest deaths, still level is a draw
     (`winner` null). Once over, guns still fire (as the browser predicts) but nobody is hurt, and
-    nobody respawns or comes in until the next map.
+    nobody respawns or comes in until the next map (the dead get `respawnT` 0, so their HUD
+    shows no countdown through the results).
 - **New calls into older code, and the states they now meet** (also in those functions' comments):
   - `addPlayer` in PvP may run in the room's lobby, mid-round, or during results, with others
     alive, waiting to respawn, or nobody: it puts the player in at once at `pvpSpawn` with spawn
@@ -809,6 +811,9 @@ stage 6b. The prediction and the timeline are unchanged.
     co-op player can be downed. The `over` event comes only out of `step` (a kill or the clock),
     never in the lobby, and starts the results as in co-op; `newRun` builds the next map's PvP
     sim (`NaiwaRoom.rules()`), with a fresh clock and kill counts.
+  - The room's `onLeave`: when the last player in a PvP round leaves while others are still
+    loading it (seated, not yet 'ready'), the room starts a fresh round in the lobby, as it does
+    when the server empties, instead of running the clock out on nobody into a draw.
 - **State** (`server/schema.js`): `timeLeft` (quantized 0–3600 s, 16 bits), `killLimit`, `winner`
   (the sim's player id, 0 for none or a draw) on `NaiwaState`, so someone who joins or reconnects
   during the results sees the winner; `respawnT` on `PlayerState`; `state` can be `'pvp'` or
@@ -817,10 +822,16 @@ stage 6b. The prediction and the timeline are unchanged.
   `respawnT`, and gives the prediction's stand-in sim `pvp` (the only change to it: the
   predicted `Player.update` reads it for the laugh). HUD: the round clock in the wave's place,
   "Kills n / limit", the leader, "Respawn in n" while dead; opponents aren't on the minimap or
-  edge arrows. Toasts for your kills and deaths, the PvP laugh's own toast (and its sound cut at
+  edge arrows, and while dead the camera stays on your own body rather than following an
+  opponent (`Game.focus`). Toasts for your kills and deaths, the PvP laugh's own toast (and its sound cut at
   4 s), a winner / draw banner. The results panel shows the winner and your deaths; the scoreboard
   shows kills and deaths, most kills first. Not checked in a browser in this stage.
 - **`PROTOCOL` 4:** the rules above, the new state fields, `died.by`, `over.winner` / `why`.
+- **`PROTOCOL` 5 (review fixes after stage 6a):** bullets go through players who can't be hurt;
+  the dead get `respawnT` 0 when a round ends; an empty round with players still loading goes
+  back to the lobby; the dead don't spectate opponents. Checked by 2 more sim-rules checks (bullets
+  through a protected or laughing player; no countdown after the round) and a 22nd server test
+  (the last one in leaves while another loads).
 - **Checks.**
   - `node tools/sim-rules.mjs`: 28 PvP checks, one or more per rule (no waves, hits and no
     i-frames, not the shooter, dash dodges, death and kill credit, respawn after 3 s with a pistol

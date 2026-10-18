@@ -249,13 +249,15 @@ export class Sim {
     if (this.state === 'pvp' && K.kills >= this.killLimit) this.endRound('kills');
   }
 
-  // The most kills wins, then the fewest deaths; still level is a draw (no winner).
+  // The most kills wins, then the fewest deaths; still level is a draw (no winner). The dead stay
+  // dead until the next map (respawnT 0: no countdown on their HUD through the results).
   endRound(why) {
     let best = null, tie = false;
     for (const P of this.players.values()) {
       const c = best ? P.kills - best.kills || best.downs - P.downs : 1;
       if (c > 0) { best = P; tie = false; } else if (c === 0) tie = true;
     }
+    for (const P of this.players.values()) P.respawnT = 0;
     this.state = 'over';
     this.winner = best && !tie ? best.id : null;
     this.emit({ type: 'over', winner: this.winner, why });
@@ -420,7 +422,8 @@ export class Sim {
   }
 
   // Players' bullets hit enemies only (no friendly fire); enemies' bullets hit players who are up.
-  // PvP: players' bullets hit the other players too, with no hit i-frames; dashing dodges them.
+  // PvP: players' bullets hit the other players too, with no hit i-frames; they pass through a
+  // player who is dashing or can't be hurt.
   updateBullets(dt) {
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
@@ -453,7 +456,9 @@ export class Sim {
               if (!P.up || P.id === b.owner || (b.hits && b.hits.has(P))) continue;
               const dx = P.x - b.x, dy = P.y - b.y, m = P.r + 4;
               if (dx * dx + dy * dy >= m * m || P.dashT > 0) continue;
-              P.hurt(b.dmg, b.x - b.vx * 0.05, b.y - b.vy * 0.05, b.owner, b.knock * PVP_PUSH, 0);
+              // A player who can't be hurt (spawn protection, the laugh, the round over) lets it
+              // through, as a dash does: nobody is a shield for someone else.
+              if (!P.hurt(b.dmg, b.x - b.vx * 0.05, b.y - b.vy * 0.05, b.owner, b.knock * PVP_PUSH, 0)) continue;
               if (b.pierce > 0) { b.pierce--; (b.hits ??= new Set()).add(P); }
               else { alive = false; break; }
             }

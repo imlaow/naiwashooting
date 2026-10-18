@@ -242,6 +242,22 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   }
 }
 {
+  // B, who can't be hurt, between A and C: the bullet goes through B to C.
+  const { sim, ps: [A, B, C] } = pvp(3);
+  const through = (setB) => {
+    const { x, y } = openPair(sim, 200);
+    Object.assign(A, { x, y, vx: 0, vy: 0, invuln: 0 });
+    Object.assign(B, { x: x + 100, y, vx: 0, vy: 0, hp: 100, invuln: 0, laughT: -1 });
+    Object.assign(C, { x: x + 200, y, vx: 0, vy: 0, hp: 100, invuln: 0 });
+    setB();
+    shoot(sim, A); run(sim, 0.3);
+    return B.hp === 100 && C.hp === 80;
+  };
+  const prot = through(() => { B.invuln = SPAWN_PROTECT; });
+  const laughing = through(() => { B.laughT = 0; });
+  check('pvp: bullets go through a player who can\'t be hurt (protected, laughing) to the one behind', prot && laughing, `protected ${prot}, laughing ${laughing}`);
+}
+{
   const { sim, ps: [A, B, C] } = pvp(3);
   A.x = 700; A.y = 700; B.x = 2400; B.y = 2400;
   for (const P of [A, B]) if (!world.isWalkable(P.x, P.y)) { const o = openPair(sim, 0); P.x = o.x; P.y = o.y; }
@@ -357,6 +373,8 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const ev = kill(sim, A, B);
   const over = ev.find((e) => e.type === 'over');
   check('pvp: the round ends at killLimit, won by the player who got there', sim.state === 'over' && over?.winner === A.id && over.why === 'kills' && sim.winner === A.id);
+  run(sim, RESPAWN_SECONDS + 0.5);
+  check('… the dead stay dead until the next map, with no respawn countdown', B.dead && B.respawnT === 0, `respawnT ${B.respawnT}`);
   B.dead = false; B.hp = 100; face(sim, A, B);
   const shots = run(sim, 0.3, { [A.id]: { mx: 0, my: 0, aim: 0, fire: true } }).filter((e) => e.type === 'shot').length;
   check('… after it, guns still fire but nobody is hurt', B.hp === 100 && shots > 0, `${shots} shots`);

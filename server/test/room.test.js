@@ -553,6 +553,9 @@ test('pvp: killLimit → results with the winner → the next map, still PvP; jo
   await until(() => a.state.phase === 'results', 'results');
   assert.equal(a.state.state, 'over');
   assert.equal(a.state.winner, simPlayer(a).id);
+  // The loser stays dead through the results, with no countdown.
+  assert.ok(a.state.players.get(b.sessionId).dead);
+  assert.equal(a.state.players.get(b.sessionId).respawnT, 0);
   const c = await enter('TooLate');
   assert.ok(simPlayer(c).dead, 'waits for the next map');
   room.state.phaseT = 0.05;
@@ -563,5 +566,28 @@ test('pvp: killLimit → results with the winner → the next map, still PvP; jo
   for (const x of [a, b, c]) x.send('ready', x.state.run);
   await until(() => a.state.players.size === 3, 'all back in');
   assert.ok([a, b, c].every((x) => !simPlayer(x).dead));
+  assert.deepEqual(errors, []);
+});
+
+test('pvp: the last one in the round leaves while another still loads: a fresh round in the lobby', async () => {
+  pvpRoom();
+  const a = await enter('Alone');
+  await startRun();
+  // Joined, but still loading the map (no 'ready' yet).
+  const b = await join(URL, { name: 'Loading' });
+  b.reconnection.minUptime = 0;
+  clients.push(b);
+  await until(() => room.seats.has(b.sessionId), 'the seat');
+  const run = room.state.run;
+  await a.leave();
+  await until(() => b.state.run === run + 1, 'a new run');
+  assert.equal(b.state.phase, 'lobby');
+  assert.equal(room.sim.players.size, 0);
+  // The 'ready' for the old run counts for nothing; the new run's puts them in.
+  b.send('ready', run);
+  b.send('ready', b.state.run);
+  await until(() => b.state.players.has(b.sessionId), 'in the new round');
+  assert.equal(room.sim.state, 'pvp');
+  assert.ok(room.sim.roundT === 600, `${room.sim.roundT}`);
   assert.deepEqual(errors, []);
 });
