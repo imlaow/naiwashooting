@@ -73,6 +73,36 @@ const STRINGS = {
     'game.respawned': '你在码头复活了',
     'game.soundOff': '声音关闭',
     'game.soundOn': '声音开启',
+    'title.online': '联机',
+    'online.title': '联机',
+    'online.tag': '加入朋友开的服务器，一起守岛。',
+    'online.address': '服务器地址',
+    'online.name': '你的名字',
+    'online.password': '密码（没有就留空）',
+    'online.recent': '最近加入',
+    'online.join': '加入',
+    'online.back': '返回',
+    'online.loading': '加载联机模块…',
+    'online.connecting': '连接中…',
+    'online.empty': '请输入服务器地址',
+    'online.badAddress': '地址要以 wss:// 开头（ws:// 只能连本机 localhost）',
+    'online.err.version': '服务器版本是 {server}，本站需要 {client}。请服主更新服务器。',
+    'online.err.full': '服务器已满',
+    'online.err.password': '密码错误',
+    'online.err.origin': '这个服务器不接受来自本站的玩家',
+    'online.err.unreachable': '连不上服务器：检查地址，确认服务器正在运行',
+    'online.err.error': '加入失败：{msg}',
+    'hud.lobby': '{n} 秒后开局',
+    'netmenu.title': '联机中',
+    'netmenu.note': '联机时游戏不会暂停',
+    'netmenu.back': '回到游戏',
+    'netmenu.leave': '离开服务器',
+    'netover.title': '本局结束',
+    'netover.mine': '你的击杀',
+    'netover.next': '{n} 秒后进入下一张地图',
+    'lost.title': '连接断开',
+    'lost.text': '和服务器的连接断开了。',
+    'lost.ok': '返回主菜单',
     'weapon.pistol': '手枪',
     'weapon.smg': '冲锋枪',
     'weapon.shotgun': '霰弹枪',
@@ -197,6 +227,36 @@ const STRINGS = {
     'game.respawned': 'Back in at the dock',
     'game.soundOff': 'Sound off',
     'game.soundOn': 'Sound on',
+    'title.online': 'ONLINE',
+    'online.title': 'Online',
+    'online.tag': 'Join a friend\'s server and hold the island together.',
+    'online.address': 'Server address',
+    'online.name': 'Your name',
+    'online.password': 'Password (if there is one)',
+    'online.recent': 'Recently joined',
+    'online.join': 'JOIN',
+    'online.back': 'BACK',
+    'online.loading': 'Loading online play…',
+    'online.connecting': 'Connecting…',
+    'online.empty': 'Enter a server address',
+    'online.badAddress': 'The address must start with wss:// (ws:// only works for localhost)',
+    'online.err.version': 'The server runs version {server}, this site needs {client}. Ask the owner to update the server.',
+    'online.err.full': 'Server full',
+    'online.err.password': 'Wrong password',
+    'online.err.origin': 'This server doesn\'t accept players from this site',
+    'online.err.unreachable': 'Can\'t reach the server: check the address and that it is running',
+    'online.err.error': 'Could not join: {msg}',
+    'hud.lobby': 'Run starts in {n}',
+    'netmenu.title': 'Online',
+    'netmenu.note': 'The game doesn\'t pause online',
+    'netmenu.back': 'BACK TO GAME',
+    'netmenu.leave': 'LEAVE SERVER',
+    'netover.title': 'RUN OVER',
+    'netover.mine': 'Your kills',
+    'netover.next': 'Next map in {n} s',
+    'lost.title': 'Connection lost',
+    'lost.text': 'The connection to the server was lost.',
+    'lost.ok': 'BACK TO TITLE',
     'weapon.pistol': 'Pistol',
     'weapon.smg': 'SMG',
     'weapon.shotgun': 'Shotgun',
@@ -278,13 +338,15 @@ export function t(key, params) {
 // Every CJK character the UI can show, so the web font can fetch just those glyphs up front.
 export const CJK_TEXT = [...new Set(Object.values(STRINGS.zh).join('').replace(/[\x00-\x7f]/g, ''))].join('');
 
-// Fills elements tagged with data-i18n (text) / data-i18n-alt (alt attribute).
+// Fills elements tagged with data-i18n (text) / data-i18n-alt (alt attribute) /
+// data-i18n-ph (placeholder) / data-i18n-label (aria-label).
 export function applyDom() {
   document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
   document.documentElement.dataset.lang = lang;
   document.title = t('doc.title');
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
   for (const el of document.querySelectorAll('[data-i18n-alt]')) el.alt = t(el.dataset.i18nAlt);
+  for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh);
   for (const el of document.querySelectorAll('[data-i18n-label]')) el.setAttribute('aria-label', t(el.dataset.i18nLabel));
   for (const el of document.querySelectorAll('[data-lang-btn]')) el.classList.toggle('on', el.dataset.langBtn === lang);
 }

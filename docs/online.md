@@ -1,7 +1,8 @@
 # Online play: self-hosted servers (design)
 
-Status: **stages 1–3 of 7 done** (layout extraction, the sim/view split and several players in the
-sim, 2026-10-17). This is the agreed design; build it in the stages at the end.
+Status: **stages 1–4 of 7 done** (layout extraction, the sim/view split, several players in the
+sim, and the Colyseus server with the join screen, 2026-10-17). This is the agreed design; build it
+in the stages at the end.
 
 ## Decisions
 
@@ -45,7 +46,8 @@ and 15 MB, the factory 3 ms. A synthetic heavy tick (20 enemies steering, 120 bu
 checks, 8 players moving) takes 0.22 ms, so 1.3 % of a core at 60 Hz. Allowing ×5 for the real sim plus
 schema encoding, that's under 10 % of one core and about 100–150 MB of memory with Colyseus. Upload
 bandwidth is the real limit. The estimate is 15–25 KB/s per player (20 Hz delta patches + bullet and
-event messages), so about 0.8 Mbps for 4 players and 1.5 Mbps for 8. Measure it in stage 7.
+event messages), so about 0.8 Mbps for 4 players and 1.5 Mbps for 8. Measure it in stage 7. (Stage 4 measured
+8–12 KB/s per player in a busy wave with 4 players, 0.4 Mbps in all; see "Stage 4 as built".)
 Recommended minimum: 1 vCPU and 512 MB–1 GB RAM (cheapest VPS, Oracle free tier, Raspberry Pi 4/5, or
 any home PC). Pick the location by ping to the players. For players in mainland China, Cloudflare
 tunnels route through edges outside the mainland, so a nearby VPS (e.g. Hong Kong) with Caddy may
@@ -382,6 +384,175 @@ Found in stage 2:
     broadcast as they are.
   - Not done here: weapon spots respawning 20 s after pickup ("online" in the plan).
 
+## Stage 4 as built
+
+- **Packages, pinned exactly** (Colyseus is pre-1.0). The server has its own `server/package.json`
+  (`npm install --prefix server`), so the Worker build at the repo root never installs it:
+  `@colyseus/core` 0.18.19, `@colyseus/ws-transport` 0.18.4, `@colyseus/schema` 5.0.40, and for the
+  tests `@colyseus/testing` 0.18.6 with `@colyseus/sdk` 0.18.5 (testing pulls in `@colyseus/tools`
+  as its peer). A production install is 105 packages and 28 MB (the 84 / 20 MB measured before was
+  an older 0.18). The root has `@colyseus/sdk` 0.18.5 for the browser and `@colyseus/schema` 5.0.40
+  pinned next to it, so browser and server always decode the same wire format.
+- **API names checked against the installed 0.18 sources.** As announced: `defineServer`,
+  `defineRoom`, `setFixedTimestep`, `defineInput` (its `sanitize` has a map form and a callback
+  form; we use the callback), `onBeforePatch`, `beforeUpgrade` (an option of `WebSocketTransport`,
+  given a `Request` and returning a `Response` to refuse), `room.input()` on the client,
+  `boot()` / `ColyseusTestServer` in `@colyseus/testing` (given a `Server`, it always listens on
+  2568). Different: **`onAuth` is static** (`static onAuth(token, options, context)`) and runs on
+  the HTTP matchmaking request before a seat exists; the instance `onAuth` still exists but runs
+  later, at the WebSocket join, where a refusal reaches the client less cleanly. Errors thrown there
+  arrive in the SDK as `MatchMakeError` with our message. `Predict` and rewind weren't touched.
+- **Files.** `server/index.js` (reads and checks `server.json` over `server.example.json`, refuses to
+  start with `"mode": "pvp"`, the transport's Origin check, creates the one room at startup),
+  `server/room.js` (`NaiwaRoom`), `server/schema.js` (state and `Command`), `src/sim/protocol.js`
+  (`PROTOCOL = 1`, message formats), `src/net/netsim.js` (`NetSim`), `src/net/online.js` (join,
+  refusal reasons; loaded with the SDK on demand), `src/online.js` (address rules, recent servers),
+  `server/test/room.test.js`, `tools/bot-clients.mjs`.
+- **One room per server.** `index.js` creates it with `matchMaker.createRoom('naiwa')` at startup,
+  `autoDispose` is off, and browsers `join` (never `joinOrCreate`), so a full server can't spawn a
+  second room. `maxClients = maxPlayers` is the backstop for two joins racing past `onAuth`.
+- **Refusals.** `onAuth` refuses, in this order, a wrong protocol (`version:N`), an Origin header
+  not in `allowedOrigins` (`origin`), a wrong password (`password`) and a full room (`full`, from
+  `hasReachedMaxClients()`). The browser shows "The server runs version N, this site needs M",
+  "Server full", "Wrong password", "This server doesn't accept players from this site", or "Can't
+  reach the server" when nothing answers. `beforeUpgrade` answers 403 to a WebSocket upgrade whose
+  Origin isn't allowed (for anything that skips matchmaking). Requests without an Origin header
+  (programs, like the bots) pass both checks: Origin only stops other websites, not other
+  programs. Names are cleaned (control characters removed, trimmed) and capped at 16 characters.
+- **Different from the plan: a `ready` handshake.** `onJoin` doesn't call `addPlayer()`. The client
+  first loads the run's map (`prepare()` behind the loading screen, seconds on a slow phone) and
+  then sends `ready` with the run number; only then is it added to the sim and the state. Without
+  this a joining player stood defenceless at the dock while the island was still being painted:
+  in the first browser test the lobby ran out and eggs killed the loading player. The same happens
+  after every new run (the next map): everyone reloads and says `ready` again. The lobby's countdown
+  starts with the first player in the sim, not the first connection. Late joiners still wait for
+  the wave break inside the sim.
+- **Commands.** `defineInput(Command)`: the sim's command with quantized fields (stick and dash
+  direction in 8 bits, aim as a 16-bit angle, the gun as 0–4, the wheel as an int8), so a value off
+  the wire is always in range; the sanitizer keeps the stick inside the unit circle, the gun within
+  0–4, the wheel within ±4 and the flags strictly boolean. The browser sends one command per 1/60 s
+  step with `room.input({ mode: 'reliable' })` (there is no unreliable channel over WebSocket).
+  Each server tick takes every buffered command of a client: movement, aim and trigger from the
+  newest, `dash` / `reload` / `last` if any of them had it, the last gun switch, the wheel summed.
+  So a press is never lost when two commands arrive between steps. A tick without a new command
+  keeps the last movement, aim and trigger, for up to 1 s (`STALE_STEPS`); then the stick and the
+  trigger are let go and the aim kept, because a hidden tab stops sending (browsers stop animation
+  frames) and its player shouldn't run into the sea firing. Offline, a player without a command
+  stands still at once.
+- **A Colyseus bug, worked around.** A malformed *unreliable* input frame (a negative slot length in
+  `@colyseus/schema`'s `InputDecoder.decodeAll`) sends the server into an endless loop: nine bytes
+  from any client froze it. `NaiwaRoom._onMessage` drops unreliable input frames before Colyseus
+  reads them (ours never sends them). A message that isn't valid msgpack gets its sender
+  disconnected by Colyseus itself (close code 4002); the room carries on. Worth reporting upstream.
+- **State** (`server/schema.js`): players (by sessionId, with the sim's `id` that events use: position,
+  aim, HP, gun and arsenal, reload, walk flag and lean speed, dash, dash cooldown, invulnerability,
+  laugh, down / bleed-out / revive, dead, kills, combo), enemies (by id: type, position, aim, HP and
+  max HP, walk flag, lean speed, spawn fade), pickups (kind, gun, position, `fading` for a dropped
+  gun's last 4 s), living props (by the id the sim gave them, 1–n in layout order; only HP), and the
+  room's `phase` / `phaseT` / `run` / `map` plus the sim's `state`, `stateT`, wave, score, kills,
+  queued enemies and King Naiwa's id. Positions are 16-bit (0.06 px), timers 8 or 16 bits and sent
+  clamped at 0, so timers that only count down stop changing. Off the schema because the client
+  works them out: an enemy's walk phase (`NetEnemy.animT` runs locally), a pickup's bob, the player's
+  max HP and radius. The state is written from the sim in `onBeforePatch` (20 times a second), not
+  every step. `name` is in it already for stage 5.
+- **Messages,** once per tick and only when not empty: `events` (the sim's events, positions rounded
+  to whole pixels and other numbers to 2 decimals), `bullet` (new bullets as
+  `[id, x, y, angle×10⁴, speed, life ms, height, tint, orb, scale×100]`) and `bulletEnd` (ids of
+  bullets that are gone, from comparing the bullet list before and after the step). Clients fly
+  bullets in a straight line. Messages go out at once while the state goes out at 20 Hz, so events
+  and bullets arrive up to 50 ms ahead of the positions they belong to.
+- **Lifecycle.** `lobby`: the sim exists but isn't stepped, so players stand at the dock (the HUD
+  shows "Run starts in N"); the countdown (10 s) runs while someone is in. `run`: the sim steps.
+  `results`: on the sim's `over` event, for 10 s; the sim keeps stepping underneath. Then the next
+  map of the rotation (`island/random` rolls a seed each time) and its lobby. When the last client
+  leaves, a fresh sim on the same map and the lobby. Building the island blocks the room for
+  110–200 ms once per map.
+- **Browser.** `NetSim` mirrors the state with the parts of `Sim`'s interface the view, the HUD and
+  the bot read (players by id, enemy / pickup / prop / bullet lists whose objects keep their
+  identity, `nearestEnemy` with the map's colliders for touch auto-aim), so `PlayerView`,
+  `EnemyView`, `reconcile` and the HUD needed no changes for it. `Game` takes `net` instead of making
+  a `Sim`: it sends `command()` each step (an idle command while the Esc menu is open), copies the
+  state each frame, draws at alpha 1 (no interpolation) and plays the broadcast events through the
+  same `onEvent`. One `NetSim` per run; when the room moves on it stops following the state, so the
+  old `Game` doesn't see players vanish before the new one exists. Online: Esc / P / the pause
+  button open a menu and the game keeps running, hiding the tab doesn't pause, the game over slow
+  motion is off, records aren't touched, the results panel follows the room's phase, a dropped
+  connection shows "Connection lost" and goes back to the title. `Input` ignores keys typed into
+  form fields (Space used to be swallowed).
+- **The ONLINE panel.** Address, name, password, up to 5 recently joined servers (localStorage
+  `naiwa-servers`, the name in `naiwa-name`), `?server=…` opens it filled in. `wss://` as is,
+  `https://` → `wss://`, a bare host name gets `wss://` (`ws://` for localhost), `ws://` and
+  `http://` only for localhost / 127.0.0.1, anything else gets "The address must start with wss://".
+  The SDK chunk starts loading when the panel opens.
+- **Bundle.** The single-player bundle doesn't contain or load the SDK: `dist/assets/index-*.js` went
+  from 449.74 kB (141.06 kB gzipped) to 456.77 kB (143.85 kB gzipped) for the panel, its strings in
+  both languages and `Game`'s online branch, and the CSS from 16.51 to 17.58 kB (4.99 → 5.20 kB
+  gzipped). `online-*.js` (SDK, `NetSim`, protocol) is 167.87 kB (53.07 kB gzipped); `index.html`
+  doesn't preload it and only the ONLINE panel fetches it.
+- **Measured** on one Neoverse-N1 core (ARM, 2 cores in all), Node 24, `stats: true`, payload plus
+  WebSocket frame headers (not TCP/IP):
+  - 4 bot clients for 4 minutes (`tools/bot-clients.mjs --clients 4 --minutes 4`, waves 1–6, up to
+    14 enemies): server CPU 4.2 % of one core, a tick 0.08–0.29 ms on average (11 ms at worst, a GC
+    pause), RSS 92–108 MB, 1.2–8.5 KB/s sent per client.
+  - A busy wave (the same 4 bots with the run moved on to wave 8, 25–28 enemies and up to 20 bullets
+    in flight, then wave 10 with King Naiwa): 8–12.3 KB/s per client, ticks 0.3–0.5 ms on average.
+    So 4 players need about 50 KB/s (0.4 Mbps) of upload, below the 15–25 KB/s per player
+    estimated above.
+  - An idle server: 86–94 MB RSS.
+- **Checks.**
+  - Single-player unchanged: `node tools/sim-headless.mjs --trace` for seeds 1–3 and the browser
+    traces (headless Chromium, ticker stopped, `game.update(1/60)` by hand, seeded `Math.random`,
+    view randomness on its own stream, mouse 36 px above the target) on `island/cove`,
+    `factory/dairy`, `island/twins` and the run where the bot doesn't shoot are byte-identical to
+    those recorded before the change. `sim-headless` (1 and 4 players), `sim-rules` and the layout
+    check pass.
+  - `npm run test:server`, 11 room tests: join and get the state; a client that never says ready
+    stays out; wrong protocol, wrong password and full refused with their reasons (and a seat frees
+    up when someone leaves); the version message carries both numbers; a bad Origin refused at
+    matchmaking and at the WebSocket upgrade; NaN / infinite / huge values, unknown guns, a wheel of
+    120, wrong types, random bytes on every input code (the frame that used to hang Colyseus
+    included) leave the player finite and in range with no room errors, and a dash pressed for a
+    single command between two steps still dashes; a client that stops sending lets go of the stick
+    and the trigger after 1 s and keeps its aim; a late joiner waits for the wave break and comes
+    in at it; leaving removes the player at once; everyone down → results → the next map, where
+    everyone says ready again; an empty server goes back to the lobby.
+  - `tools/bot-clients.mjs`: see the numbers above, no errors, every client killing and reviving.
+  - Two headless browsers (one in English, one in Chinese) through `ws://localhost:7777`, each
+    page's keyboard and mouse driven by `sim/bot.js` so commands go through the real input path.
+    The server ran in the test process, holding each run's intro and healing the players between
+    the scripted moments (SwiftShader draws about 1.5 frames a second, so bots die fast and page
+    polls lag by seconds). Both saw two players; with A knocked down at the dock, B walked over and
+    revived it and both pages got `revived` with A's and B's ids; each saw the other shoot (35 and
+    37 shots) and move across the island, the same kills, and as many enemy sprites as enemies in
+    the state; everyone down → the results panel on both → the next map (`factory/dairy`) loaded
+    and joined on both. Esc opens the menu and the game keeps updating under it; Leave goes back to
+    the title and the other browser sees the player go. The panel showed "The address must start
+    with wss://" for `ws://example.com`, "The server runs version 2, this site needs 1", "Wrong
+    password", "Server full", and a dropped connection showed "Connection lost" and then the title;
+    the server was remembered under recently joined. No page errors (the browser does log the
+    matchmaking request's HTTP 525 for each refusal).
+  - Single-player in the browser, both themes (`island/cove`, `factory/dairy`): play, pause and
+    resume, game over with the results panel and records; and `?debug&bots=3` co-op.
+- **For stage 5:**
+  - **Prediction.** `defineInput` is in place and the browser already sends one input per step, so
+    `Predict` can number and replay them. But the room drains every buffered input per tick and
+    applies only the newest movement, which moves the reconcile ack past inputs it never simulated
+    (the docs warn about exactly this). For prediction, consume one input per tick per player
+    (`next()` with an `idle` policy) and keep the merged one-shots.
+  - **Interpolation.** Today everything snaps to each 20 Hz patch. Interpolate players and enemies
+    in `NetSim` (it owns the mirrors) or with `predict.attachAll`; `NetEnemy.animT` already runs
+    locally. Events and bullets arrive up to one patch before the state: delay them to the
+    interpolated time (or send them `afterNextPatch`) so a kill's burst lines up with the drawn enemy.
+  - **Reconnect.** `onLeave` removes the player at once and the client shows "Connection lost".
+    `allowReconnection(client, 60)` should keep the seat (the player stays in the sim; after 1 s
+    without commands it stands still and can be downed) and `NetSim` needs to survive the SDK's
+    reconnect.
+  - **Names, scoreboard, teammate colours, edge arrows:** `PlayerState.name`, `kills` and `combo` are
+    already in the state; per-player score isn't (the sim only keeps a team score).
+  - The loading window: a client is out of the sim until `ready`, so a slow phone joining mid-run
+    misses nothing dangerous but also sees nothing until it has loaded.
+  - The server log has no player join / leave lines yet; the admin page is still to come.
+
 ## PvP deathmatch
 
 - No AI waves. Crates and barrels respawn 30 s after being destroyed, weapon spots after 20 s.
@@ -494,9 +665,10 @@ Each stage leaves single-player working and is pushed on its own.
    with a scripted bot and no errors.
 3. **Several players in the sim. Done.** Targeting, spawns, scaling, downed/revive, per-player laugh.
    Check: a headless run with 2–4 bots.
-4. **Colyseus server and join screen.** `server/`, schema, `NaiwaRoom`, `onAuth` version check, the
-   ONLINE panel. No prediction yet. Check: `@colyseus/testing` room tests; two browsers play co-op
-   through `ws://localhost` and through a quick tunnel.
+4. **Colyseus server and join screen. Done.** `server/`, schema, `NaiwaRoom`, `onAuth` version check,
+   the ONLINE panel. No prediction yet. Check: `@colyseus/testing` room tests; two browsers play
+   co-op through `ws://localhost` (the quick tunnel is the owner's part and wasn't tested here).
+   See "Stage 4 as built" below.
 5. **Feel.** `Predict` reconciliation and interpolation, tuned with the SDK debug panel. Reconnect,
    scoreboard, names, chat.
 6. **PvP mode,** with rewind-checked hits.

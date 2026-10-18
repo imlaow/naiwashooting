@@ -1,0 +1,21 @@
+{
+  "name": "naiwa-server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hosted co-op server for 奶蛙射击 (Naiwa Shootout)",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "dependencies": {
+    "@colyseus/core": "0.18.19",
+    "@colyseus/schema": "5.0.40",
+    "@colyseus/ws-transport": "0.18.4"
+  },
+  "devDependencies": {
+    "@colyseus/sdk": "0.18.5",
+    "@colyseus/testing": "0.18.6"
+  }
+}

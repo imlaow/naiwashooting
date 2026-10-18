@@ -19,6 +19,37 @@ map's best score, best wave and run count (kept in the browser). `?map=island/tw
 
 Phones always play in landscape: Android locks the orientation in fullscreen, and an upright iPhone gets the page rotated a quarter turn.
 
+## Online co-op (self-hosted servers)
+
+Anyone can run a `naiwa-server` and friends join it from the site's **联机 / ONLINE** button
+(server address, name, password if any; recently joined servers are remembered). A link with
+`?server=wss://…` opens straight into that panel. The server runs the game and the browsers draw
+it; see `docs/online.md` for the design and what is still to come.
+
+```bash
+npm install --prefix server        # once: the server's own packages (Colyseus), kept out of the site build
+cp server/server.example.json server/server.json   # optional, edit to taste
+npm run server                     # ws://localhost:7777; Node 22+
+npm run test:server                # the room tests
+```
+
+`server/server.json` (any key left out takes the value from `server.example.json`):
+
+| Key | Meaning |
+| --- | --- |
+| `name` | Shown in the server's log |
+| `port` | Local port for plain `ws://` (default 7777) |
+| `mode` | `"coop"` (PvP comes later; the server refuses to start with `"pvp"`) |
+| `maxPlayers` | Players at once (1–16, default 4) |
+| `password` | `""` for none |
+| `maps` | The rotation, e.g. `"island/cove"`, `"factory/dairy"`, `"island/random"` (a new island each time) |
+| `allowedOrigins` | Sites whose pages may join (the official domains and `http://localhost:5173` by default); `["*"]` for any |
+| `stats` | `true` prints time per tick, memory and bytes sent per player every 10 s |
+
+The site is served over HTTPS, so browsers can only reach a server through a `wss://` address
+(`ws://localhost:7777` works from the same machine). A run starts 10 s after the first player is
+in, ends when everyone is down or dead, shows the results for 10 s and moves on to the next map.
+
 The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (remembered per browser) or add `?lang=en`.
 
 ## Controls
@@ -54,13 +85,21 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/sim/entities.js` | Player and enemies (position, HP, timers, AI, enemy targeting), weapon and enemy stats, gun sizes, `LAUGH_SECONDS` and the downed/revive constants; a player takes a command per step |
 | `src/sim/bot.js` | The scripted player: the headless runs' bots and the browser's debug teammates (`?debug&bots=N`) |
 | `src/sim/physics.js` | Static colliders in a spatial hash: push-out, point and line-of-sight tests |
+| `src/sim/protocol.js` | What server and browser must agree on: `PROTOCOL` (bump it whenever the sim, the room state or a message changes), the bullet and event message formats |
+| `server/index.js` | `naiwa-server`: reads and checks `server.json`, refuses WebSocket upgrades from sites not in `allowedOrigins`, runs one `NaiwaRoom` (`npm run server`) |
+| `server/room.js` | `NaiwaRoom` (Colyseus 0.18): joining rules (version, full, password, origin), lobby → run → results → next map, the 1/60 s step feeding clients' commands to the sim, the sim's events and bullets out as messages, the state written before each patch |
+| `server/schema.js` | The room state (`@colyseus/schema`): players, enemies, pickups, living props, the map choice and the sim's wave state; and the `Command` clients send |
+| `server/test/room.test.js` | Room tests with `@colyseus/testing` (`npm run test:server`) |
+| `src/net/netsim.js` | `NetSim`: the room's state mirrored with `Sim`'s interface, so `Game`, the views, the HUD and the bot draw and read it as they do a local sim; flies bullets from their messages |
+| `src/net/online.js` | Joins a server with `@colyseus/sdk` and turns refusals into reasons; loaded only when ONLINE is used |
+| `src/online.js` | The ONLINE panel's address rules, recently joined servers and the player's name |
 | `src/dashboard.js` | The map dashboard: a section per theme, preview cards, random-seed card |
 | `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting; `DEFAULT_SHAPE` lists the knobs a map can turn |
 | `src/factory.js` | The factory map's layout (hall, belts, canal, tank farm, buildings, yard), its floor painting and minimap; same terrain interface as `Island` plus belt `drift` |
 | `src/factoryArt.js` | Painted factory textures (silos, water tower, chimney, machines, containers, lorry, buildings), built the first time a factory loads |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX); guns are painted at the sim's `GUN_SIZES` |
 | `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), builds recoloured rival skins |
-| `src/view/game.js` | The game in the browser: runs the sim's steps for each frame, turns input into the local player's commands (touch auto-aim included) and events into particles, sounds, banners and shake (shake, toasts and the laugh sound only for the local player); sprites for players, props, pickups and bullets; camera, pause, title-screen demo, `?debug&bots=N` |
+| `src/view/game.js` | The game in the browser: runs the sim's steps for each frame (online: sends the command each step and draws the room's state through `NetSim`, no pause), turns input into the local player's commands (touch auto-aim included) and events into particles, sounds, banners and shake (shake, toasts and the laugh sound only for the local player); sprites for players, props, pickups and bullets; camera, pause, title-screen demo, `?debug&bots=N` |
 | `src/view/entities.js` | `PlayerView` / `EnemyView`: sprites, walk cycle, recoil, hit flash, footsteps, dash ghosts, downed look and revive ring, crown, health bars |
 | `src/view/world.js` | Draws the island from its layout: water, vegetation, ambient life |
 | `src/view/factoryScene.js` | Draws the factory from its layout: perimeter wall, sprites, moving belts and cartons, smoke, steam, lamps |
@@ -71,6 +110,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/audio.js` | WebAudio-synthesised sound effects |
 | `tools/dump-layouts.mjs` | Dumps every preset map's colliders, props and weapon spots; `--check` compares them with `tools/layout-baseline.txt` (run it after touching layout code) |
 | `tools/sim-headless.mjs` | Plays 10 minutes of every preset map in plain Node with scripted bots and reports waves, kills, deaths and errors; `--players 2`–`4` plays co-op with bots joining and leaving mid-run (kills per bot, downs, revives, respawns); `--trace` prints the state every game second for diffing two versions (run it after touching `src/sim`) |
+| `tools/bot-clients.mjs` | Starts a server and plays it with 2–8 bot clients over real WebSockets (`sim/bot.js` through `NetSim`); reports waves, kills per client, errors and the server's tick time, memory, CPU and bytes per client |
 | `tools/sim-rules.mjs` | Sets up each co-op rule by hand (downed, revive, bleed-out, respawn, late joiners, targeting, laugh, pickups, scaling) and checks it |
 | `tools/extract-sprites.mjs` | Cuts the 2×2 character sheet into transparent PNG frames (`npm run sprites`) |
 | `tools/extract-laugh-frames.mjs` | Cuts Naiwa out of every frame of the laughing clip into `laugh-frames/` (see the file header for the ffmpeg step); `--masks` uses BiRefNet alpha masks, `--cropped` takes upscaled crops, `--grade` matches the fur colour to `public/assets/hero_*.png` |

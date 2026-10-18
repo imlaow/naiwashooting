@@ -25,6 +25,8 @@ export class Input {
     this.dashTap = false;
 
     addEventListener('keydown', (e) => {
+      // Typing in a form field (the ONLINE panel) isn't playing.
+      if (e.target instanceof HTMLInputElement) return;
       const k = e.key.toLowerCase();
       if (!this.keys.has(k)) this.pressed.add(k);
       this.keys.add(k);

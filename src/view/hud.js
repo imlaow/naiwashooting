@@ -278,7 +278,9 @@ export class Hud {
     const st = S.state;
     this.setText(this.waveText, 'wave', S.wave ? t('hud.wave', { n: S.wave }) : t('hud.getReady'));
     const remaining = S.queue.length + S.enemies.filter((e) => !e.dead).length;
-    this.setText(this.enemyText, 'enemies', st === 'break' ? t('hud.nextWave', { n: Math.ceil(S.stateT) }) : st === 'intro' ? t('hud.starting', { n: Math.ceil(S.stateT) }) : t('hud.left', { n: remaining }));
+    // Online, the room's lobby comes before the sim's own intro.
+    const lobby = S.phase === 'lobby';
+    this.setText(this.enemyText, 'enemies', lobby ? t('hud.lobby', { n: Math.ceil(S.phaseT) }) : st === 'break' ? t('hud.nextWave', { n: Math.ceil(S.stateT) }) : st === 'intro' ? t('hud.starting', { n: Math.ceil(S.stateT) }) : t('hud.left', { n: remaining }));
     this.setText(this.scoreText, 'score', S.score.toLocaleString());
     const mult = 1 + Math.min(3, Math.floor(P.combo / 3) * 0.5);
     this.setText(this.comboText, 'combo', P.comboT > 0 && P.combo > 1 ? t('hud.combo', { n: P.combo, m: mult }) : '');

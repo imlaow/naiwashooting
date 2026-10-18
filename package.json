@@ -8,9 +8,13 @@
     "build": "vite build",
     "preview": "vite preview",
     "sprites": "node tools/extract-sprites.mjs",
-    "deploy": "vite build && wrangler deploy"
+    "deploy": "vite build && wrangler deploy",
+    "server": "node server/index.js",
+    "test:server": "npm test --prefix server"
   },
   "dependencies": {
+    "@colyseus/schema": "5.0.40",
+    "@colyseus/sdk": "0.18.5",
     "pixi.js": "^8.22.0"
   },
   "devDependencies": {

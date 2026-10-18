@@ -10,6 +10,7 @@ import { t, setLang, applyDom, CJK_TEXT } from './i18n.js';
 import { Dashboard } from './dashboard.js';
 import { initMenu } from './menu.js';
 import { RANDOM_ID, makeChoice, choiceKey, worldFor, findTheme, readSelected, recordRun } from './maps.js';
+import { serverUrl, readRecent, rememberServer, readName, writeName } from './online.js';
 import './style.css';
 
 const $ = (id) => document.getElementById(id);
@@ -135,15 +136,19 @@ async function boot() {
   const q = new URLSearchParams(location.search);
   const bots = q.has('debug') ? Math.max(1, Math.min(4, Number(q.get('bots')) || 1)) : 1;
 
-  const newGame = (isDemo) => {
+  // `net`: an online game drawing that NetSim (see the ONLINE section below).
+  const newGame = (isDemo, net = null) => {
     if (game) game.destroy();
     demo = isDemo;
     const { island, layout, terrainTex, choice } = built;
     game = new Game({
-      app, art, skins, island, layout, terrainTex, input, demo: isDemo, Scene: findTheme(choice.theme).scene, bots: isDemo ? 1 : bots,
+      app, art, skins, island, layout, terrainTex, input, demo: isDemo, Scene: findTheme(choice.theme).scene, bots: isDemo || net ? 1 : bots, net,
       onPause: (p) => show(p ? 'pause' : null),
+      onMenu: () => toggleNetMenu(),
       onMute: (m) => $('btn-mute').classList.toggle('muted', m),
       onGameOver: ({ score, wave, kills, coop }) => {
+        // Online, the room's results phase shows the results; records stay as they are.
+        if (net) return;
         // Co-op runs don't count for the records.
         const best = coop ? readBest() : Math.max(readBest(), score);
         if (!coop) {
@@ -200,18 +205,158 @@ async function boot() {
   $('btn-pause').addEventListener('click', () => game?.togglePause());
   $('btn-mute').addEventListener('click', () => game?.toggleMute());
   // Pause when the tab or app goes to the background (phone call, app switch, screen lock).
+  // Online games never pause.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && game && !demo && !game.paused) game.togglePause();
+    if (document.hidden && game && !demo && !game.net && !game.paused) game.togglePause();
   });
   const open = (id) => !$(id).classList.contains('hidden');
   addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (open('title') || open('over') || open('maps'))) start();
     else if (e.key === 'Escape' && open('maps')) showTitle();
+    else if (e.key === 'Escape' && open('online') && !joining) showTitle();
   });
 
+  // ---------- ONLINE ----------
+  // The panel joins a naiwa-server (net/online.js, loaded with the Colyseus SDK on first use).
+  // While connected, every new run of the room (a new map, or the same map started over) gets
+  // a fresh online Game behind the loading screen; the room's results phase shows its panel.
+  let session = null; // { room, mod, run (the Game's), prepared (the map loaded for), loading }
+  let joining = false;
+  const setStatus = (text, error = false) => {
+    $('net-status').textContent = text;
+    $('net-status').classList.toggle('error', error);
+  };
+  const renderRecent = () => {
+    const box = $('net-recent');
+    box.replaceChildren(...readRecent().map((url) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = url.replace(/^wss?:\/\//, '');
+      b.title = url;
+      b.addEventListener('click', () => { $('net-address').value = url; setStatus(''); });
+      return b;
+    }));
+  };
+  // net/online.js and the Colyseus SDK: fetched when the panel opens, so JOIN doesn't wait.
+  let online = null;
+  const loadOnline = () => (online ??= import('./net/online.js').catch((err) => { online = null; throw err; }));
+  const showOnline = (address) => {
+    loadOnline().catch(() => {});
+    if (!demo) newGame(true);
+    if (address != null) $('net-address').value = address;
+    $('net-name').value ||= readName();
+    renderRecent();
+    setStatus('');
+    show('online');
+  };
+  const joinMessage = (err, mod) => {
+    if (err.reason === 'version') return t('online.err.version', { server: err.server, client: mod.PROTOCOL });
+    if (['full', 'password', 'origin', 'unreachable'].includes(err.reason)) return t(`online.err.${err.reason}`);
+    return t('online.err.error', { msg: err.message });
+  };
+
+  const join = async () => {
+    if (joining) return;
+    const target = serverUrl($('net-address').value);
+    if (target.error) { setStatus(t(`online.${target.error}`), true); return; }
+    const name = $('net-name').value.trim();
+    joining = true;
+    sfx.unlock();
+    let mod;
+    try {
+      setStatus(t('online.loading'));
+      mod = await loadOnline();
+      setStatus(t('online.connecting'));
+      const room = await mod.join(target.url, { name, password: $('net-password').value });
+      writeName(name);
+      rememberServer(target.url);
+      session = { room, mod, run: -1, prepared: -1, loading: false };
+      room.onLeave(() => { if (session?.room === room) lost(); });
+      room.onStateChange(() => { if (session?.room === room) enterRun(); });
+      lockLandscape();
+      await enterRun();
+    } catch (err) {
+      const refused = mod && err instanceof mod.JoinError;
+      if (!refused || err.reason === 'error') console.error(err);
+      setStatus(refused ? joinMessage(err, mod) : t('online.err.error', { msg: err.message }), true);
+    }
+    joining = false;
+  };
+
+  // A new run in the room: its map behind the loading screen, then 'ready' (the room puts
+  // this player into its sim), then an online Game once the player is in the state. Called on
+  // every state change, so it moves on as soon as the room does.
+  const enterRun = async () => {
+    const s = session;
+    if (!s || s.loading) return;
+    const S = s.room.state;
+    if (S.run === s.run) return;
+    if (s.prepared !== S.run) {
+      const run = S.run;
+      s.loading = true;
+      try { await prepare(makeChoice(S.map.theme, S.map.id, S.map.seed)); } finally { s.loading = false; }
+      if (session !== s) return;
+      s.prepared = run;
+      s.room.send('ready', run);
+    }
+    if (S.run === s.prepared && S.players.has(s.room.sessionId)) {
+      s.run = S.run;
+      // Keys pressed while the map loaded (nobody read them) don't carry into the new run.
+      input.endFrame();
+      newGame(false, new s.mod.NetSim(s.room, built.island, built.layout));
+      show(null);
+    }
+  };
+
+  const leave = () => {
+    const s = session;
+    session = null;
+    s?.room.leave();
+    showTitle();
+  };
+  const lost = () => {
+    session = null;
+    if (!demo) newGame(true);
+    show('lost');
+  };
+  const toggleNetMenu = () => {
+    if (!session) return;
+    const on = !open('netmenu');
+    game.menu = on;
+    show(on ? 'netmenu' : session.room.state.phase === 'results' ? 'netover' : null);
+  };
+
+  // The results panel follows the room's phase; its countdown is updated every frame.
+  const updateOnline = () => {
+    const s = session;
+    if (!s || s.loading || !game?.net) return;
+    const S = s.room.state, results = S.phase === 'results';
+    if (results && !open('netover') && !open('netmenu')) {
+      $('no-score').textContent = S.score.toLocaleString();
+      $('no-wave').textContent = S.wave;
+      $('no-kills').textContent = S.kills;
+      $('no-mine').textContent = game.me?.kills ?? 0;
+      show('netover');
+    } else if (!results && open('netover')) show(null);
+    if (results) $('no-next').textContent = t('netover.next', { n: Math.ceil(S.phaseT) });
+  };
+
+  $('open-online').addEventListener('click', () => showOnline());
+  $('net-back').addEventListener('click', () => { if (!joining) showTitle(); });
+  $('net-form').addEventListener('submit', (e) => { e.preventDefault(); join(); });
+  $('net-resume').addEventListener('click', toggleNetMenu);
+  $('net-leave').addEventListener('click', leave);
+  $('net-leave2').addEventListener('click', leave);
+  $('lost-ok').addEventListener('click', showTitle);
+  // ?server=wss://… opens straight into the panel, so a server owner can share a link.
+  if (q.has('server')) showOnline(q.get('server'));
+
   app.renderer.on('resize', () => game && game.resize());
-  if (q.has('debug')) window.__naiwa = { app, get game() { return game; } };
-  app.ticker.add((t) => game && game.update(t.deltaMS / 1000));
+  if (q.has('debug')) window.__naiwa = { app, get game() { return game; }, get session() { return session; } };
+  app.ticker.add((t) => {
+    if (game) game.update(t.deltaMS / 1000);
+    updateOnline();
+  });
 }
 
 boot().catch((err) => {

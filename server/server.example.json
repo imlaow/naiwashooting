@@ -1,0 +1,15 @@
+{
+  "name": "Naiwa server",
+  "port": 7777,
+  "mode": "coop",
+  "maxPlayers": 4,
+  "password": "",
+  "maps": ["island/cove", "island/twins", "factory/dairy", "island/random"],
+  "allowedOrigins": [
+    "https://naiwashootout.laow.dev",
+    "https://play.naiwashootout.top",
+    "https://naiwa.imlaow.us.ci",
+    "http://localhost:5173"
+  ],
+  "stats": false
+}

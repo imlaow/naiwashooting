@@ -3,6 +3,10 @@
 // into particles, sounds, banners and screen shake. Also owns the camera, pause and the
 // title-screen demo. Every player is drawn; recoil, the hurt flash, shake, toasts and the laugh
 // sound are only for the local one.
+//
+// Online (`net`, a NetSim from net/netsim.js) the server runs the game: Game draws the room's
+// state instead of owning a Sim, sends the local command each step and turns the events the
+// server broadcasts into the same effects. There is no pause (Esc and P call onMenu).
 import { Container, Sprite } from 'pixi.js';
 import { WORLD } from '../island.js';
 import { mulberry32 } from '../noise.js';
@@ -26,10 +30,10 @@ export class Game {
   // `island` is the map's terrain (an Island or a Factory, see maps.js), `layout` its colliders,
   // props and weapon spots, and Scene the class that draws its scenery (Environment by default).
   // `bots` > 1 (debug only) adds bots - 1 scripted teammates (sim/bot.js) to see co-op locally.
-  constructor({ app, art, skins, island, layout, terrainTex, input, onGameOver, onPause, onMute, demo = false, Scene = Environment, bots = 1 }) {
+  constructor({ app, art, skins, island, layout, terrainTex, input, onGameOver, onPause, onMute, onMenu, demo = false, Scene = Environment, bots = 1, net = null }) {
     this.demo = demo;
     this.app = app; this.art = art; this.skins = skins; this.island = island; this.input = input;
-    this.onGameOver = onGameOver; this.onPause = onPause; this.onMute = onMute;
+    this.onGameOver = onGameOver; this.onPause = onPause; this.onMute = onMute; this.onMenu = onMenu;
     this.time = 0;
     this.timeScale = 1;
     this.paused = false;
@@ -56,10 +60,13 @@ export class Game {
     this.hurtVignette.alpha = 0;
     this.root.addChild(this.hurtVignette);
 
-    this.sim = new Sim(island, layout);
-    this.localId = this.sim.addPlayer().id;
+    this.net = net;
+    // Online: the local command goes out each step, or an idle one while the menu is open.
+    this.menu = false;
+    this.sim = net ?? new Sim(island, layout);
+    this.localId = net ? net.localId : this.sim.addPlayer().id;
     this.bots = [];
-    for (let i = 1; i < bots; i++) this.bots.push(new Bot(this.sim, this.sim.addPlayer().id, mulberry32(1000 + i)));
+    if (!net) for (let i = 1; i < bots; i++) this.bots.push(new Bot(this.sim, this.sim.addPlayer().id, mulberry32(1000 + i)));
     this.fx = new Fx(art, this.layers);
     // Sprites for the sim's things, by id.
     this.playerViews = new Map();
@@ -313,7 +320,7 @@ export class Game {
 
   // Every player is down or dead (alone: the player died).
   onOver() {
-    this.timeScale = 0.3;
+    if (!this.net) this.timeScale = 0.3;
     this.shake(20);
     sfx.play('gameover');
     laugh.stop();
@@ -415,6 +422,7 @@ export class Game {
   }
 
   togglePause() {
+    if (this.net) { this.onMenu?.(); return; }
     if (this.demo || this.sim.state === 'dead') return;
     this.paused = !this.paused;
     this.onPause(this.paused);
@@ -452,7 +460,8 @@ export class Game {
     for (const v of this.playerViews.values()) v.tick(dt);
     for (const v of this.enemyViews.values()) v.tick(dt);
     this.acc += dt;
-    while (this.acc > 1e-9) {
+    if (this.net) this.updateNet(dt, mouseWorld);
+    else while (this.acc > 1e-9) {
       this.rememberPositions();
       const cmds = { [this.localId]: this.command(mouseWorld) };
       for (const b of this.bots) cmds[b.id] = b.command(STEP);
@@ -460,7 +469,8 @@ export class Game {
       this.acc -= STEP;
       for (const e of this.sim.takeEvents()) this.onEvent(e);
     }
-    const alpha = 1 + this.acc / STEP;
+    // Online, everything is drawn where the server last put it.
+    const alpha = this.net ? 1 : 1 + this.acc / STEP;
 
     this.syncPlayers(dt, alpha);
     this.syncEnemies(dt, alpha);
@@ -500,6 +510,17 @@ export class Game {
     input.endFrame();
   }
 
+  // Online: one command per step for the frame's time, then the room's latest state and events.
+  updateNet(dt, mouseWorld) {
+    while (this.acc > 1e-9) {
+      if (this.menu) { this.presses = noPresses(); this.net.send(idleCommand(this.me.aim)); }
+      else this.net.send(this.command(mouseWorld));
+      this.acc -= STEP;
+    }
+    this.net.sync(dt);
+    for (const e of this.net.takeEvents()) this.onEvent(e);
+  }
+
   focus() {
     if (!this.me.dead) return this.hero;
     for (const v of this.playerViews.values()) if (!v.p.dead) return v;
@@ -525,6 +546,7 @@ export class Game {
   }
 
   destroy() {
+    this.net?.destroy();
     laugh.stop();
     this.hud.destroy();
     this.root.destroy({ children: true });
