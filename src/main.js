@@ -11,6 +11,7 @@ import { Dashboard } from './dashboard.js';
 import { initMenu } from './menu.js';
 import { RANDOM_ID, makeChoice, choiceKey, worldFor, findTheme, readSelected, recordRun } from './maps.js';
 import { serverUrl, readRecent, rememberServer, readName, writeName } from './online.js';
+import { teamColour } from './skins.js';
 import './style.css';
 
 const $ = (id) => document.getElementById(id);
@@ -137,12 +138,12 @@ async function boot() {
   const bots = q.has('debug') ? Math.max(1, Math.min(4, Number(q.get('bots')) || 1)) : 1;
 
   // `net`: an online game drawing that NetSim (see the ONLINE section below).
-  const newGame = (isDemo, net = null) => {
+  const newGame = (isDemo, net = null, hueFilter = null) => {
     if (game) game.destroy();
     demo = isDemo;
     const { island, layout, terrainTex, choice } = built;
     game = new Game({
-      app, art, skins, island, layout, terrainTex, input, demo: isDemo, Scene: findTheme(choice.theme).scene, bots: isDemo || net ? 1 : bots, net,
+      app, art, skins, island, layout, terrainTex, input, demo: isDemo, Scene: findTheme(choice.theme).scene, bots: isDemo || net ? 1 : bots, net, hueFilter,
       onPause: (p) => show(p ? 'pause' : null),
       onMenu: () => toggleNetMenu(),
       onMute: (m) => $('btn-mute').classList.toggle('muted', m),
@@ -214,13 +215,19 @@ async function boot() {
     if (e.key === 'Enter' && (open('title') || open('over') || open('maps'))) start();
     else if (e.key === 'Escape' && open('maps')) showTitle();
     else if (e.key === 'Escape' && open('online') && !joining) showTitle();
+    // Online: Enter opens the chat line (focused at once, so nothing typed goes to the game).
+    else if (e.key === 'Enter' && document.activeElement !== chatInput && session && game?.net && !e.repeat) {
+      if (openChat()) e.preventDefault();
+    }
   });
 
   // ---------- ONLINE ----------
   // The panel joins a naiwa-server (net/online.js, loaded with the Colyseus SDK on first use).
   // While connected, every new run of the room (a new map, or the same map started over) gets
-  // a fresh online Game behind the loading screen; the room's results phase shows its panel.
-  let session = null; // { room, mod, run (the Game's), prepared (the map loaded for), loading }
+  // a fresh online Game behind the loading screen; the room's results phase shows its panel. A
+  // dropped connection shows a banner while the SDK reconnects (the game goes on drawing the
+  // last state); after RECONNECT_SECONDS it gives up and shows "Connection lost".
+  let session = null; // { room, mod, run (the Game's), prepared (the map loaded for), loading, giveUp }
   let joining = false;
   const setStatus = (text, error = false) => {
     $('net-status').textContent = text;
@@ -266,13 +273,21 @@ async function boot() {
     try {
       setStatus(t('online.loading'));
       mod = await loadOnline();
+      // ?debug: the SDK's debug panel (drift telemetry, latency simulator), its own chunk.
+      if (q.has('debug')) await mod.loadDebug().catch((err) => console.error('debug panel', err));
       setStatus(t('online.connecting'));
       const room = await mod.join(target.url, { name, password: $('net-password').value });
       writeName(name);
       rememberServer(target.url);
-      session = { room, mod, run: -1, prepared: -1, loading: false };
-      room.onLeave(() => { if (session?.room === room) lost(); });
-      room.onStateChange(() => { if (session?.room === room) enterRun(); });
+      session = { room, mod, run: -1, prepared: -1, loading: false, giveUp: null };
+      document.body.classList.add('online');
+      const mine = (fn) => (...a) => { if (session?.room === room) fn(...a); };
+      room.onLeave(mine(lost));
+      room.onDrop(mine(dropped));
+      // Back after the page gave up: too late, leave again.
+      room.onReconnect(() => { if (session?.room === room) reconnected(); else room.leave(); });
+      room.onStateChange(mine(enterRun));
+      room.onMessage('chat', mine(chatLine));
       lockLandscape();
       await enterRun();
     } catch (err) {
@@ -285,7 +300,8 @@ async function boot() {
 
   // A new run in the room: its map behind the loading screen, then 'ready' (the room puts
   // this player into its sim), then an online Game once the player is in the state. Called on
-  // every state change, so it moves on as soon as the room does.
+  // every state change, so it moves on as soon as the room does (also after a reconnect into a
+  // run that started while this player was away).
   const enterRun = async () => {
     const s = session;
     if (!s || s.loading) return;
@@ -303,19 +319,44 @@ async function boot() {
       s.run = S.run;
       // Keys pressed while the map loaded (nobody read them) don't carry into the new run.
       input.endFrame();
-      newGame(false, new s.mod.NetSim(s.room, built.island, built.layout));
+      newGame(false, new s.mod.NetSim(s.room, built.island, built.layout), s.mod.hueFilter);
       show(null);
     }
   };
 
+  const dropped = () => {
+    $('net-banner').classList.remove('hidden');
+    clearTimeout(session.giveUp);
+    session.giveUp = setTimeout(() => {
+      const r = session?.room;
+      if (!r) return;
+      r.reconnection.maxRetries = 0;
+      lost();
+    }, session.mod.RECONNECT_SECONDS * 1000);
+  };
+  const reconnected = () => {
+    $('net-banner').classList.add('hidden');
+    clearTimeout(session.giveUp);
+  };
+  // Out of the session: the online HUD goes.
+  const endSession = () => {
+    if (session) clearTimeout(session.giveUp);
+    session = null;
+    document.body.classList.remove('online');
+    $('net-banner').classList.add('hidden');
+    $('chat-log').replaceChildren();
+    closeChat();
+    scoresOpen = false;
+    $('scoreboard').classList.add('hidden');
+  };
   const leave = () => {
     const s = session;
-    session = null;
+    endSession();
     s?.room.leave();
     showTitle();
   };
   const lost = () => {
-    session = null;
+    endSession();
     if (!demo) newGame(true);
     show('lost');
   };
@@ -326,8 +367,73 @@ async function boot() {
     show(on ? 'netmenu' : session.room.state.phase === 'results' ? 'netover' : null);
   };
 
+  // ---------- Chat ----------
+  // Enter (or the touch button) opens a line; one a second, 80 characters (the server cleans
+  // and checks it too). The last few lines fade out over the game.
+  const chatForm = $('chat-form'), chatInput = $('chat-input'), chatLog = $('chat-log');
+  let chatAt = 0;
+  const span = (text, color) => {
+    const el = document.createElement(color ? 'b' : 'span');
+    el.textContent = text;
+    if (color) el.style.color = color;
+    return el;
+  };
+  function chatLine(m) {
+    const line = document.createElement('div');
+    line.className = m.k ? 'chat-line system' : 'chat-line';
+    line.append(span(m.n, teamColour(m.c).css), span(m.k ? ` ${t(`chat.${m.k}`)}` : `: ${m.t}`));
+    chatLog.append(line);
+    while (chatLog.children.length > 6) chatLog.firstChild.remove();
+    setTimeout(() => line.classList.add('gone'), 9000);
+    setTimeout(() => line.remove(), 10000);
+  }
+  function openChat() {
+    // Not over a menu.
+    if (!session || !game?.net || !$('overlay').classList.contains('hidden')) return false;
+    chatForm.classList.remove('hidden');
+    chatInput.focus();
+    return true;
+  }
+  function closeChat() {
+    chatForm.classList.add('hidden');
+    chatInput.value = '';
+    chatInput.blur();
+  }
+  chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    if (text && session && performance.now() - chatAt >= 1000) {
+      chatAt = performance.now();
+      session.room.send('chat', text);
+    }
+    closeChat();
+  });
+  chatInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChat(); });
+  chatInput.addEventListener('blur', () => chatForm.classList.add('hidden'));
+
+  // ---------- Scoreboard ----------
+  // While Tab is held (or toggled with the touch button): name, kills, revives, downs, ping.
+  let scoresOpen = false, scoresT = 0;
+  const renderScores = () => {
+    const S = session.room.state, rows = [];
+    S.players.forEach((p, sid) => rows.push({ p, me: sid === session.room.sessionId }));
+    rows.sort((a, b) => a.p.colour - b.p.colour);
+    $('score-rows').replaceChildren(...rows.map(({ p, me }) => {
+      const tr = document.createElement('tr');
+      tr.className = me ? 'me' : p.away ? 'out' : '';
+      const cells = [p.name, p.kills, p.revives, p.downs, p.away ? '—' : p.ping ? `${p.ping}` : '…'];
+      for (const [i, v] of cells.entries()) {
+        const td = document.createElement('td');
+        td.textContent = String(v);
+        if (i === 0) td.style.color = teamColour(p.colour).css;
+        tr.append(td);
+      }
+      return tr;
+    }));
+  };
+
   // The results panel follows the room's phase; its countdown is updated every frame.
-  const updateOnline = () => {
+  const updateOnline = (dt) => {
     const s = session;
     if (!s || s.loading || !game?.net) return;
     const S = s.room.state, results = S.phase === 'results';
@@ -339,6 +445,9 @@ async function boot() {
       show('netover');
     } else if (!results && open('netover')) show(null);
     if (results) $('no-next').textContent = t('netover.next', { n: Math.ceil(S.phaseT) });
+    const scores = (game.scores || scoresOpen) && $('overlay').classList.contains('hidden');
+    $('scoreboard').classList.toggle('hidden', !scores);
+    if (scores && (scoresT -= dt) <= 0) { scoresT = 0.25; renderScores(); }
   };
 
   $('open-online').addEventListener('click', () => showOnline());
@@ -348,6 +457,10 @@ async function boot() {
   $('net-leave').addEventListener('click', leave);
   $('net-leave2').addEventListener('click', leave);
   $('lost-ok').addEventListener('click', showTitle);
+  $('btn-scores').addEventListener('click', () => { scoresOpen = !scoresOpen; scoresT = 0; });
+  $('btn-chat').addEventListener('click', () => openChat());
+  // Closing the page: tell the server (best effort) rather than leave a held seat behind.
+  addEventListener('pagehide', () => session?.room.leave());
   // ?server=wss://… opens straight into the panel, so a server owner can share a link.
   if (q.has('server')) showOnline(q.get('server'));
 
@@ -355,7 +468,7 @@ async function boot() {
   if (q.has('debug')) window.__naiwa = { app, get game() { return game; }, get session() { return session; } };
   app.ticker.add((t) => {
     if (game) game.update(t.deltaMS / 1000);
-    updateOnline();
+    updateOnline(t.deltaMS / 1000);
   });
 }
 

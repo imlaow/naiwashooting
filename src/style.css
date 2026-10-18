@@ -391,6 +391,8 @@ body.touch.playing #touch-hud { display: flex; }
 #touch-hud svg .fill { fill: #fff; }
 #btn-pause svg { stroke-width: 3.4; }
 #btn-mute .off, #btn-mute.muted .on { display: none; }
+#touch-hud .net-only { display: none; }
+body.online #touch-hud .net-only { display: grid; }
 #btn-mute.muted .off { display: inline; }
 
 /* Keyboard help is noise on a phone; the touch note says it all. */
@@ -549,3 +551,52 @@ body.compact .map-actions > button.ghost { font-size: 16px; padding: 7px 22px; }
 .net-status { min-height: 1.3em; margin: 0; font-weight: 800; color: #b45309; text-align: center; }
 .net-status.error { color: #b91c1c; }
 html[data-lang="zh"] .net-form label { letter-spacing: 2px; }
+
+/* ---------- Online play: reconnect banner, chat, scoreboard (over the game, under the menus) ---------- */
+#net-hud { position: fixed; inset: 0; pointer-events: none; display: none; font-family: Nunito, 'ZCOOL KuaiLe', sans-serif; }
+body.online #net-hud { display: block; }
+#net-hud .hidden { display: none; }
+.net-banner {
+  position: absolute; top: 18%; left: 50%; transform: translateX(-50%);
+  margin: 0; padding: 10px 22px; border-radius: 999px;
+  background: rgba(11, 30, 42, 0.82); border: 2px solid rgba(255, 210, 63, 0.7);
+  font-weight: 800; font-size: 18px; white-space: nowrap;
+  animation: pulse 1.2s ease-in-out infinite alternate;
+}
+@keyframes pulse { from { opacity: 0.65; } to { opacity: 1; } }
+/* Above the minimap (bottom-left); touch play keeps that corner for the move stick, so the chat
+   goes under the score on the right there. */
+.chat { position: absolute; left: 14px; bottom: 200px; width: min(440px, 46%); display: flex; flex-direction: column; gap: 6px; }
+.chat-log { display: flex; flex-direction: column; gap: 3px; }
+.chat-line {
+  align-self: flex-start; max-width: 100%;
+  padding: 3px 10px; border-radius: 10px; background: rgba(11, 30, 42, 0.55);
+  font-size: 14px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere;
+  transition: opacity 1s;
+}
+.chat-line b { font-weight: 800; }
+.chat-line.system { font-style: italic; opacity: 0.85; }
+.chat-line.gone { opacity: 0; }
+.chat-form input {
+  pointer-events: auto; width: 100%;
+  font: 700 15px Nunito, 'ZCOOL KuaiLe', sans-serif; color: #fff;
+  padding: 7px 12px; border-radius: 12px; border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(11, 30, 42, 0.8); outline: none;
+  -webkit-user-select: text; user-select: text; touch-action: manipulation;
+}
+.chat-form input:focus { border-color: var(--sun); }
+body.touch .chat { left: auto; right: 14px; bottom: auto; top: 124px; width: min(320px, 42%); }
+body.touch .chat-line { align-self: flex-end; font-size: 12px; }
+.scoreboard {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  padding: 12px 18px; border-radius: 18px;
+  background: rgba(11, 30, 42, 0.85); border: 2px solid rgba(255, 255, 255, 0.18);
+}
+.scoreboard table { border-collapse: collapse; font-size: 16px; font-weight: 700; }
+.scoreboard th { font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; opacity: 0.7; padding: 0 12px 6px; }
+.scoreboard td { padding: 4px 12px; text-align: center; }
+.scoreboard td:first-child, .scoreboard th:first-child { text-align: left; }
+.scoreboard td:first-child { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scoreboard tr.me td { background: rgba(255, 255, 255, 0.1); }
+.scoreboard tr.out td { opacity: 0.5; }
+body.compact .scoreboard table { font-size: 14px; }

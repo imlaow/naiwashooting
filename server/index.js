@@ -39,6 +39,7 @@ export function readConfig(path) {
     }
   }
   if (!Array.isArray(cfg.allowedOrigins)) throw new Error('"allowedOrigins" must be a list of sites (["*"] for any)');
+  if (typeof cfg.log !== 'boolean') throw new Error('"log" must be true or false');
   return cfg;
 }
 

@@ -10,13 +10,13 @@ import { boot } from '@colyseus/testing';
 import { matchMaker } from '@colyseus/core';
 import { Client } from '@colyseus/sdk';
 import { makeServer, DEFAULTS } from '../index.js';
-import { NaiwaRoom, NAME_MAX } from '../room.js';
+import { NaiwaRoom, NAME_MAX, STALE_STEPS } from '../room.js';
 import { join, joinError, JoinError } from '../../src/net/online.js';
-import { PROTOCOL } from '../../src/sim/protocol.js';
+import { PROTOCOL, CHAT_MAX } from '../../src/sim/protocol.js';
 import { buildMap, makeChoice } from '../../src/sim/maps.js';
 
 const URL = 'ws://127.0.0.1:2568';
-const CONFIG = { ...DEFAULTS, maps: ['island/cove', 'factory/dairy'], allowedOrigins: ['https://good.example'], password: '', maxPlayers: 4, stats: false };
+const CONFIG = { ...DEFAULTS, maps: ['island/cove', 'factory/dairy'], allowedOrigins: ['https://good.example'], password: '', maxPlayers: 4, stats: false, log: false };
 let colyseus, room, clients = [], errors = [];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -28,14 +28,20 @@ async function until(fn, what, ms = 5000) {
   }
 }
 
-// Joins and gets into the sim, as the browser does after loading the map.
+// Joins and gets into the sim, as the browser does after loading the map. The SDK only
+// reconnects a room that has been up 5 s; here at once.
 async function enter(name = 'Tester', opts = {}) {
   const c = await join(URL, { name, ...opts });
+  c.reconnection.minUptime = 0;
   clients.push(c);
   c.send('ready', c.state.run);
   await until(() => c.state.players.has(c.sessionId), 'the player in the state');
   return c;
 }
+// The network goes (the socket closes without a word, as when a phone loses its signal).
+const drop = (c) => c.connection.transport.ws.close();
+// Messages of a type a client gets, collected.
+const collect = (c, type) => { const got = []; c.onMessage(type, (m) => got.push(m)); return got; };
 const simPlayer = (c) => room.sim.players.get(room.seats.get(c.sessionId).id);
 // Skips the lobby's countdown.
 const startRun = async () => { room.state.phaseT = 0; await until(() => room.state.phase === 'run', 'the run'); };
@@ -54,6 +60,7 @@ beforeEach(async () => {
   await matchMaker.createRoom('naiwa', {});
   room = NaiwaRoom.current;
   room.config = { ...CONFIG };
+  room.reconnectSeconds = 60;
   errors = [];
   room.onUncaughtException = (err, method) => errors.push(`${method}: ${err.stack ?? err}`);
 });
@@ -177,7 +184,7 @@ test('garbage commands are clamped without errors; presses between steps are kep
   assert.equal(P.weapon, 'pistol');
   // A dash pressed for one command only, with no step in between, still dashes.
   const dashes = [];
-  c.onMessage('events', (ev) => { for (const e of ev) if (e.type === 'dash') dashes.push(e); });
+  c.onMessage('tick', ([, ev]) => { for (const e of ev) if (e.type === 'dash') dashes.push(e); });
   P.dashCd = 0;
   d.dash = true; d.mx = 1; input.send();
   d.dash = false; input.send();
@@ -213,7 +220,7 @@ test('a late joiner waits for the wave break', async () => {
   assert.equal(b.state.players.get(b.sessionId).dead, true);
   // Clear the wave: the break brings the late joiner in at the dock.
   const respawned = [];
-  b.onMessage('events', (ev) => { for (const e of ev) if (e.type === 'respawned') respawned.push(e); });
+  b.onMessage('tick', ([, ev]) => { for (const e of ev) if (e.type === 'respawned') respawned.push(e); });
   room.sim.queue = [];
   for (const e of room.sim.enemies) e.hit(1e6, 0, 0, null);
   await until(() => respawned.length, 'the respawn');
@@ -270,5 +277,207 @@ test('an empty server goes back to the lobby', async () => {
   // Ticks go on without anyone and the countdown waits.
   await sleep(200);
   assert.equal(room.state.phaseT, 10);
+  assert.deepEqual(errors, []);
+});
+
+test('one command a step: a burst is played out one per step, and no press is lost', async () => {
+  const c = await enter('Steady');
+  await startRun();
+  room.sim.stateT = 1e6;
+  const input = c.input({ mode: 'reliable' });
+  // Quiet for over a second first (a held stick would be guessed on, see the next test).
+  await sleep(1000 * (STALE_STEPS / 60) + 300);
+  const acc = room.inputs.get(c.sessionId), seat = room.seats.get(c.sessionId);
+  const consumed = [];
+  const tick = room.tick.bind(room);
+  room.tick = () => { tick(); consumed.push(acc.consumedCount); };
+  const base = acc.consumedCount;
+  const dashes = [];
+  c.onMessage('tick', ([, ev]) => { for (const e of ev) if (e.type === 'dash') dashes.push(e); });
+  simPlayer(c).dashCd = 0;
+  // Ten commands at once; the third presses dash.
+  for (let i = 0; i < 10; i++) { input.data.mx = 1; input.data.dash = i === 2; input.send(); }
+  input.data.dash = false;
+  await until(() => acc.consumedCount >= base + 10, 'all ten consumed');
+  room.tick = tick;
+  const steps = consumed.filter((n) => n > base && n <= base + 10);
+  const jumps = steps.slice(1).map((n, i) => n - steps[i]);
+  assert.ok(jumps.every((d) => d <= 1), `one command per step (${JSON.stringify(steps)})`);
+  assert.equal(seat.folded, 0);
+  await until(() => dashes.length, 'the dash');
+  // Commands that come late, after steps held on a guess, are folded into one step: presses kept.
+  for (let i = 0; i < 30; i++) { input.data.mx = 0; input.send(); await sleep(16); }
+  await sleep(200); // ~12 steps on a held command
+  const before = seat.folded, dashed = dashes.length;
+  simPlayer(c).dashCd = 0;
+  for (let i = 0; i < 12; i++) { input.data.mx = 1; input.data.dash = i === 4; input.send(); }
+  input.data.dash = false;
+  await until(() => dashes.length > dashed, 'the folded dash');
+  assert.ok(seat.folded > before, `late commands folded (${seat.folded - before})`);
+  assert.deepEqual(errors, []);
+});
+
+test('a player who drops keeps their seat and player, and comes back as them', async () => {
+  const a = await enter('Stays');
+  const b = await enter('Drops');
+  await startRun();
+  room.sim.stateT = 1e6;
+  const P = simPlayer(b), id = P.id;
+  P.kills = 7; P.hp = 55; P.invuln = 1e6;
+  const sid = b.sessionId;
+  const back = new Promise((resolve) => b.onReconnect(resolve));
+  const chat = collect(a, 'chat');
+  // Walking when the connection goes: the player stops at once.
+  const input = b.input({ mode: 'reliable' });
+  input.data.mx = 1; input.send();
+  await sleep(100);
+  b.reconnection.delay = 400;
+  drop(b);
+  await until(() => room.seats.get(sid)?.dropped, 'the drop');
+  await sleep(100);
+  assert.equal(room.seats.size, 2, 'the seat is held');
+  assert.equal(room.sim.players.get(id), P, 'the player stays in the sim');
+  assert.equal(room.seats.get(sid).cmd.mx, 0, 'and stands still');
+  await until(() => a.state.players.get(sid)?.away, 'shown away in the state');
+  await back;
+  assert.equal(b.sessionId, sid);
+  await until(() => !room.seats.get(sid).dropped, 'back in its seat');
+  const ps = b.state.players.get(sid);
+  assert.equal(ps.id, id);
+  assert.equal(ps.kills, 7);
+  assert.equal(ps.hp, 55);
+  assert.equal(ps.away, false);
+  // It plays on: a command moves it again.
+  const x = P.x;
+  b.input({ mode: 'reliable' }).data.mx = 1;
+  for (let i = 0; i < 20; i++) { b.input({ mode: 'reliable' }).send(); await sleep(16); }
+  await until(() => P.x > x + 5, 'moving after the reconnect');
+  await until(() => chat.some((m) => m.k === 'back'), 'the others told');
+  assert.ok(chat.some((m) => m.k === 'drop' && m.n === 'Drops'));
+  assert.deepEqual(errors, []);
+});
+
+test('after the window the seat goes, and the old token is refused', async () => {
+  room.reconnectSeconds = 1;
+  const a = await enter('Stays');
+  const b = await enter('Gone');
+  await startRun();
+  const token = b.reconnectionToken, sid = b.sessionId, id = simPlayer(b).id;
+  b.reconnection.enabled = false;
+  const left = new Promise((resolve) => b.onLeave(resolve));
+  drop(b);
+  await left;
+  await until(() => room.seats.has(sid) && room.seats.get(sid).dropped, 'held');
+  await until(() => !room.seats.has(sid), 'the seat to go', 4000);
+  assert.ok(!room.sim.players.has(id), 'out of the sim');
+  await until(() => !a.state.players.has(sid), 'out of the state');
+  await assert.rejects(new Client(URL).reconnect(token));
+  assert.equal(room.seats.size, 1);
+  assert.equal(room.state.phase, 'run', 'the run goes on');
+});
+
+test('a held seat counts as taken; a reconnect still has to come from an allowed site', async () => {
+  room.config = { ...CONFIG, maxPlayers: 2 };
+  room.maxClients = 2;
+  room.reconnectSeconds = 2;
+  await enter('One');
+  const b = await enter('Two');
+  const token = b.reconnectionToken;
+  b.reconnection.enabled = false;
+  drop(b);
+  await until(() => room.seats.get(b.sessionId)?.dropped, 'held');
+  await assert.rejects(join(URL, { name: 'Three' }), (e) => e instanceof JoinError && e.reason === 'full');
+  // The token alone isn't enough from another site's page.
+  const evil = new Client(URL, { headers: { Origin: 'https://evil.example' } });
+  await assert.rejects(evil.reconnect(token));
+  await until(() => room.seats.size === 1, 'the held seat to run out', 5000);
+  clients.push(await join(URL, { name: 'Three' }));
+});
+
+test('a reconnect into the next map', async () => {
+  const a = await enter('Here');
+  const b = await enter('Away');
+  await startRun();
+  const run = room.state.run, sid = b.sessionId;
+  b.reconnection.delay = 1500;
+  const back = new Promise((resolve) => b.onReconnect(resolve));
+  drop(b);
+  await until(() => room.seats.get(sid)?.dropped, 'held');
+  // While it is away everyone goes down, and the room moves on to the next map.
+  for (const P of room.sim.players.values()) { P.invuln = 0; P.hurt(1000, P.x + 5, P.y); }
+  await until(() => room.state.phase === 'results', 'results');
+  room.state.phaseT = 0.05;
+  await until(() => room.state.run === run + 1, 'the next run');
+  assert.equal(room.seats.get(sid).id, 0, 'out of the sim until it has the map');
+  await back;
+  // The state that comes with the reconnect is the new run's.
+  await until(() => b.state.run === run + 1, 'the new run in its state');
+  assert.deepEqual([b.state.map.theme, b.state.map.id], ['factory', 'dairy']);
+  a.send('ready', a.state.run);
+  b.send('ready', b.state.run);
+  await until(() => b.state.players.has(sid) && b.state.players.size === 2, 'both on the new map');
+  assert.equal(b.state.players.get(sid).name, 'Away');
+  assert.deepEqual(errors, []);
+});
+
+test('chat: cleaned, capped, one line a second', async () => {
+  const a = await enter('Talker');
+  const b = await enter('Listener');
+  const got = collect(b, 'chat');
+  a.send('chat', `  hi\u0000 there‮\n${'x'.repeat(200)}  `);
+  await until(() => got.length, 'the line');
+  const line = got[0];
+  assert.equal(line.n, 'Talker');
+  assert.equal(line.c, 0);
+  assert.equal([...line.t].length, CHAT_MAX);
+  assert.ok(line.t.startsWith('hi therexxx'), line.t);
+  assert.ok(!/[\p{C}]/u.test(line.t), 'no control characters');
+  a.send('chat', 'too soon');
+  await sleep(300);
+  for (const bad of ['   ', '\u0007\u0008', 42, { t: 'x' }, null]) a.send('chat', bad);
+  await sleep(300);
+  assert.equal(got.length, 1, 'the second line within a second, and empty or wrong ones, are dropped');
+  await sleep(600);
+  a.send('chat', '你好');
+  await until(() => got.length === 2, 'a line a second later');
+  assert.equal(got[1].t, '你好');
+  assert.ok(b.connection.isOpen && a.connection.isOpen);
+});
+
+test('names, colours, ping and the scoreboard stats are in the state', async () => {
+  const a = await enter('Ann\u0007');
+  const b = await enter('Bea');
+  const c = await enter('Cid');
+  const colour = (x) => a.state.players.get(x.sessionId).colour;
+  assert.deepEqual([colour(a), colour(b), colour(c)], [0, 1, 2], 'by join order');
+  assert.equal(a.state.players.get(a.sessionId).name, 'Ann');
+  // A free colour is taken again by the next to join.
+  await b.leave();
+  const d = await enter('Dee');
+  assert.equal(colour(d), 1);
+  // The round trip a browser measured.
+  const pong = collect(a, 'pong');
+  a.send('ping', [12345.5, 87]);
+  await until(() => pong.length, 'the answer');
+  assert.equal(pong[0], 12345.5);
+  await until(() => a.state.players.get(a.sessionId).ping === 87, 'the ping in the state');
+  // Downed, then revived: downs and revives.
+  await startRun();
+  room.sim.stateT = 1e6;
+  const A = simPlayer(a), C = simPlayer(c);
+  Object.assign(C, { x: A.x + 30, y: A.y, vx: 0, vy: 0 });
+  A.invuln = 0; A.hurt(1000, A.x + 5, A.y);
+  assert.ok(A.down);
+  const shots = [];
+  c.onMessage('tick', ([t, ev]) => { assert.ok(Number.isInteger(t)); for (const e of ev) if (e.type === 'shot') shots.push(e); });
+  const input = c.input({ mode: 'reliable' });
+  input.data.fire = true; input.data.aim = 0;
+  for (let i = 0; i < 20; i++) { input.send(); await sleep(16); }
+  input.data.fire = false; input.send();
+  await until(() => !A.down, 'the revive', 6000);
+  await until(() => a.state.players.get(c.sessionId).revives === 1 && a.state.players.get(a.sessionId).downs === 1, 'the stats in the state');
+  assert.equal(a.state.players.get(a.sessionId).revives, 0);
+  // Its shots say which command they came from.
+  assert.ok(shots.length && shots.every((e) => e.id === C.id && Number.isInteger(e.seq) && e.seq > 0), JSON.stringify(shots[0]));
   assert.deepEqual(errors, []);
 });

@@ -7,6 +7,9 @@
 //   npm install --prefix server       once
 //   node tools/bot-clients.mjs                       3 clients, 3 minutes, real time
 //   node tools/bot-clients.mjs --clients 4 --minutes 5 --maps island/cove,factory/dairy
+//   node tools/bot-clients.mjs --rtt 150 --jitter 30 --loss 0.01    over a bad network (tools/lag.mjs)
+//   node tools/bot-clients.mjs --wave 8 [--patch-ms 33]             runs start at wave 8 (a busy fight;
+//                                                                   tools/server-tweaks.mjs)
 //
 // Exits with code 1 on any error: an exception, a client dropped, a position that isn't a
 // number, or no wave progress.
@@ -22,6 +25,7 @@ import { STEP } from '../src/sim/sim.js';
 import { idleCommand } from '../src/sim/entities.js';
 import { buildMap, makeChoice, choiceKey } from '../src/sim/maps.js';
 import { mulberry32 } from '../src/noise.js';
+import { lag } from './lag.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : def; };
@@ -29,12 +33,17 @@ const CLIENTS = Math.max(1, Math.min(8, Number(opt('clients', 3))));
 const MINUTES = Number(opt('minutes', 3));
 const PORT = Number(opt('port', 7790));
 const MAPS = opt('maps', 'island/cove,factory/dairy,island/twins').split(',');
+const WAVE = Number(opt('wave', 0)), PATCH_MS = Number(opt('patch-ms', 0));
+const NET = { rtt: Number(opt('rtt', 0)), jitter: Number(opt('jitter', 0)), loss: Number(opt('loss', 0)) };
 
 // ---------- The server ----------
 const dir = mkdtempSync(joinPath(tmpdir(), 'naiwa-bots-'));
 const cfgFile = joinPath(dir, 'server.json');
 writeFileSync(cfgFile, JSON.stringify({ name: 'bots', port: PORT, mode: 'coop', maxPlayers: CLIENTS, password: '', maps: MAPS, allowedOrigins: [], stats: true }));
-const server = spawn(process.execPath, [fileURLToPath(new URL('../server/index.js', import.meta.url)), cfgFile], { stdio: ['ignore', 'pipe', 'pipe'] });
+const tweaks = WAVE || PATCH_MS ? ['--import', fileURLToPath(new URL('./server-tweaks.mjs', import.meta.url))] : [];
+const server = spawn(process.execPath, [...tweaks, fileURLToPath(new URL('../server/index.js', import.meta.url)), cfgFile], {
+  stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, BOT_WAVE: String(WAVE), BOT_PATCH_MS: String(PATCH_MS) },
+});
 const stats = [];
 const errors = [];
 let serverOut = '';
@@ -84,6 +93,7 @@ class BotClient {
       record.maps.add(`${S.map.theme}/${S.map.id}`);
     }
     const net = this.net, P = net.players.get(this.id);
+    net.tick(STEP);
     net.send(P && !P.dead ? this.bot.command(STEP) ?? idleCommand(P.aim) : idleCommand(0));
     net.sync(STEP);
     for (const e of net.takeEvents()) {
@@ -103,6 +113,7 @@ let done = false;
 const bots = [];
 for (let i = 0; i < CLIENTS; i++) {
   const room = await join(`ws://127.0.0.1:${PORT}`, { name: `bot${i + 1}` });
+  lag(room, { ...NET, rand: mulberry32(50 + i) });
   bots.push(new BotClient(i, room));
 }
 const cpu0 = cpuOf(server.pid), t0 = performance.now();
@@ -124,14 +135,14 @@ for (const b of bots) await b.room.leave().catch(() => {});
 server.kill('SIGKILL');
 
 // ---------- Report ----------
-console.log(`${CLIENTS} clients, ${secs.toFixed(0)} s real time on ${MAPS.join(', ')}`);
+console.log(`${CLIENTS} clients, ${secs.toFixed(0)} s real time on ${MAPS.join(', ')}${NET.rtt || NET.jitter || NET.loss ? ` (rtt ${NET.rtt} ms, jitter ${NET.jitter} ms, loss ${NET.loss * 100} %)` : ''}`);
 console.log(`  runs ${record.runs.size} (maps ${[...record.maps].join(', ')}), runs ended ${record.over}, best wave ${record.bestWave}`);
 for (const b of bots) console.log(`  client ${b.n + 1}: kills ${b.kills}, downs ${b.downs}, revives ${b.revives}, bled out ${b.deaths}, events ${b.events}`);
 console.log(`  server CPU ${(cpu / secs * 100).toFixed(1)} % of one core over the run`);
 const busy = stats.filter((l) => / run wave [1-9]/.test(l));
 for (const l of busy) console.log(`  ${l}`);
 if (!busy.length) for (const l of stats) console.log(`  ${l}`);
-if (record.bestWave < 2) errors.push(`no wave progress (best wave ${record.bestWave})`);
+if (record.bestWave < Math.max(2, WAVE)) errors.push(`no wave progress (best wave ${record.bestWave})`);
 if (errors.length) {
   console.log(`\n${errors.length} error(s):`);
   for (const e of errors.slice(0, 20)) console.log(`  ${e}`);

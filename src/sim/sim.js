@@ -117,6 +117,7 @@ export class Sim {
 
   // HP 0. Alone, that's the end of the run; in co-op the player is down until revived or bled out.
   onPlayerDown(P) {
+    P.downs++;
     if (this.players.size === 1) {
       P.dead = true;
       this.emit({ type: 'died', id: P.id, x: P.x, y: P.y });
@@ -159,6 +160,7 @@ export class Sim {
       D.reviveT += dt;
       if (D.reviveT >= REVIVE_SECONDS) {
         D.down = false; D.hp = 30; D.invuln = 1; D.bleedT = 0; D.reviveT = 0; D.reviver = null;
+        R.revives++;
         this.emit({ type: 'revived', id: D.id, by: R.id, x: D.x, y: D.y });
       }
     }

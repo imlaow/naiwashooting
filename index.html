@@ -22,6 +22,28 @@
     <button id="btn-pause" class="icon" data-i18n-label="hud.pause" aria-label="暂停">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg>
     </button>
+    <button id="btn-scores" class="icon net-only" data-i18n-label="hud.scores" aria-label="记分板">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14" /></svg>
+    </button>
+    <button id="btn-chat" class="icon net-only" data-i18n-label="hud.chat" aria-label="聊天">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /></svg>
+    </button>
+  </div>
+  <!-- Online, over the game and under the menus. Names and chat only ever go in as textContent. -->
+  <div id="net-hud">
+    <p id="net-banner" class="net-banner hidden" data-i18n="net.reconnecting">连接断开，正在重连…</p>
+    <div class="chat">
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <form id="chat-form" class="chat-form hidden" autocomplete="off">
+        <input id="chat-input" type="text" maxlength="80" spellcheck="false" data-i18n-ph="chat.placeholder" placeholder="说点什么，回车发送" />
+      </form>
+    </div>
+    <div id="scoreboard" class="scoreboard hidden">
+      <table>
+        <thead><tr><th data-i18n="score.name">玩家</th><th data-i18n="score.kills">击杀</th><th data-i18n="score.revives">救援</th><th data-i18n="score.downs">倒地</th><th data-i18n="score.ping">延迟</th></tr></thead>
+        <tbody id="score-rows"></tbody>
+      </table>
+    </div>
   </div>
   <div id="overlay">
     <img class="decor kicker" src="assets/gunner.png" alt="" aria-hidden="true" />

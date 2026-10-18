@@ -12,31 +12,50 @@
 // defenceless at the dock while their browser is still painting the island. The sim itself
 // makes late joiners wait for the wave break.
 //
-// Clients only ever send commands. Each tick a client's buffered commands are merged into one:
-// movement, aim and the trigger from the newest, one-shot presses (dash, reload, weapon,
-// cycle, last) from any of them, so a press is never lost when two commands arrive between
-// steps. Without a new command the player keeps the last movement, aim and trigger for up to
-// STALE_STEPS, then lets go of the stick and the trigger (a hidden tab stops sending).
-import { Room, ServerError, ErrorCode, Protocol } from '@colyseus/core';
+// Commands: each step takes exactly one command per player (inputs.next()), so the input the
+// state acknowledges is the one that was simulated and the browser's prediction can replay the
+// rest. A step with no command waiting (a late packet) holds the last stick, aim and trigger
+// for up to STALE_STEPS, then lets go (a hidden tab stops sending); a dropped player lets go at
+// once. The commands that then arrive late stand for steps that already ran on that guess, so
+// as many of them are folded into the next step's command (movement, aim and trigger from the
+// newest, one-shot presses — dash, reload, weapon, cycle, last — from any of them, so a press is
+// never lost): a player walking on through a stall ends up where their browser predicted, and
+// isn't left behind by it. A backlog that builds up anyway (a client sending a little fast) is
+// folded away the same way, slowly.
+//
+// A dropped connection keeps its seat (it counts as taken) for RECONNECT_SECONDS: the player stays
+// in the sim, standing still, and can be downed. The browser's SDK reconnects with its token,
+// which only works for that held seat, so the version, password and origin checks of the first
+// join still stand.
+import { Room, ServerError, ErrorCode, CloseCode, Protocol } from '@colyseus/core';
 import { makeChoice, buildMap, RANDOM_ID } from '../src/sim/maps.js';
 import { Sim, STEP } from '../src/sim/sim.js';
 import { idleCommand } from '../src/sim/entities.js';
-import { PROTOCOL, packBullet, packEvents, weaponFromCode } from '../src/sim/protocol.js';
+import { PROTOCOL, CHAT_MAX, CHAT_GAP, packBullet, packEvents, cleanText, sanitizeCommand, simCommand } from '../src/sim/protocol.js';
 import { NaiwaState, PlayerState, EnemyState, PickupState, PropState, Slot, Command } from './schema.js';
 
 export const LOBBY_SECONDS = 10;
 export const RESULTS_SECONDS = 10;
+export const RECONNECT_SECONDS = 60;
 export const NAME_MAX = 16;
 export const STALE_STEPS = 60; // 1 s: a slow phone still sends several commands a second
+// Commands waiting beyond BACKLOG_STEPS are folded into the step's command at once; a smaller
+// backlog, more than CUSHION, that stands for DRAIN_STEPS loses one the same way.
+export const BACKLOG_STEPS = 12;
+export const DRAIN_STEPS = 60;
+// Late commands are folded only beyond CUSHION waiting; debt is forgotten after DEBT_STEPS.
+export const CUSHION = 2;
+export const DEBT_STEPS = 120;
+
+// The ways of losing a connection that @colyseus/sdk reconnects after (its Room.connect); a seat
+// is held only for those. A client the server threw out (WITH_ERROR) leaves at once.
+const MAY_RECONNECT = new Set([CloseCode.GOING_AWAY, CloseCode.NO_STATUS_RECEIVED, CloseCode.ABNORMAL_CLOSURE, CloseCode.MAY_TRY_RECONNECT]);
 
 // Why a join was refused; the browser turns these into messages (src/net/online.js).
 export const REFUSED = { version: 'version', full: 'full', password: 'password', origin: 'origin' };
 
 // A display name: printable, trimmed, at most NAME_MAX characters.
-export function cleanName(name) {
-  const s = typeof name === 'string' ? name.replace(/[\p{C}]/gu, '').trim() : '';
-  return [...s].slice(0, NAME_MAX).join('') || 'Naiwa';
-}
+export const cleanName = (name) => cleanText(name, NAME_MAX) || 'Naiwa';
 
 // "island/cove", "factory/dairy", "island/random" (a new seed each time) → a map choice.
 export function parseMap(entry) {
@@ -44,17 +63,19 @@ export function parseMap(entry) {
   return makeChoice(theme, id, id === RANDOM_ID ? 0 : undefined);
 }
 
-// Fixes up a decoded command in place. The wire types already bound every number; this keeps
-// the stick inside the unit circle and the switches within the guns and a sane wheel count.
-function sanitize(c) {
-  const fin = (v) => (Number.isFinite(v) ? v : 0);
-  c.mx = fin(c.mx); c.my = fin(c.my); c.aim = fin(c.aim);
-  const l = Math.hypot(c.mx, c.my);
-  if (l > 1) { c.mx /= l; c.my /= l; }
-  c.dashX = fin(c.dashX); c.dashY = fin(c.dashY);
-  if (!(Number.isInteger(c.weapon) && c.weapon >= 0 && c.weapon <= 4)) c.weapon = 0;
-  c.cycle = Number.isInteger(c.cycle) ? Math.max(-4, Math.min(4, c.cycle)) : 0;
-  for (const k of ['fire', 'dash', 'reload', 'last']) c[k] = c[k] === true;
+// What a step without a command keeps of the last one: the stick, aim and trigger, no presses.
+const holdLast = ({ latest }) => (latest ? { mx: latest.mx, my: latest.my, aim: latest.aim, fire: latest.fire, dashX: latest.dashX, dashY: latest.dashY } : true);
+
+// Folds later commands into `f`: movement, aim and trigger from the newest, presses from any.
+function fold(f, later) {
+  const m = { mx: f.mx, my: f.my, aim: f.aim, fire: f.fire, dash: f.dash, dashX: f.dashX, dashY: f.dashY, reload: f.reload, weapon: f.weapon, cycle: f.cycle, last: f.last };
+  for (const g of later) {
+    m.mx = g.mx; m.my = g.my; m.aim = g.aim; m.fire = g.fire; m.dashX = g.dashX; m.dashY = g.dashY;
+    m.dash ||= g.dash; m.reload ||= g.reload; m.last ||= g.last;
+    if (g.weapon) m.weapon = g.weapon;
+    m.cycle = Math.max(-4, Math.min(4, m.cycle + g.cycle));
+  }
+  return m;
 }
 
 const nonNeg = (v) => Math.max(0, v);
@@ -79,10 +100,20 @@ export class NaiwaRoom extends Room {
     this.config = config;
     this.maxClients = config.maxPlayers;
     this.autoDispose = false;
+    this.reconnectSeconds = RECONNECT_SECONDS;
     this.setState(new NaiwaState());
-    this.inputs = this.defineInput(Command, { sanitize });
-    this.seats = new Map(); // sessionId → { id: sim player id (0 until ready), name, cmd }
+    this.inputs = this.defineInput(Command, { sanitize: sanitizeCommand, idle: holdLast, bufferMaxSize: 240 });
+    // sessionId → { id: sim player id (0 until ready), name, colour, cmd, … }
+    this.seats = new Map();
     this.onMessage('ready', (client, run) => this.ready(client, run));
+    this.onMessage('chat', (client, text) => this.chat(client, text));
+    // [the client's clock, its last measured round trip]: answered at once with the clock.
+    this.onMessage('ping', (client, m) => {
+      const [t, ms] = Array.isArray(m) ? m : [];
+      const seat = this.seats.get(client.sessionId);
+      if (seat && Number.isFinite(ms)) seat.ping = Math.max(0, Math.min(9999, Math.round(ms)));
+      if (Number.isFinite(t)) client.send('pong', t);
+    });
     this.rotation = 0;
     this.stats = config.stats ? { ticks: 0, tickMs: 0, maxMs: 0, bytes: new Map(), since: performance.now() } : null;
     this.loadMap();
@@ -103,6 +134,11 @@ export class NaiwaRoom extends Room {
     if (NaiwaRoom.current === this) NaiwaRoom.current = null;
   }
 
+  // The server's log: joins, leaves, reconnects (server.json "log": false turns it off).
+  log(msg) {
+    if (this.config.log !== false) console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
+  }
+
   // Why this join can't happen, or null. `origin` is the browser's Origin header (missing for
   // programs that aren't browsers).
   refuse(options, origin) {
@@ -110,6 +146,7 @@ export class NaiwaRoom extends Room {
     if (options.protocol !== PROTOCOL) return `${REFUSED.version}:${PROTOCOL}`;
     if (origin && !this.originAllowed(origin)) return REFUSED.origin;
     if (cfg.password && options.password !== cfg.password) return REFUSED.password;
+    // A seat held for a dropped player counts too.
     if (this.hasReachedMaxClients()) return REFUSED.full;
     return null;
   }
@@ -151,17 +188,29 @@ export class NaiwaRoom extends Room {
     const P = this.sim.addPlayer();
     seat.id = P.id;
     seat.cmd = idleCommand(P.aim);
-    seat.quiet = 0;
+    seat.quiet = 0; seat.backlogT = 0; seat.seq = 0;
+    // Steps that ran on a held command and whose own commands haven't come yet.
+    seat.debt = 0; seat.debtT = 0;
+    // How many steps went without a command, and how many commands were folded into another.
+    seat.idleSteps = 0; seat.folded = 0;
     const ps = new PlayerState();
     ps.id = P.id;
     ps.name = seat.name;
-    this.writePlayer(ps, P);
+    ps.colour = seat.colour;
+    this.writePlayer(ps, P, seat);
     this.state.players.set(sid, ps);
   }
 
   onJoin(client, options, auth) {
-    this.seats.set(client.sessionId, { id: 0, name: auth?.name ?? cleanName(options?.name), cmd: null });
+    // Colours by join order: the lowest one nobody here has.
+    const taken = new Set([...this.seats.values()].map((s) => s.colour));
+    let colour = 0;
+    while (taken.has(colour)) colour++;
+    const seat = { id: 0, name: auth?.name ?? cleanName(options?.name), colour, cmd: null, ping: 0, chatAt: -Infinity, dropped: false };
+    this.seats.set(client.sessionId, seat);
     if (this.stats) this.countBytes(client);
+    this.log(`${seat.name} joined (${this.seats.size}/${this.maxClients})`);
+    this.broadcast('chat', { k: 'join', n: seat.name, c: seat.colour }, { except: client });
   }
 
   // The client has loaded run `run`'s map: into the sim (once per run).
@@ -173,6 +222,26 @@ export class NaiwaRoom extends Room {
     if (this.state.phase === 'lobby' && this.sim.players.size === 1) this.state.phaseT = LOBBY_SECONDS;
   }
 
+  // Lost without leaving: hold the seat while the browser reconnects (onLeave follows otherwise).
+  onDrop(client, code) {
+    const seat = this.seats.get(client.sessionId);
+    if (!seat || !MAY_RECONNECT.has(code)) return;
+    seat.dropped = true;
+    this.log(`${seat.name} lost the connection; holding the seat for ${this.reconnectSeconds} s`);
+    this.broadcast('chat', { k: 'drop', n: seat.name, c: seat.colour }, { except: client });
+    this.allowReconnection(client, this.reconnectSeconds).catch(() => {});
+  }
+
+  onReconnect(client) {
+    const seat = this.seats.get(client.sessionId);
+    if (!seat) return;
+    seat.dropped = false;
+    if (this.stats) this.countBytes(client);
+    this.log(`${seat.name} reconnected`);
+    this.broadcast('chat', { k: 'back', n: seat.name, c: seat.colour }, { except: client });
+  }
+
+  // Left for good: they said so, or the held seat ran out.
   onLeave(client) {
     const seat = this.seats.get(client.sessionId);
     if (!seat) return;
@@ -180,30 +249,49 @@ export class NaiwaRoom extends Room {
     if (seat.id) this.sim.removePlayer(seat.id);
     this.state.players.delete(client.sessionId);
     this.stats?.bytes.delete(client.sessionId);
+    this.log(`${seat.name} left${seat.dropped ? ' (did not come back)' : ''} (${this.seats.size}/${this.maxClients})`);
+    this.broadcast('chat', { k: 'leave', n: seat.name, c: seat.colour });
     if (!this.seats.size) this.newRun();
   }
 
+  // A chat line: one a second per player, CHAT_MAX characters, printable only.
+  chat(client, text) {
+    const seat = this.seats.get(client.sessionId);
+    const line = cleanText(text, CHAT_MAX);
+    const now = this.clock.elapsedTime / 1000;
+    if (!seat || !line || now - seat.chatAt < CHAT_GAP) return;
+    seat.chatAt = now;
+    this.broadcast('chat', { n: seat.name, c: seat.colour, t: line });
+  }
+
   // ---------- The fixed step ----------
-  // This tick's command for each seat (see the file header).
+  // This step's command for each seat (see the file header).
   commands() {
     const cmds = {};
     for (const [sid, seat] of this.seats) {
-      const c = seat.cmd;
-      if (!seat.id) { this.inputs.get(sid).clear(); continue; }
-      c.dash = c.reload = c.last = false; c.weapon = null; c.cycle = 0;
-      if (++seat.quiet > STALE_STEPS) { c.mx = c.my = 0; c.fire = false; }
-      for (const f of this.inputs.get(sid)) {
+      const acc = this.inputs.get(sid);
+      if (!seat.id) { acc.clear(); continue; }
+      let f = acc.next();
+      if (acc.wasIdle) {
+        seat.idleSteps++;
+        seat.debtT = 0;
+        if (seat.dropped || ++seat.quiet > STALE_STEPS) { f.mx = f.my = 0; f.fire = false; seat.debt = 0; }
+        else seat.debt++;
+      } else {
         seat.quiet = 0;
-        c.mx = f.mx; c.my = f.my; c.aim = f.aim; c.fire = f.fire;
-        c.dashDir = f.dashX || f.dashY ? { x: f.dashX, y: f.dashY } : null;
-        if (f.dash) c.dash = true;
-        if (f.reload) c.reload = true;
-        if (f.last) c.last = true;
-        if (f.weapon) c.weapon = weaponFromCode(f.weapon);
-        c.cycle += f.cycle;
+        // Late commands pay for the guessed steps, beyond one kept waiting against jitter; a
+        // debt nothing pays within a couple of seconds was jitter the cushion took.
+        if (++seat.debtT > DEBT_STEPS) seat.debt = 0;
+        let extra = Math.min(seat.debt, Math.max(0, acc.size - CUSHION));
+        seat.debt -= extra;
+        const left = acc.size - extra;
+        seat.backlogT = left > CUSHION ? seat.backlogT + 1 : 0;
+        if (left > BACKLOG_STEPS) extra += left - BACKLOG_STEPS;
+        else if (seat.backlogT >= DRAIN_STEPS) { extra++; seat.backlogT = 0; }
+        if (extra) { f = fold(f, acc.take(extra)); seat.folded += extra; }
       }
-      c.cycle = Math.max(-4, Math.min(4, c.cycle));
-      cmds[seat.id] = c;
+      seat.seq = acc.consumedCount;
+      cmds[seat.id] = simCommand(f, seat.cmd);
     }
     return cmds;
   }
@@ -225,16 +313,22 @@ export class NaiwaRoom extends Room {
       }
     }
     const events = sim.takeEvents();
-    if (events.length) {
-      if (S.phase === 'run' && events.some((e) => e.type === 'over')) { S.phase = 'results'; S.phaseT = RESULTS_SECONDS; }
-      this.broadcast('events', packEvents(events));
-    }
-    this.sendBullets();
+    if (S.phase === 'run' && events.some((e) => e.type === 'over')) { S.phase = 'results'; S.phaseT = RESULTS_SECONDS; }
+    // The input a shot came from, so its player's browser knows it already showed it.
+    for (const e of events) if (e.type === 'shot') e.seq = this.seatOf(e.id)?.seq ?? 0;
+    const [born, gone] = this.bullets();
+    // Whole ms, as the patches carry it.
+    if (events.length || born.length || gone.length) this.broadcast('tick', [this.clock.elapsedTime >>> 0, packEvents(events), born, gone]);
     this.record(t0);
   }
 
+  seatOf(id) {
+    for (const seat of this.seats.values()) if (seat.id === id) return seat;
+    return null;
+  }
+
   // New bullets go out once, with what a client needs to fly them; then only their end.
-  sendBullets() {
+  bullets() {
     const born = [], now = new Set();
     for (const b of this.sim.bullets) {
       now.add(b.id);
@@ -244,8 +338,7 @@ export class NaiwaRoom extends Room {
     for (const id of this.bulletIds) if (!now.has(id)) gone.push(id);
     for (const a of born) this.lastBullet = Math.max(this.lastBullet, a[0]);
     this.bulletIds = now;
-    if (born.length) this.broadcast('bullet', born);
-    if (gone.length) this.broadcast('bulletEnd', gone);
+    return [born, gone];
   }
 
   // ---------- Sim → state ----------
@@ -261,16 +354,17 @@ export class NaiwaRoom extends Room {
     S.boss = sim.boss && !sim.boss.dead ? sim.boss.id : 0;
     for (const [sid, seat] of this.seats) {
       const P = sim.players.get(seat.id), ps = S.players.get(sid);
-      if (P && ps) this.writePlayer(ps, P);
+      if (P && ps) this.writePlayer(ps, P, seat);
     }
     syncMap(S.enemies, sim.enemies.filter((e) => !e.dead), EnemyState, writeEnemy);
     syncMap(S.pickups, sim.pickups, PickupState, writePickup);
     syncMap(S.props, sim.props, PropState, (s, p) => { s.hp = Math.max(0, Math.ceil(p.hp)); });
   }
 
-  writePlayer(s, P) {
+  writePlayer(s, P, seat) {
+    s.ping = seat.ping; s.away = seat.dropped;
     s.x = P.x; s.y = P.y; s.aim = P.aim; s.hp = P.hp;
-    s.weapon = P.weapon;
+    s.weapon = P.weapon; s.lastWeapon = P.lastWeapon;
     for (const k of Object.keys(P.arsenal)) {
       const a = P.arsenal[k];
       let slot = s.arsenal.get(k);
@@ -278,12 +372,14 @@ export class NaiwaRoom extends Room {
       slot.mag = a.mag; slot.reserve = a.reserve === Infinity ? -1 : Math.min(32767, a.reserve);
     }
     for (const k of [...s.arsenal.keys()]) if (!P.arsenal[k]) s.arsenal.delete(k);
-    s.reloading = nonNeg(P.reloading);
-    s.moving = P.moving; s.vx = P.vx;
+    s.reloading = nonNeg(P.reloading); s.cooldown = nonNeg(P.cooldown);
+    s.moving = P.moving; s.vx = P.vx; s.vy = P.vy;
     s.dashT = nonNeg(P.dashT); s.dashCd = nonNeg(P.dashCd); s.invuln = nonNeg(P.invuln);
+    if (P.dashDir) s.dashA = Math.atan2(P.dashDir.y, P.dashDir.x);
     s.laughT = P.laughT;
     s.down = P.down; s.bleedT = P.down ? nonNeg(P.bleedT) : 0; s.reviveT = P.reviveT; s.dead = P.dead;
     s.kills = P.kills; s.combo = P.combo; s.comboT = nonNeg(P.comboT);
+    s.revives = P.revives; s.downs = P.downs;
   }
 
   // ---------- Stats (server.json "stats": true) ----------
@@ -291,7 +387,7 @@ export class NaiwaRoom extends Room {
   // header, not TCP/IP).
   countBytes(client) {
     const ws = client.ref, send = ws.send.bind(ws), bytes = this.stats.bytes;
-    bytes.set(client.sessionId, 0);
+    if (!bytes.has(client.sessionId)) bytes.set(client.sessionId, 0);
     ws.send = (data, ...rest) => {
       const n = data.byteLength ?? data.length;
       if (bytes.has(client.sessionId)) bytes.set(client.sessionId, bytes.get(client.sessionId) + n + (n < 126 ? 2 : 4));

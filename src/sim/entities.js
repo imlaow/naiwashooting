@@ -60,6 +60,8 @@ export class Player {
     this.moving = false;
     this.laughT = -1; // seconds into the laugh, -1 when not laughing
     this.kills = 0; this.combo = 0; this.comboT = 0;
+    // For the scoreboard: teammates revived, times downed.
+    this.revives = 0; this.downs = 0;
     // Co-op: down (crawling, bleedT seconds left, reviveT seconds of a teammate's revive so far,
     // by `reviver`) and dead (out until the next wave break).
     this.down = false; this.bleedT = 0; this.reviveT = 0; this.reviver = null;

@@ -2,18 +2,63 @@
 // the room state (server/schema.js), the command or these message formats change: a client
 // with a different number is refused with "server runs version N, this site needs M".
 //
-// Besides the state patches, the room sends three messages once per tick when there is
-// something in them:
-//   events     the sim's events of that tick (see sim.js), numbers rounded by packEvents
-//   bullet     new bullets, each packBullet(b); clients move them in a straight line
-//   bulletEnd  ids of bullets that hit something or ran out of range
+// Besides the state patches, the room sends these messages:
+//   tick       [t, events, born, gone], once a tick when there is something in it:
+//                t       the room clock (whole ms since the room started), the clock the state
+//                        patches are stamped with, so clients play events and bullets on the
+//                        same timeline as the positions
+//                events  the sim's events (see sim.js), numbers rounded by packEvents; a
+//                        player's 'shot' also carries `seq`, the input it came from
+//                born    new bullets, each packBullet(b); clients fly them in a straight line
+//                gone    ids of bullets that hit something or ran out of range
+//   chat       { n: name, c: colour, t: text } a player's line, or { k: 'join' | 'leave' |
+//              'drop' | 'back', n, c } someone joining, leaving, dropping out or reconnecting
+//   pong       t: the answer to a client's 'ping', with the clock it sent
+// Clients send commands (server/schema.js Command) and the messages 'ready' (run number),
+// 'chat' (text) and 'ping' ([their clock, their last measured round trip in ms] — the round
+// trip goes on the scoreboard).
 import { WEAPON_ORDER } from './entities.js';
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
+
+// Chat: one line a second at most, CHAT_MAX characters, control characters removed.
+export const CHAT_MAX = 80;
+export const CHAT_GAP = 1;
+
+// A line of text a player typed: printable, trimmed, at most `max` characters ('' if nothing
+// is left). Names and chat both go through it.
+export function cleanText(s, max) {
+  const v = typeof s === 'string' ? s.replace(/[\p{C}]/gu, '').trim() : '';
+  return [...v].slice(0, max).join('').trim();
+}
 
 // Weapons travel as 1–4 in commands (0: no switch).
 export const weaponCode = (k) => WEAPON_ORDER.indexOf(k) + 1;
 export const weaponFromCode = (n) => WEAPON_ORDER[n - 1] ?? null;
+
+// Fixes up a decoded command in place. The wire types already bound every number; this keeps
+// the stick inside the unit circle and the switches within the guns and a sane wheel count.
+// The server runs it on every command it receives and the browser's prediction on its own, so
+// both apply exactly the same command.
+export function sanitizeCommand(c) {
+  const fin = (v) => (Number.isFinite(v) ? v : 0);
+  c.mx = fin(c.mx); c.my = fin(c.my); c.aim = fin(c.aim);
+  const l = Math.hypot(c.mx, c.my);
+  if (l > 1) { c.mx /= l; c.my /= l; }
+  c.dashX = fin(c.dashX); c.dashY = fin(c.dashY);
+  if (!(Number.isInteger(c.weapon) && c.weapon >= 0 && c.weapon <= 4)) c.weapon = 0;
+  c.cycle = Number.isInteger(c.cycle) ? Math.max(-4, Math.min(4, c.cycle)) : 0;
+  for (const k of ['fire', 'dash', 'reload', 'last']) c[k] = c[k] === true;
+}
+
+// A sanitized wire command (f) → the sim's command (see Player.update), written into `out`.
+export function simCommand(f, out) {
+  out.mx = f.mx; out.my = f.my; out.aim = f.aim; out.fire = f.fire;
+  out.dash = f.dash;
+  out.dashDir = f.dashX || f.dashY ? { x: f.dashX, y: f.dashY } : null;
+  out.reload = f.reload; out.weapon = weaponFromCode(f.weapon); out.cycle = f.cycle; out.last = f.last;
+  return out;
+}
 
 // A bullet as it is right after the step that fired it: [id, x, y, angle × 10⁴, speed, life
 // in ms, height, tint, orb, scale × 100]. Small integers pack into a few bytes each.

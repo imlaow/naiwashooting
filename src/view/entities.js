@@ -1,8 +1,10 @@
 // Draws the sim's players and enemies (sim/entities.js): sprites, walk cycle, recoil, hit flash,
 // footstep dust, dash ghosts, the downed look and revive ring, the boss's crown and enemy health
 // bars. Each view reads its sim object every frame and keeps only what is drawn.
-import { Container, Sprite, Graphics } from 'pixi.js';
+import { Container, Sprite, Graphics, Text } from 'pixi.js';
 import { makeSprite } from './world.js';
+import { FONT } from './hud.js';
+import { TEAM, teamColour } from '../skins.js';
 import { GUN_H, REVIVE_RANGE, REVIVE_SECONDS, BLEED_SECONDS } from '../sim/entities.js';
 import { sfx } from '../audio.js';
 import { laugh } from '../laugh.js';
@@ -34,7 +36,8 @@ function stepFx(v, e, dt, moving, splashSound) {
 }
 
 // The local player's view (`local`) also follows the laugh sound and splashes audibly; recoil and
-// the hurt flash are only ever set on it (view/game.js).
+// the hurt flash are only ever set on it (view/game.js). Online, every player wears their team
+// colour, and other players carry their name over their head.
 export class PlayerView {
   constructor(game, player, local = true) {
     this.game = game;
@@ -44,8 +47,9 @@ export class PlayerView {
     this.animT = 0; this.stepT = 0; this.recoil = 0; this.flash = 0;
     this.dashLeft = 0; this.ghostT = 0;
 
+    this.frames = player.colour != null ? game.skins.team(player.colour) : game.skins.hero;
     this.root = new Container();
-    this.body = new Sprite(game.skins.hero[0]);
+    this.body = new Sprite(this.frames[0]);
     this.body.anchor.copyFrom(HERO_ANCHOR);
     this.body.scale.set(HERO_SCALE);
     this.gun = makeSprite(game.art.guns.pistol);
@@ -60,6 +64,14 @@ export class PlayerView {
     this.ring.scale.y = 0.5;
     this.ring.visible = false;
     game.layers.shadows.addChild(this.ring);
+    if (!local && player.name != null) {
+      this.tag = new Text({
+        text: player.name,
+        style: { fontFamily: FONT, fontSize: 15, fill: teamColour(player.colour).css, stroke: { color: '#10202b', width: 4, join: 'round' } },
+      });
+      this.tag.anchor.set(0.5, 1);
+      game.layers.text.addChild(this.tag);
+    }
     this.sync(1);
   }
 
@@ -87,6 +99,7 @@ export class PlayerView {
     const P = this.p;
     // Out of play (bled out, or a late joiner waiting for the wave break).
     this.root.visible = !P.dead;
+    if (this.tag) this.tag.visible = !P.dead;
     if (P.dead) { this.shadow.visible = this.ring.visible = false; return; }
     // Dash ghosts, dropped where he was before the last step.
     if (this.dashLeft > 0) {
@@ -119,8 +132,13 @@ export class PlayerView {
       const tex = L.frames[Math.min(L.frames.length - 1, Math.floor(lt * L.fps))];
       this.body.texture = tex;
       this.body.anchor.copyFrom(tex.defaultAnchor);
+      // The laugh clip has Naiwa's own colours: a teammate's is turned to theirs while it plays
+      // (online, with the filter net/online.js brings along).
+      const hue = P.colour ? TEAM[P.colour % TEAM.length].hue : 0;
+      if (hue && game.hueFilter && !this.body.filters?.length) this.body.filters = [game.hueFilter(hue)];
     } else {
-      this.body.texture = game.skins.hero[Math.floor(this.animT) % 4];
+      if (this.body.filters?.length) this.body.filters = [];
+      this.body.texture = this.frames[Math.floor(this.animT) % 4];
       this.body.anchor.copyFrom(HERO_ANCHOR);
     }
     if (this.weapon !== P.weapon) { this.weapon = P.weapon; this.gun.texture = game.art.guns[P.weapon]; }
@@ -153,6 +171,7 @@ export class PlayerView {
     this.shadow.visible = !wading;
     this.ring.visible = down;
     if (down) this.drawRing(x, y);
+    this.tag?.position.set(x, y - (down ? 62 : 106));
   }
 
   drawRing(x, y) {
@@ -168,6 +187,7 @@ export class PlayerView {
     this.root.destroy({ children: true });
     this.shadow.destroy();
     this.ring.destroy();
+    this.tag?.destroy();
   }
 }
 

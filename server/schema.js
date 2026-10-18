@@ -1,15 +1,17 @@
-// The room state every client gets patched (@colyseus/schema): only what the browser draws or
-// shows in the HUD. Positions and timers are quantized to 1–2 bytes; timers that only count
-// down are sent clamped at 0 so they stop changing. Drawn-only values the client can work out
-// (an enemy's walk phase, a pickup's bob) stay off. Map layout never goes over the wire: the
-// client rebuilds it from `map` ({ theme, id, seed }), and props are keyed by the id the sim
-// gave them (1–n in layout order).
+// The room state every client gets patched (@colyseus/schema): what the browser draws or shows in
+// the HUD, plus what a player's own browser needs to predict its movement and gun (velocity,
+// dash direction, gun cooldown, previous gun). Positions and timers are quantized to 1–2 bytes;
+// timers that only count down are sent clamped at 0 so they stop changing. Drawn-only values the
+// client can work out (an enemy's walk phase, a pickup's bob) stay off. Map layout never goes
+// over the wire: the client rebuilds it from `map` ({ theme, id, seed }), and props are keyed by
+// the id the sim gave them (1–n in layout order).
 //
 // Change anything here and bump PROTOCOL in src/sim/protocol.js.
 import { schema, t } from '@colyseus/schema';
 
 const pos = () => t.quantized({ min: -256, max: 3456 }); // the map is 3200 px; 0.06 px steps
 const timer = (max, bits = 8) => t.quantized({ min: 0, max, bits });
+const vel = () => t.quantized({ min: -1000, max: 1000, bits: 16 }); // 0.03 px/s steps
 
 export const MapChoice = schema({
   theme: t.string(),
@@ -25,16 +27,23 @@ export const Slot = schema({
 export const PlayerState = schema({
   id: t.uint32(), // the sim's player id, which events refer to
   name: t.string(),
+  colour: t.uint8(), // by join order: the skin, minimap dot, name tag and scoreboard row
+  ping: t.uint16(), // the round trip the player's browser measured, ms
+  away: t.boolean(), // lost the connection; the seat is held while it reconnects
   x: pos(), y: pos(),
   aim: t.angle(),
   hp: t.float32(),
   weapon: t.string(),
+  lastWeapon: t.string(),
   arsenal: t.map(Slot),
-  reloading: timer(2),
+  reloading: timer(2, 16),
+  cooldown: timer(1, 16), // until the gun can fire again
   moving: t.boolean(),
-  vx: t.quantized({ min: -1000, max: 1000, bits: 8 }), // the walk lean
+  // Velocity, for the walk lean and so the owner's prediction can replay from it.
+  vx: vel(), vy: vel(),
   dashT: timer(0.2),
-  dashCd: timer(1),
+  dashA: t.angle(), // the dash's direction
+  dashCd: timer(1, 16),
   invuln: timer(2),
   laughT: t.quantized({ min: -1, max: 13 }),
   down: t.boolean(),
@@ -44,6 +53,8 @@ export const PlayerState = schema({
   kills: t.uint16(),
   combo: t.uint16(),
   comboT: timer(3),
+  revives: t.uint16(),
+  downs: t.uint16(),
 }, 'PlayerState');
 
 export const EnemyState = schema({

@@ -1,4 +1,5 @@
-// Loads the hero frames and builds recoloured enemy variants from them.
+// Loads the hero frames and builds recoloured variants from them: the enemies', and teammates'
+// online (one per colour, built the first time a player with that colour shows up).
 import { Assets, Texture, CanvasSource, Spritesheet } from 'pixi.js';
 
 const FRAME_URLS = [0, 1, 2, 3].map((i) => `${import.meta.env.BASE_URL}assets/hero_${i}.png`);
@@ -10,6 +11,19 @@ const EGG_URL = `${import.meta.env.BASE_URL}assets/egg.png`;
 // The gunner's single pose, cut out the same way; 660px tall like the hero frames.
 const GUNNER_URL = `${import.meta.env.BASE_URL}assets/gunner.png`;
 
+// Online players' colours by join order (the room state's `colour`, wrapping): the skin, plus the
+// colour of their name tag, minimap dot, edge arrow and scoreboard row. 0 is Naiwa as he is;
+// the hues stay clear of the enemies' purple heavies and grey King Naiwa.
+export const TEAM = [
+  { css: '#ffd23f', hex: 0xffd23f },
+  { css: '#5ec8ff', hex: 0x5ec8ff, hue: 150, sat: 1, light: 1 },
+  { css: '#ff7ac8', hex: 0xff7ac8, hue: 290, sat: 0.9, light: 1.05 },
+  { css: '#6ee07a', hex: 0x6ee07a, hue: 80, sat: 0.85, light: 0.95 },
+  { css: '#ff9a3c', hex: 0xff9a3c, hue: 335, sat: 1, light: 0.95 },
+  { css: '#3fe0c8', hex: 0x3fe0c8, hue: 120, sat: 0.9, light: 0.95 },
+];
+export const teamColour = (c) => TEAM[(c ?? 0) % TEAM.length];
+
 export async function loadSkins() {
   const [egg, gunner, ...textures] = await Promise.all([
     Assets.load({ src: EGG_URL, data: { resolution: 5, autoGenerateMipmaps: true } }),
@@ -18,7 +32,13 @@ export async function loadSkins() {
   ]);
   const images = textures.map((t) => t.source.resource);
   const headX = images.map(findHeadX);
+  const team = [textures];
   return {
+    // The hero frames in team colour c.
+    team: (c) => {
+      const i = (c ?? 0) % TEAM.length;
+      return (team[i] ??= images.map((img) => recolor(img, TEAM[i])));
+    },
     hero: textures,
     headX,
     egg,

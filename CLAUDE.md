@@ -14,7 +14,7 @@ See `README.md` for running the game, controls and the code map.
 
 ## Online play
 
-In progress (stages 1–4 of 7 done): self-hosted servers in the style of Minecraft (co-op and PvP,
+In progress (stages 1–5 of 7 done): self-hosted servers in the style of Minecraft (co-op and PvP,
 owners put a `wss://` tunnel or proxy in front), built on Colyseus 0.18 rather than our own netcode.
 The agreed design and build stages are in `docs/online.md`. Keep it up to date as stages land.
 
@@ -25,6 +25,13 @@ touching `src/sim/`, run `node tools/sim-headless.mjs` and `node tools/sim-headl
 
 After touching `server/`, `src/net/`, `src/sim/protocol.js` or anything the room state carries,
 run `npm run test:server` (all pass) and `node tools/bot-clients.mjs` ("no errors"; it starts its
-own server on port 7790). Bump `PROTOCOL` in `src/sim/protocol.js` whenever the sim's rules, the
-state (`server/schema.js`), the command or a message format changes. Colyseus is pinned to exact
-versions (pre-1.0); check its APIs against the installed type definitions before using one.
+own server on port 7790). After touching the prediction, the timeline or how the room takes
+commands, also run `node tools/net-feel.mjs` (port 7791, about 6 minutes): at 0 and 80 ms the
+prediction error should stay at the wire's rounding (p95 well under 1 px) and B be drawn without
+starving the timeline. The local player's prediction runs the sim's own `Player.update`, so a
+change to player movement or shooting in `src/sim/` reaches it by itself; anything the step reads
+must be in the room state (`server/schema.js`) and adopted in `NetSim.adopt`.
+
+Bump `PROTOCOL` in `src/sim/protocol.js` whenever the sim's rules, the state (`server/schema.js`),
+the command or a message format changes. Colyseus is pinned to exact versions (pre-1.0); check its
+APIs against the installed type definitions before using one.

@@ -5,8 +5,9 @@
 // sound are only for the local one.
 //
 // Online (`net`, a NetSim from net/netsim.js) the server runs the game: Game draws the room's
-// state instead of owning a Sim, sends the local command each step and turns the events the
-// server broadcasts into the same effects. There is no pause (Esc and P call onMenu).
+// state instead of owning a Sim, sends the local command each step (NetSim predicts the local
+// player from it) and turns the events the server broadcasts into the same effects. There is no
+// pause (Esc and P call onMenu), and Tab held asks for the scoreboard (`scores`).
 import { Container, Sprite } from 'pixi.js';
 import { WORLD } from '../island.js';
 import { mulberry32 } from '../noise.js';
@@ -30,7 +31,7 @@ export class Game {
   // `island` is the map's terrain (an Island or a Factory, see maps.js), `layout` its colliders,
   // props and weapon spots, and Scene the class that draws its scenery (Environment by default).
   // `bots` > 1 (debug only) adds bots - 1 scripted teammates (sim/bot.js) to see co-op locally.
-  constructor({ app, art, skins, island, layout, terrainTex, input, onGameOver, onPause, onMute, onMenu, demo = false, Scene = Environment, bots = 1, net = null }) {
+  constructor({ app, art, skins, island, layout, terrainTex, input, onGameOver, onPause, onMute, onMenu, demo = false, Scene = Environment, bots = 1, net = null, hueFilter = null }) {
     this.demo = demo;
     this.app = app; this.art = art; this.skins = skins; this.island = island; this.input = input;
     this.onGameOver = onGameOver; this.onPause = onPause; this.onMute = onMute; this.onMenu = onMenu;
@@ -61,6 +62,8 @@ export class Game {
     this.root.addChild(this.hurtVignette);
 
     this.net = net;
+    // Online: (degrees) → a hue-turning filter, for a teammate's laugh (view/entities.js).
+    this.hueFilter = hueFilter;
     // Online: the local command goes out each step, or an idle one while the menu is open.
     this.menu = false;
     this.sim = net ?? new Sim(island, layout);
@@ -444,9 +447,18 @@ export class Game {
     if (input.wasPressed('m')) this.toggleMute();
     if (this.paused) { input.endFrame(); return; }
     this.collectPresses();
+    if (this.net) this.scores = input.keys.has('tab');
 
     if (this.timeScale < 1) this.timeScale = Math.min(1, this.timeScale + rawDt * 0.6);
-    const dt = Math.min(rawDt, 1 / 30) * this.timeScale;
+    // Online the server keeps real time, so commands go out by the wall clock (a frame's own
+    // timestamp can lag it: headless Chromium stamps every frame 1/60 s after the last), and a
+    // slow frame takes every step it lasted (up to a second's worth) instead of slowing down.
+    if (this.net) {
+      const now = performance.now();
+      if (this.wall) rawDt = (now - this.wall) / 1000;
+      this.wall = now;
+    }
+    const dt = this.net ? Math.min(rawDt, 1) : Math.min(rawDt, 1 / 30) * this.timeScale;
     this.time += dt;
     if (this.overT > 0) {
       this.overT -= rawDt;
@@ -469,7 +481,7 @@ export class Game {
       this.acc -= STEP;
       for (const e of this.sim.takeEvents()) this.onEvent(e);
     }
-    // Online, everything is drawn where the server last put it.
+    // Online, NetSim has already placed everything for this frame.
     const alpha = this.net ? 1 : 1 + this.acc / STEP;
 
     this.syncPlayers(dt, alpha);
@@ -510,8 +522,10 @@ export class Game {
     input.endFrame();
   }
 
-  // Online: one command per step for the frame's time, then the room's latest state and events.
+  // Online: the prediction catches up with the server, one command per step for the frame's
+  // time, then the frame's state and events.
   updateNet(dt, mouseWorld) {
+    this.net.tick(dt);
     while (this.acc > 1e-9) {
       if (this.menu) { this.presses = noPresses(); this.net.send(idleCommand(this.me.aim)); }
       else this.net.send(this.command(mouseWorld));

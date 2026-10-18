@@ -1,8 +1,9 @@
 # Online play: self-hosted servers (design)
 
-Status: **stages 1–4 of 7 done** (layout extraction, the sim/view split, several players in the
-sim, and the Colyseus server with the join screen, 2026-10-17). This is the agreed design; build it
-in the stages at the end.
+Status: **stages 1–5 of 7 done** (layout extraction, the sim/view split, several players in the
+sim, the Colyseus server with the join screen, 2026-10-17; prediction, interpolation, reconnecting
+and the in-game multiplayer UI, 2026-10-18). This is the agreed design; build it in the stages at
+the end.
 
 ## Decisions
 
@@ -23,8 +24,8 @@ in the stages at the end.
 | Rooms, joining, WebSocket transport, reconnects | `colyseus` server + `@colyseus/sdk` client | our own `ws` server and handshake |
 | State sync (delta-encoded, binary) | `@colyseus/schema` (`schema({ … })`, plain JS, no decorators) | hand-written snapshot JSON |
 | Fixed step and input buffering, clamping values | `setFixedTimestep()`, `defineInput()` with `sanitize` | our own tick loop and validation |
-| Own-player prediction and reconciliation | `Predict.get()`, `predict.reconciler()`, `predict.tick()` | our own replay buffer |
-| Interpolating other entities | `predict.attachAll({ mode: "lerp" })` | our own interpolation buffer |
+| Own-player prediction and reconciliation | `Predict.get()`, `predict.sim()` (a `SimReconciler`), `predict.tick()` | our own replay buffer |
+| Interpolating other entities | the SDK's server clock (`room.clock`) for a whole-state timeline in `NetSim`; not `attachAll` (see "Stage 5 as built") | our own clock sync |
 | Lag compensation for PvP hits | `allowRewindState()`, `rewind.lastSeenBy(sessionId)` | nothing (it was deferred) |
 | Refusing connections (wrong version, banned, bad origin) | `onAuth` / `beforeUpgrade` | custom checks |
 | Admin: player list, kick, inspect rooms | `@colyseus/monitor` / `@colyseus/admin` behind `basicAuth()` | a stdin console |
@@ -47,7 +48,8 @@ checks, 8 players moving) takes 0.22 ms, so 1.3 % of a core at 60 Hz. Allowing �
 schema encoding, that's under 10 % of one core and about 100–150 MB of memory with Colyseus. Upload
 bandwidth is the real limit. The estimate is 15–25 KB/s per player (20 Hz delta patches + bullet and
 event messages), so about 0.8 Mbps for 4 players and 1.5 Mbps for 8. Measure it in stage 7. (Stage 4 measured
-8–12 KB/s per player in a busy wave with 4 players, 0.4 Mbps in all; see "Stage 4 as built".)
+8–12 KB/s per player in a busy wave with 4 players, 0.4 Mbps in all, and stage 5, with what the
+prediction needs, 9.5–14 KB/s; see "Stage 4 as built" and "Stage 5 as built".)
 Recommended minimum: 1 vCPU and 512 MB–1 GB RAM (cheapest VPS, Oracle free tier, Raspberry Pi 4/5, or
 any home PC). Pick the location by ping to the players. For players in mainland China, Cloudflare
 tunnels route through edges outside the mainland, so a nearby VPS (e.g. Hong Kong) with Caddy may
@@ -553,6 +555,188 @@ Found in stage 2:
     misses nothing dangerous but also sees nothing until it has loaded.
   - The server log has no player join / leave lines yet; the admin page is still to come.
 
+## Stage 5 as built
+
+- **Packages unchanged.** Colyseus stays at the stage 4 versions (`@colyseus/core` 0.18.19,
+  `@colyseus/sdk` 0.18.5, `@colyseus/schema` 5.0.40); nothing needed an upgrade and no package was
+  added. Every API below was checked against the installed sources
+  (`server/node_modules/@colyseus/core/src`, `node_modules/@colyseus/sdk/src`).
+- **API names, as announced:** `Predict.get(room, { delay })`, `predict.tick(now)`,
+  `defineInput(…, { idle })`, the input accessor's `next()` / `wasIdle` / `take(n)` / `size` /
+  `consumedCount`, `onDrop` / `allowReconnection(client, seconds)` / `onReconnect`,
+  `room.reconnection`, `room.clock` (`renderNow()`, `smoothedRtt()`, `jitter()`,
+  `lastServerTime()`), `@colyseus/sdk/debug` (its panel and the `__net(rtt, jitter)` latency
+  simulator). **Different:**
+  - `predict.reconciler()` (the flat `Reconciler`) mirrors scalar fields of one schema instance.
+    The player's step also reads the arsenal (a map) and the gun (a string), so the local player
+    is a `predict.sim()` (`SimReconciler`) with an opaque world: a copy of the sim's own `Player`,
+    plus `adopt` and `pose` callbacks.
+  - `predict.attachAll({ mode: "lerp" })` isn't used. It lerps each numeric field on its own, as
+    it arrives: booleans, HP, spawns and removals land on arrival while positions lag by the
+    delay, so a killed enemy vanishes `delay` ms before its burst. Its `snap` is per field, too, so
+    an x can jump while the y slides. `NetSim` keeps a timeline of whole patches instead, on the
+    SDK's server clock, and draws everything on it (below).
+  - `room.ping()` has one callback slot, which the debug panel's own pings take over (the
+    readout showed 9 ms at 150 ms). The ping is our own `ping` / `pong` message.
+- **The server takes one command per player per step** (`inputs.next()`, with an `idle` policy
+  that holds the last stick, aim and trigger, no presses), so the acknowledged command is the one
+  that was simulated. After `STALE_STEPS` (1 s) without commands the stick and trigger are let go,
+  as in stage 4; a dropped player lets go at once. Steps that ran on a held command are a debt: the
+  commands that then arrive late are folded into one step (movement from the newest, presses from
+  any, so none is lost), beyond `CUSHION` (2) left waiting against jitter. A player walking on
+  through a stall ends up where the browser predicted. The server also folds what waits beyond
+  `BACKLOG_STEPS` (12) at once, and one command a second while more than the cushion stands
+  waiting. With a cushion of 1, Node's fixed-step timer (sometimes two steps in one callback)
+  emptied the queue often: 109–237 steps of a minute's run went on a held command at 80–150 ms. With 2 it's 15–27, at the
+  cost of one step (17 ms) of input delay on the server, which the prediction hides from the player.
+- **Prediction** (`src/net/netsim.js`): every command the browser sends also runs `Player.update`
+  and the belt drift (as `Sim.applyDrift`) on a copy of the local player, whose sim is a stand-in
+  (map, colliders with the props of the latest state, no bullets). Nothing in `src/sim/` changed
+  for it. It covers walking, wading, dashes, belts, colliders and crates, switching, reloading
+  and the gun's cooldown, so the muzzle flash, shell, gun sound and the gun's kick play at once.
+  The room state carries what the step reads (velocity `vx`/`vy` at 16 bits, `dashA`, `cooldown`,
+  `lastWeapon`, 16-bit `dashCd` and `reloading`). On each acknowledged command `adopt` puts the
+  copy back to the server's state and the SDK replays the commands still on their way; the
+  correction is eased out (`smoothMs: 60`), and a jump over 120 px (respawn) is drawn at once.
+  The lobby takes commands without stepping, decided per command with `ctx.memo`.
+  - **Different: the wire's rounding has to be kept out.** Restarting from the state's 16-bit
+    position (0.057 px steps) put the copy 0.02 px inside a wall, `moveBody` refused the move, and
+    walking along the factory wall mispredicted 13 px on every acknowledgement. `adopt` keeps the
+    copy's own value of every rounded field (position, velocity, timers) where it matches the
+    server's to within one step of its quantization, as the SDK's flat `Reconciler` does.
+  - Shots carry `seq` (the command they came from). A server shot within two commands of a
+    predicted one isn't played again; an unpredicted one plays late. The prediction's dashes and
+    gun sounds replace the server's copies for the local player.
+  - Online, frame time comes from `performance.now()`: headless Chromium stamps every frame 1/60 s
+    after the last however long it took, and its game clock ran at 66 % of real time, sending 40
+    commands a second. Online frames take up to 1 s of steps (single-player keeps its 1/30 s cap).
+- **Interpolation and the timeline.** Each patch is kept whole (players, enemies, living props,
+  pickups) with its server time (`room.clock.lastServerTime()`). Other players and enemies are
+  drawn at `T = renderNow() − smoothedRtt/2 − delay`, between the two patches either side,
+  angles the short way round. A move over 150 px between patches, an enemy whose spawn fade
+  restarts (put back on the map) and a respawn (dead in one patch, alive in the next) jump.
+  Discrete fields (HP, down, dead, the walk flag) come from the earlier patch, so they change
+  with the drawn position. `T` plays at real speed, 0.5–1.6× while it is off the mark (late
+  patches after a stall are caught up over a few tenths of a second, not in one jump), never
+  goes back, and holds at the newest patch when the next is late.
+  - **Delay: 100 ms, more with jitter** (`50 + 4 × clock.jitter()`, up to 200), at the stage 4
+    patch rate of **20 Hz**. 30 Hz would allow about 67 ms but costs about 40 % more upload in a
+    busy wave (12–18.9 against 9.5–14.2 KB/s per client; events and bullets don't change with the
+    rate); for a home host's upload, 20 Hz it is.
+  - **Events and bullets are on the same clock.** The room sends one `tick` message per tick
+    (`[t, events, born, gone]`, `t` the room clock in whole ms, as the patches carry it). Events
+    play when `T` reaches them, so a kill's burst plays where the enemy is drawn, and the enemy
+    goes when its kill plays. Bullets fly from where and when they were fired along `T`, so they
+    leave the drawn muzzle. Events about the local player (hurt, downed, revived, died, respawned,
+    laugh, pickup, an egg's bite) play as they arrive, on the predicted player. Pickups appear at
+    `T` (a dropped gun with its kill) and go as soon as the server says. Props are drawn at `T`,
+    their colliders follow the latest state.
+  - Merging the three stage 4 messages into `tick`, with the time in whole ms, matters: the first
+    version sent `events`, `bullet` and `bulletEnd` each with a float timestamp (9 bytes) and
+    cost 60 % more than stage 4 in a busy wave.
+- **Reconnect.** `onDrop` holds the seat with `allowReconnection(client, 60)` for the close codes
+  the SDK reconnects after (going away, no status, abnormal, may-try-reconnect); a client the
+  server threw out (4002) leaves at once. The held seat counts toward `maxPlayers`
+  (`hasReachedMaxClients()`), the player stays in the sim standing still, can be downed, and is
+  `away` in the state. The browser shows "Connection lost, reconnecting…" over the still running
+  game; the SDK retries (backoff capped at 3 s), the input handle resets (its `epoch`), and the
+  `SimReconciler` follows it by itself. A reconnect into a new run (the map changed or results
+  passed while away) goes through the same `enterRun` as any new run. After 60 s the page gives up
+  and shows the stage 4 "Connection lost". A reconnect only works with the session's token
+  (`client.reconnect(token)` or the SDK's own retry), so the password and version checks of the
+  first join stand, and the WebSocket upgrade still checks the Origin. `pagehide` leaves the room
+  (best effort) so a closed tab doesn't hold its seat.
+- **In-game UI**, both languages: names over other players' heads; colours by join order
+  (`colour` in the state, the lowest one free): Naiwa's own and then sky, pink, green, orange,
+  teal, built with `skins.js`'s `recolor` the first time a colour shows up, on the skin, name tag,
+  minimap dot, edge arrow and scoreboard row; a laughing teammate's clip gets a hue filter in
+  their colour (the filter comes with the online chunk). **Different:** not the enemies' recoloured
+  skins (a purple teammate looks like a shotgun heavy). Edge arrows for teammates out of sight
+  (bigger and pulsing red while down); "Watching <name>" while dead or waiting to join; the
+  scoreboard on Tab (a touch button): name, kills, revives, downs (new `Player` counters in the
+  sim, in the state) and ping; the ping in the top-right corner; chat on Enter (a touch button):
+  one line a second, 80 characters, control characters removed on the server, shown with
+  `textContent`, the last six lines fading out after 9 s, plus lines for players joining,
+  leaving, dropping out and coming back. The server logs joins, leaves, drops and reconnects
+  (`"log": false` in server.json turns it off).
+- **`PROTOCOL` 2:** the state's new fields, the `tick` message, `seq` on shots, `chat`,
+  `ping` / `pong`, `away`.
+- **Bundle.** Single-player: `index-*.js` 463.19 kB (146.13 kB gzipped), from 456.77 kB
+  (143.85 kB) for the teammate skins, the online HUD, chat and scoreboard and their strings; CSS
+  19.73 kB (5.69 kB). Online: `online-*.js` 234.45 kB (75.09 kB gzipped), from 167.87 kB
+  (53.07 kB), for `Predict` and the hue filter. `@colyseus/sdk/debug` is its own chunk
+  (83.10 kB, 24.37 kB gzipped), fetched only for `?debug`; nothing preloads either.
+- **Measured: prediction** (`node tools/net-feel.mjs`: a server and two clients in Node through
+  `NetSim`, the SDK's latency model with TCP-like loss, a 200 ms stall per lost message, on the
+  factory). The error is the predicted position at each acknowledged command against the
+  server's; p95 / max in px:
+
+  | rtt, jitter (each way), loss | walk | dash | belt | crate | fight | B drawn |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | 0 | 0.05 / 4.4 | 0.13 / 0.3 | 0.04 / 0 | 0.17 / 0.2 | 0.07 / 0.1 | never starved |
+  | 80 ms, ±5 | 0.04 / 9.6 | 0.14 / 0.2 | 0.03 / 0 | 0.17 / 0.3 | 0.07 / 4.4 | 1 of 3600 frames |
+  | 150 ms, ±15 | 0.03 / 4.1 | 0.11 / 0.2 | 0.04 / 0 | 0.18 / 0.2 | 0.08 / 7.9 | 4 frames |
+  | 150 ms, ±15, 1 % | 8.7 / 25 | 0.3 / 89 | 0.04 / 4.4 | 22 / 40 | 3.5 / 34 | 99 frames (≤ 30 ms) |
+  | 250 ms, ±25 | 4.4 / 7.9 | 6.7 / 17.7 | 4.4 / 4.5 | 4.4 / 4.4 | 1.1 / 8.8 | 10 frames |
+  | 250 ms, ±25, 1 % | 8.7 / 12.7 | 38 / 55 | 0.07 / 4.4 | 4.4 / 4.4 | 4.9 / 40 | 92 frames (≤ 44 ms) |
+
+  0.03–0.2 px is the wire's rounding: up to 150 ms with jitter the prediction is exact, and
+  corrections stay under 1 px at p95 (the largest 15 px, a turn on a held step). 4.4 px is one
+  step of walking (a step the server ran on a held command at a turn). With loss, a 200 ms stall
+  over a dash or a turn moves the player by up to a dash (89 px at worst), eased out over 60 ms:
+  visible, but rare at 1 %. The fight includes hits' knockback, which only the server knows.
+  Shots: every predicted shot confirmed at 0 and 80 ms, 38 of 40 at 150 ms; with loss 72 of 85
+  and 10 played late. The other player, walking at 265 px/s, is drawn 25 px (0 ms) to 61 px
+  (250 ms) behind the server, its drawn speed changing by at most 120–200 px/s from frame to frame
+  (440 px/s while catching up after a stall).
+- **Measured: the server** (`tools/bot-clients.mjs`, one Neoverse-N1 core, Node 24): the default
+  run (3 bots, 3 minutes): 4.0 % CPU, no errors; 4 bots for 3 minutes over 150 ms ± 15 with 1 %
+  loss: 4.8 %, no errors. A busy wave (4 bots with runs starting at
+  wave 8, `--wave 8`: 25–32 enemies, up to 40 bullets, then King Naiwa): ticks 0.3–0.5 ms,
+  9.5–12.2 KB/s per client (one 10-s window 14.2), 5.2 % CPU. The same tool on the stage 4 code:
+  7.4–10.5 KB/s, ticks 0.36–0.45 ms. The difference is the prediction fields (each player's
+  velocity, cooldown and timers go to everyone); state views (owner-only fields) could take most
+  of it back, for stage 7.
+- **Checks.**
+  - Single-player unchanged: `node tools/sim-headless.mjs --trace` (seeds 1–3) and the four
+    browser traces (`island/cove`, `factory/dairy`, `island/twins`, the bot that doesn't shoot)
+    are byte-identical to those recorded before the change (which also matched stage 4's).
+    `sim-headless` (1 and 4 players), `sim-rules` (now with the downs and revives counters) and
+    the layout check pass. In the browser, both themes: pause, frame rates, aim, touch, HUD taps,
+    dash, game over and records; `?debug&bots=3` co-op.
+  - `npm run test:server`, 18 room tests, 7 new: a burst is played out one command per step with
+    a press in it kept, and late commands folded with their dash; a dropped player keeps seat,
+    player, kills and HP, stands still, shows `away`, and comes back as them; after the window the
+    seat goes and the old token is refused; a held seat counts as full, and a reconnect from a
+    site not allowed is refused; a reconnect into the next map; chat cleaned (control characters,
+    trimmed), capped at 80, one line a second, empty or wrong ones dropped; names, colours by join
+    order (a freed one reused), ping, downs and revives in the state, `seq` on shots.
+  - `tools/bot-clients.mjs`, plain and over 150 ms ± 15 with 1 % loss: no errors.
+  - Two headless browsers (English and Chinese) through `ws://localhost:7777` with the debug
+    panel's latency simulator at 150 ± 30 ms (also 0 and 250 ± 50), pages driven by `sim/bot.js`
+    at full frame rate with drawing switched off except for screenshots: the drawn player moves
+    on the first or second frame after a key goes down (17–33 ms) while the server's copy moves
+    200–500 ms later; every own shot predicted (39 of 39, 44 of 44); the other player and the
+    enemies drawn without a jump (over 1000 px/s, or 700 for enemies) in 2,000 frames each; enemy
+    sprites matching the timeline; names in the right colours, the scoreboard on Tab and chat
+    (English and Chinese) on both; B revived A; A's network cut (offline, socket closed): the
+    banner, the game running on, the seat held, back in the same `Game` as the same player; then
+    everyone down and the next map while A was offline, A reconnecting into it. No page errors.
+- **For stage 6 (rewind-checked PvP hits):**
+  - The timeline already draws others between the patches the server's rewind records
+    (`allowRewindState()` records on each broadcast, stamped with the same clock), so "what you
+    see is what you hit" only needs the input's render time to equal `NetSim.T`. The SDK stamps
+    `renderTime = reckon − (renderDelay + rtt/2)`; bind the handle's render delay to the real lag,
+    `serverNow() − T − smoothedRtt()/2` (our delay adapts to jitter and `T`'s playback rate moves),
+    rather than leaving it at `Predict`'s fixed `delay`.
+  - Bullets are projectiles over several steps, not hitscan: a bullet should carry its shooter's
+    render-time offset and test players at `now − offset` on each step (`rewind.at(time)`).
+  - Co-op hits on enemies aren't lag-compensated: at 150 ms and the 100 ms delay, an egg crossing
+    at 150 px/s is about 37 px from where it is drawn when the server tests the bullet. The same
+    rewind would fix that.
+  - Teleport thresholds (`JUMP` 150 px, the reconciler's `snap` 120 px) need checking against PvP
+    respawns; the shot `seq` matching works for shots at players as it is.
+
 ## PvP deathmatch
 
 - No AI waves. Crates and barrels respawn 30 s after being destroyed, weapon spots after 20 s.
@@ -582,12 +766,13 @@ NaiwaState { phase, mode, map: MapChoice, wave, score, timeLeft,
 Fields that are only drawn (animation time, flash, recoil) stay off the schema; the view works them
 out locally. Schema allows at most 63 fields per type, far more than these need.
 
-**Messages (broadcasts), for things that happen once:**
+**Messages (broadcasts), for things that happen once** (formats in `src/sim/protocol.js`):
 
-- `events`: the sim's fx/sfx/HUD events for that tick.
-- `bullet` / `bulletEnd`: bullets aren't in the state. The server sends `{ id, x, y, ang, speed, life,
-  kind }` and clients move each one in a straight line until `bulletEnd`.
-- `chat`.
+- `tick` (since stage 5 one message per tick; stage 4 sent `events`, `bullet` and `bulletEnd`): the
+  tick's room-clock time, the sim's fx/sfx/HUD events, new bullets and ended bullets. Bullets aren't
+  in the state: the server sends `{ id, x, y, ang, speed, life, kind }` and clients move each one in
+  a straight line until it ends.
+- `chat`: players' lines, and someone joining, leaving, dropping out or coming back.
 
 **Joining:** `client.joinOrCreate("naiwa", { protocol, name, password })`. `onAuth` rejects a wrong
 `PROTOCOL` (from `src/sim/protocol.js`, bumped whenever the sim or state changes), a full server, a
@@ -596,9 +781,10 @@ needs M"). `beforeUpgrade` checks `Origin` against `allowedOrigins`. Colyseus ha
 after a drop. `allowReconnection(client, 60)` holds the player's slot.
 
 **Feel:** `Predict` runs the shared movement step for the local player and reconciles against the
-server. Other players and enemies are drawn with its lerp interpolation. The local player's muzzle
-flash, shell and sound play immediately, and bullets and damage come from the server.
-`@colyseus/sdk/debug` (drift telemetry and a latency simulator) is how we tune it.
+server. Other players and enemies are drawn a fixed delay in the past, between server states. The
+local player's muzzle flash, shell and sound play immediately, and bullets and damage come from the
+server. `@colyseus/sdk/debug` (drift telemetry and a latency simulator) is how we tune it. See
+"Stage 5 as built".
 
 ## The server program
 
@@ -669,8 +855,8 @@ Each stage leaves single-player working and is pushed on its own.
    the ONLINE panel. No prediction yet. Check: `@colyseus/testing` room tests; two browsers play
    co-op through `ws://localhost` (the quick tunnel is the owner's part and wasn't tested here).
    See "Stage 4 as built" below.
-5. **Feel.** `Predict` reconciliation and interpolation, tuned with the SDK debug panel. Reconnect,
-   scoreboard, names, chat.
+5. **Feel. Done.** `Predict` reconciliation and interpolation, tuned with the SDK debug panel.
+   Reconnect, scoreboard, names, chat. See "Stage 5 as built".
 6. **PvP mode,** with rewind-checked hits.
 7. **Packaging and docs.** `docs/hosting.md` (tunnel and Caddy recipes in Chinese and English),
    Docker image, npm package, a `@colyseus/loadtest` run at `maxPlayers`.
@@ -678,7 +864,8 @@ Each stage leaves single-player working and is pushed on its own.
 ## Open questions
 
 - The PvP laugh rule (see above).
-- Should teammates get distinct colours, or pick a skin?
-- Is chat wanted, or only quick emotes (no moderation needed)?
+- Teammates have distinct colours by join order (stage 5); picking a skin is still open.
+- Chat is text, rate-limited and cleaned, with no moderation (stage 5); whether servers want a way
+  to turn it off is open.
 - Later: an optional public server list (servers announce themselves to the official Worker). Not
   part of option 3 as chosen.

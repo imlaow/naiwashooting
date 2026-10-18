@@ -53,6 +53,7 @@ const clearWave = (sim) => { sim.state = 'fight'; sim.queue = []; for (const e o
   const evs = run(sim, REVIVE_SECONDS + 0.1);
   const rev = evs.find((e) => e.type === 'revived');
   check('a teammate within 60 px for 3 s revives with 30 HP and 1 s invulnerability', !A.down && A.hp === 30 && A.invuln > 0.8 && rev?.by === B.id, `hp ${A.hp}, invuln ${A.invuln.toFixed(2)}`);
+  check('the scoreboard counts it: a down for the downed, a revive for the reviver', A.downs === 1 && B.revives === 1 && A.revives === 0 && B.downs === 0, `downs ${A.downs}/${B.downs}, revives ${A.revives}/${B.revives}`);
 
   A.invuln = 0; knockOut(A); sim.takeEvents();
   run(sim, 1.5);

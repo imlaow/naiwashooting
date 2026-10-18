@@ -1,8 +1,11 @@
-// Screen-space HUD: health, ammo, wave info, minimap, banners and crosshair.
+// Screen-space HUD: health, ammo, wave info, minimap, banners and crosshair. Online also: arrows
+// at the screen's edge towards teammates out of sight, who is being watched while out, and the
+// round trip to the server.
 import { Container, Graphics, Sprite, Text } from 'pixi.js';
 import { WORLD } from '../island.js';
 import { WEAPONS, WEAPON_ORDER } from '../sim/entities.js';
 import { t } from '../i18n.js';
+import { teamColour } from '../skins.js';
 
 export const FONT = '"Lilita One", "ZCOOL KuaiLe", "Arial Black", sans-serif';
 
@@ -119,7 +122,7 @@ export class Hud {
     this.toastT = 0;
     this.hint = label(15, '#e8f6ff');
     this.hint.anchor.set(0.5, 1);
-    this.hint.text = t('hud.hint');
+    this.hint.text = t(game.net ? 'hud.hintOnline' : 'hud.hint');
     this.hintT = 12;
     ui.addChild(this.bannerTitle, this.bannerSub, this.toastText, this.hint);
 
@@ -132,6 +135,14 @@ export class Hud {
     this.stickHints[1].text = t('hud.touchAim');
     for (const h of this.stickHints) h.anchor.set(0.5, 1);
     ui.addChild(this.cross, this.reloadArc, this.sticks, ...this.stickHints);
+
+    // Online
+    this.arrows = new Graphics();
+    this.watchText = label(18, '#e0f2fe');
+    this.watchText.anchor.set(0.5, 1);
+    this.pingText = label(13, '#cfe8ff');
+    this.pingText.anchor.set(1, 0);
+    ui.addChild(this.arrows, this.watchText, this.pingText);
   }
 
   // A touch on the weapon panel switches weapon (slot row) or reloads (ammo area).
@@ -177,6 +188,9 @@ export class Hud {
     const scoreY = T - 4 + (touch ? 52 : 0);
     this.scoreText.position.set(R + 2, scoreY);
     this.comboText.position.set(R + 2, scoreY + 36 * s);
+    this.pingText.position.set(R + 2, scoreY + 62 * s);
+    this.watchText.position.set(w / 2, touch || narrow ? B - 118 * s - 48 : h - 92);
+    this.edge = { L: L + 26, R: R - 26, T: T + 26, B: B - 26 };
     const ms = touch || s < 1 ? 0.62 : 1;
     this.mini.scale.set(ms);
     // Touch players use the bottom-left corner as the move stick, so the minimap goes up top.
@@ -307,12 +321,15 @@ export class Hud {
     }
     const hw = this.w / 2 / g.zoom, hh = this.h / 2 / g.zoom;
     d.rect((g.cam.x - hw) * k, (g.cam.y - hh) * k, hw * 2 * k, hh * 2 * k).stroke({ width: 1, color: 0xffffff, alpha: 0.5 });
+    // Teammates (online in their colours; red while down).
     for (const o of S.players.values()) {
       if (o === P || o.dead) continue;
-      d.circle(o.x * k, o.y * k, 3).fill(o.down ? 0xff6b6b : 0x7dd3fc).stroke({ width: 1.5, color: 0x000000 });
+      const col = o.colour != null ? teamColour(o.colour).hex : 0x7dd3fc;
+      if (o.colour == null) d.circle(o.x * k, o.y * k, 3).fill(o.down ? 0xff6b6b : col).stroke({ width: 1.5, color: 0x000000 });
+      else d.circle(o.x * k, o.y * k, 3).fill(col).stroke({ width: 1.5, color: o.down ? 0xff3b3b : 0x000000 });
     }
     const pulse = 3.5 + Math.sin(g.time * 6) * 0.8;
-    if (!P.dead) d.circle(P.x * k, P.y * k, pulse).fill(0xffd23f).stroke({ width: 1.5, color: 0x000000 });
+    if (!P.dead) d.circle(P.x * k, P.y * k, pulse).fill(P.colour != null ? teamColour(P.colour).hex : 0xffd23f).stroke({ width: 1.5, color: 0x000000 });
 
     // Banner & toast
     if (this.bannerT > 0) this.bannerT -= dt;
@@ -347,6 +364,8 @@ export class Hud {
         r.arc(mx, my, 24, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2).stroke({ width: 4, color: 0x7dd3fc });
       }
     }
+    if (g.net) this.updateOnline();
+
     // Fixed touch sticks; labels fade out once the player has had time to learn them
     const s = this.sticks.clear();
     const show = input.touch && !P.dead;
@@ -366,6 +385,32 @@ export class Hud {
         s.circle(k.x, k.y, 26).fill({ color: i ? 0xff6b6b : 0x7dd3fc, alpha: k.on ? 0.6 : 0.3 });
       });
     }
+  }
+
+  // Arrows at the screen's edge towards teammates out of sight (a downed one bigger, pulsing red),
+  // who the camera follows while out, and the round trip.
+  updateOnline() {
+    const g = this.game, P = g.me, a = this.arrows.clear(), E = this.edge;
+    const cx = this.w / 2, cy = this.h / 2;
+    for (const v of g.playerViews.values()) {
+      const o = v.p;
+      if (o === P || o.dead) continue;
+      const sx = g.world.x + v.x * g.zoom, sy = g.world.y + (v.y - 40) * g.zoom;
+      if (sx > E.L && sx < E.R && sy > E.T && sy < E.B) continue;
+      const dx = sx - cx, dy = sy - cy;
+      const f = Math.min((E.R - cx) / Math.max(1, Math.abs(dx)), (E.B - cy) / Math.max(1, Math.abs(dy)));
+      const x = cx + dx * f, y = cy + dy * f, ang = Math.atan2(dy, dx);
+      const size = o.down ? 15 + Math.sin(g.time * 8) * 3 : 11;
+      const pts = [[size, 0], [-size * 0.7, size * 0.75], [-size * 0.35, 0], [-size * 0.7, -size * 0.75]]
+        .flatMap(([px, py]) => [x + px * Math.cos(ang) - py * Math.sin(ang), y + px * Math.sin(ang) + py * Math.cos(ang)]);
+      if (o.down) a.circle(x, y, size + 6).fill({ color: 0xff3b3b, alpha: 0.35 });
+      a.poly(pts).fill(teamColour(o.colour).hex).stroke({ width: 2, color: o.down ? 0xff3b3b : 0x10202b });
+    }
+    const focus = g.focus();
+    this.setText(this.watchText, 'watch', P.dead && focus !== g.hero ? t('hud.watching', { name: focus.p.name ?? '' }) : '');
+    const ping = g.net.ping;
+    this.setText(this.pingText, 'ping', ping ? t('hud.ping', { n: ping }) : '');
+    this.pingText.tint = ping < 100 ? 0x9ff5b0 : ping < 200 ? 0xfde68a : 0xff8a8a;
   }
 
   destroy() {
