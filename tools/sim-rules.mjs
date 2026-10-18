@@ -410,5 +410,53 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   check('pvp: a player who left still hits with the bullets they fired; nobody gets that kill', B.dead && died?.by === null && sim.kills === 0);
 }
 
+// ---------- Lag compensation (the server's sim.seen; see Sim's header) ----------
+{
+  const { sim, ps: [A, B] } = pvp(2);
+  face(sim, A, B, 200);
+  const saw = { x: B.x, y: B.y };
+  B.y += 120; // B has moved off the line since the shooter's browser drew it on it
+  const times = [];
+  sim.seen = (e, b) => { times.push(b.seen + (b.age - STEP) * 1000); return e === B ? saw : e; };
+  const fire = (seen) => ({ [A.id]: { mx: 0, my: 0, aim: 0, fire: true, seen } });
+  run(sim, 0.35, fire(1000));
+  const steps = new Set(times.map((t) => Math.round((t - 1000) / (STEP * 1000))));
+  check('lag compensation: a bullet fired on a command with `seen` tests players where sim.seen says its shooter saw them', B.hp < 100 && times.length > 0, `hp ${B.hp}`);
+  check('… on each step at `seen` plus the bullet\'s flight less a step', Math.min(...times) === 1000 && [...steps].every((k) => Number.isInteger(k) && k >= 0) && steps.size > 3, `${steps.size} steps`);
+  B.hp = 100; B.x = saw.x; B.y = saw.y; sim.bullets = [];
+  sim.seen = () => null;
+  run(sim, 0.35, fire(1000));
+  check('… and not at all where it says the shooter didn\'t see them (null: before a respawn)', B.hp === 100);
+  run(sim, 0.35, fire(0));
+  check('… a command without `seen` tests where they are now', B.hp < 100, `hp ${B.hp}`);
+}
+{
+  const { sim, ps: [A] } = setup(1);
+  const { x, y } = openPair(sim, 200);
+  A.x = x; A.y = y; A.invuln = 1e6;
+  const egg = sim.spawnEnemy('egg', x + 200, y + 120);
+  egg.spawnT = 0;
+  const saw = { x: x + 200, y };
+  sim.seen = (e) => (e === egg ? saw : e);
+  const hp = egg.hp;
+  run(sim, 0.3, { [A.id]: { mx: 0, my: 0, aim: 0, fire: true, seen: 1000 } });
+  check('lag compensation: co-op bullets test enemies where their shooter saw them too', egg.hp < hp || egg.dead, `hp ${egg.hp} of ${hp}`);
+}
+{
+  // The browser's prediction fires the same pellets as the server: the spread comes from the
+  // player's id and shot count, not Math.random.
+  const fire = () => {
+    const { sim, ps: [A] } = pvp(2);
+    A.giveWeapon('shotgun');
+    A.shotN = 77; A.cooldown = 0;
+    const fired = [];
+    sim.fireBullet = (o) => fired.push([o.ang, o.speed, o.life].map((v) => v.toFixed(9)).join());
+    sim.step(STEP, { [A.id]: { mx: 0, my: 0, aim: 1, fire: true } });
+    return { n: A.shotN, b: fired.join(';') };
+  };
+  const one = fire(); Math.random(); const two = fire();
+  check('a shot\'s spread comes from the player\'s id and shot count (the prediction fires the same pellets)', one.b === two.b && one.b.split(';').length === 8 && one.n === 78);
+}
+
 console.log(failed ? `\n${failed} rule(s) failed` : '\nall rules hold');
 if (failed) process.exitCode = 1;

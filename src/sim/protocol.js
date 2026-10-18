@@ -19,7 +19,7 @@
 // trip goes on the scoreboard).
 import { WEAPON_ORDER } from './entities.js';
 
-export const PROTOCOL = 5;
+export const PROTOCOL = 6;
 
 // How long a dropped player's seat is held, and the browser keeps reconnecting, in seconds.
 export const RECONNECT_SECONDS = 60;
@@ -64,16 +64,17 @@ export function simCommand(f, out) {
 }
 
 // A bullet as it is right after the step that fired it: [id, x, y, angle × 10⁴, speed, life
-// in ms, height, tint, orb, scale × 100]. Small integers pack into a few bytes each.
+// in ms, height, tint, orb, scale × 100, owner (a player's id, 0 for an enemy's)]. Small
+// integers pack into a few bytes each.
 export function packBullet(b) {
   return [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.ang * 1e4), Math.round(Math.hypot(b.vx, b.vy)),
-    Math.round(b.life * 1000), b.h, b.tint, b.orb ? 1 : 0, Math.round(b.scale * 100)];
+    Math.round(b.life * 1000), b.h, b.tint, b.orb ? 1 : 0, Math.round(b.scale * 100), b.team === 'player' ? b.owner ?? 0 : 0];
 }
 
 export function unpackBullet(a) {
-  const [id, x, y, ang, speed, life, h, tint, orb, scale] = a;
+  const [id, x, y, ang, speed, life, h, tint, orb, scale, owner] = a;
   const r = ang / 1e4;
-  return { id, x, y, ang: r, vx: Math.cos(r) * speed, vy: Math.sin(r) * speed, life: life / 1000, h, tint, orb: !!orb, scale: scale / 100 };
+  return { id, x, y, ang: r, vx: Math.cos(r) * speed, vy: Math.sin(r) * speed, life: life / 1000, h, tint, orb: !!orb, scale: scale / 100, owner };
 }
 
 // Positions to whole pixels, everything else to 2 decimals (angles stay within 0.3°).

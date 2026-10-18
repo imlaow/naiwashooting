@@ -26,7 +26,7 @@ the end.
 | Fixed step and input buffering, clamping values | `setFixedTimestep()`, `defineInput()` with `sanitize` | our own tick loop and validation |
 | Own-player prediction and reconciliation | `Predict.get()`, `predict.sim()` (a `SimReconciler`), `predict.tick()` | our own replay buffer |
 | Interpolating other entities | the SDK's server clock (`room.clock`) for a whole-state timeline in `NetSim`; not `attachAll` (see "Stage 5 as built") | our own clock sync |
-| Lag compensation for PvP hits | `allowRewindState()`, `rewind.lastSeenBy(sessionId)` | nothing (it was deferred) |
+| Lag compensation for hits | `allowRewindState()`, the input's render-time stamp, `rewind.at(time)` (stage 6b) | nothing (it was deferred) |
 | Refusing connections (wrong version, banned, bad origin) | `onAuth` / `beforeUpgrade` | custom checks |
 | Admin: player list, kick, inspect rooms | `@colyseus/monitor` / `@colyseus/admin` behind `basicAuth()` | a stdin console |
 | Headless tests and bot load tests | `@colyseus/testing`, `@colyseus/loadtest` | our own harness |
@@ -727,7 +727,7 @@ Found in stage 2:
     (English and Chinese) on both; B revived A; A's network cut (offline, socket closed): the
     banner, the game running on, the seat held, back in the same `Game` as the same player; then
     everyone down and the next map while A was offline, A reconnecting into it. No page errors.
-- **For stage 6 (rewind-checked PvP hits):**
+- **For stage 6 (rewind-checked PvP hits; as built in "Stage 6b as built"):**
   - The timeline already draws others between the patches the server's rewind records
     (`allowRewindState()` records on each broadcast, stamped with the same clock), so "what you
     see is what you hit" only needs the input's render time to equal `NetSim.T`. The SDK stamps
@@ -748,8 +748,8 @@ Found in stage 2:
 - Spawns: walkable points far from every living player (reuse `spawnPoint`'s checks). Respawn after
   3 s with a pistol and 1.5 s of spawn protection.
 - Round ends at `killLimit` or `timeLimit`, then results for 10 s and the next map.
-- Bullets from players hit other players, checked against `rewind.lastSeenBy(shooter)` so hits match
-  what the shooter saw (stage 6b; 6a checks them against the server's current positions).
+- Bullets from players hit other players, tested where the shooter saw them (the rewind, stage 6b;
+  6a tested them against the server's current positions).
   Explosions hurt everyone.
 - Laugh: **decided** (it was an open question: 12 s of invulnerability is too strong if the
   laughing player can shoot): in PvP the laugh is 4 s, untouchable and unable to shoot. Co-op is
@@ -849,6 +849,151 @@ stage 6b. The prediction and the timeline are unchanged.
     CPU.
   - `sim-headless` (1 and 4 players), the layout check and plain `bot-clients`: no errors.
 
+## Stage 6b as built
+
+Lag compensation: a player's bullets are tested where that player saw the target, in PvP and on
+co-op enemies. Packages unchanged (`@colyseus/core` 0.18.19, `@colyseus/sdk` 0.18.5).
+
+- **APIs, checked against the installed sources.** `allowRewindState({ maxRewindMs })` records the
+  attached fields after `onBeforePatch` on every patch, stamped with `clock.elapsedTime`, the same
+  number the browser reads as `room.clock.lastServerTime()` for that patch, so the rewind holds
+  exactly what the timeline draws between (and lerps the same way). Attaching a `mode: "snapshot"`
+  group makes the SDK stamp every reliable input with `round(serverNow()) −
+  round(renderDelay + smoothedRtt()/2)`, in whole ms, delta-coded (about a byte). The server's
+  input accessor gives it as `renderTime` (after `next()` that command's, after `take(n)` the
+  newest's; a held step keeps the last). `rewind.at(time)` clamps to `[lastRecordedAt −
+  maxRewindMs, lastRecordedAt]` and interpolates linearly; there is no teleport handling beyond
+  `interpolate: "step"`. **Different from the plan:** not `rewind.lastSeenBy(sid)`, which reads
+  the shooter's *current* stamp and has no notion of a bullet in flight; `rewind.at(time)` with a
+  time per bullet and step instead. The handle's `renderDelay` can't be set after `room.input()`
+  (only an internal `bindRenderDelay`), but `Predict.sim({ input })` binds it to Predict's default
+  `delay`, read on every send, and `predict.setDefaults({ delay })` is public.
+- **The stamp is the timeline's time** (`src/net/netsim.js`). Each frame, after working out `T`,
+  `NetSim.sync` sets Predict's delay to `serverNow() − T − smoothedRtt()/2`; the commands sent in
+  the next frame are then stamped `T` plus however far `serverNow()` moved, which is `T` as that
+  frame draws it (the frame order is tick, send, sync, in the browser as in the tools). The SDK's
+  own lerp delay isn't used (the timeline draws everything), so nothing else reads it.
+- **The server** (`server/room.js`): `allowRewindState({ maxRewindMs: 500 })` with players and
+  enemies (`x`, `y`) attached in `onCreate`, before anyone joins (attaching decides the stamp).
+  Each step's command carries `seen`, the stamp of the newest command taken (a held step adds a
+  step to the last one). The sim (`src/sim/sim.js`) keeps `seen` on the bullets a player fires and
+  asks `sim.seen(target, bullet)` for every player bullet against every enemy, and in PvP every
+  other player, on each sub-step: `NaiwaRoom.seenAt` answers from the rewind at `seenTime(b)`. The
+  sim doesn't know about the rewind; without `sim.seen` (single-player, the tools) or with a
+  command not stamped yet, bullets test current positions as before.
+  - **Which time, decided while building.** The plan was "now − the shooter's offset" per step.
+    Two problems, both measured: Node runs two steps in one timer callback now and then, and
+    `clock.elapsedTime` is the same for both (the first version, PvP at 80 ms: p95 12.8 ms apart,
+    2.5 px; counting the bullet's flight in steps instead: 1.1 ms, 0.3 px); and after a stall the browser's timeline catches up at up to 1.6× (co-op at 150 ms with
+    1 % loss: p95 108 ms apart, 12.8 px). What's used: the stamp of the command the shooter is on
+    at that step. The server takes one command a step, so that's the command sent with the frame
+    that drew the bullet at the same age, whatever speed the timeline ran at (p95 17 ms, 2.3 px in
+    the same setting). If the shooter has left, the bullet's own stamp plus its age less a step.
+  - **What is as it is now:** whether a target can be hit (alive, dashing, spawn protection, the
+    laugh, enemy spawn fade, the round over), the knockback's direction, the damage. Only
+    positions are rewound.
+  - **Teleports:** a target that moved more than `JUMP` (150 px) between two patches, or came back
+    alive, has that patch's time recorded (`jumped`, a WeakMap by state entry); a rewound time
+    before it means the shooter saw it before the jump (the timeline doesn't draw across one
+    either), so the bullet doesn't test it (`seenAt` returns null). Without that, the rewind would
+    lerp a respawned player from the corpse to the spawn point.
+  - Allocation-free: `RewindView.read` into one reused object. Ticks in a busy wave: see Checks.
+- **Own bullets fly on the predicted timeline** (`NetSim.fire` / `flyOwn`). Drawn on `T` as in
+  stage 5, they would leave the muzzle the round trip and the delay late, and with the rewind the
+  shooter would see them meet the target where the server didn't test it, off by as much as the
+  rewind fixes. The prediction's `fireBullet` now makes a bullet (on a command's first run only)
+  that flies from the muzzle at once, by the frame clock, tested each frame in 10 px steps against
+  the walls and props (the latest colliders) and everyone as drawn this frame, by the sim's rules
+  (enemies that have faded in; in PvP other players who are up, not dashing, protected or
+  laughing, the round not over; pierce). Where it ends it plays the spark or dust; it shows a hit
+  on a player as a spark too.
+  - To fire the same pellets as the server, a shot's spread no longer comes from `Math.random`:
+    `Player.shoot` seeds `mulberry32` from the player's id and a new 16-bit shot counter `shotN`
+    (in the state, adopted by the prediction). Single-player traces change from here (shots
+    spread differently); the rules don't.
+  - Bullets carry their `owner` (`packBullet`), and `bulletHit` / `bulletEnd` the bullet's id
+    (`bid`). The server's copies of a shot the prediction fired (matched through the shot's `seq`,
+    as before) aren't drawn, nor their hits and ends; a shot the prediction didn't fire is drawn on
+    `T` as before. `bulletHit` now also has `target: 'player'` (PvP), which every browser draws.
+- **`PROTOCOL` 6:** the input's render-time stamp, `shotN` in the state, the bullet's `owner`,
+  `bid` on bullet events, `target: 'player'`, and the deterministic spread.
+- **Teleport thresholds against PvP respawns.** A respawn lands at the best of 24 open spots by
+  distance to the nearest living player, the killer included: in 2,000 tries on each of
+  `island/cove`, `factory/dairy` and `island/twins` with the killer 150–400 px from the corpse, it
+  landed 347, 787 and 430 px away at least, never under 120. So the reconciler's `snap` (120 px)
+  always draws the local player's respawn at once (net-feel: corrections of 1,000–1,800 px at
+  respawns, drawn at once), and the timeline never lerps across one, whatever `JUMP` says: it
+  doesn't lerp to or from a dead patch. Knockback is far below both (the rifle's PvP push is
+  192 px/s, under 10 px a patch). Both stay.
+- **Known and measured, not changed:**
+  - A bullet the shooter saw hit a target that the server already had dead (killed by an earlier
+    bullet, usually the shooter's own, which the timeline shows only `T` later) flies on through
+    on the server. The target dies anyway and the server's copies of own bullets aren't drawn, so
+    the only effect is a rare hit on someone behind the shooter didn't see. Most of the co-op
+    mismatches below are this.
+  - A shot the server fires on a held step (its command came too late for its step, common at
+    250 ms with ±25 ms jitter beyond the 2-step cushion) is a step off the frame its browser fired
+    it in for its whole flight: ±16 ms, about 4 px for a walking target, the same step the
+    prediction is off by there.
+- **Measured** (`tools/net-feel.mjs`; `--pvp` for the PvP scenario, `--rewind off` for current
+  positions). *Seen vs tested:* each server test of one of A's bullets against a target within
+  30 px of it, the tested position against where A drew that target in the frame that drew the
+  bullet at that age; p95 / max in px, and how far apart the two times were (p95, ms). PvP: A's
+  bot shoots B walking circles for 30 s, then both bots fight for 60 s, on `island/cove`, no loss;
+  co-op: the stage 5 scenario's minute of fighting waves on `factory/dairy`.
+
+  | rtt, jitter (each way), loss | PvP: B | co-op: enemies, rewound | co-op: enemies, current positions |
+  | --- | --- | --- | --- |
+  | 0 | 0.39 / 0.57 (1.5 ms) | 0.24 / 0.35 (2.0 ms) | 17.1 / 19.7 (117 ms) |
+  | 80 ms, ±5 | 0.60 / 0.63 (2.5 ms) | 0.28 / 0.46 (2.3 ms) | 35.1 / 39.2 (218 ms) |
+  | 150 ms, ±15 | 3.36 / 5.0 (12.5 ms)¹ | 2.29 / 6.0 (17 ms), 1 % loss | 47.0 / 65.4 (324 ms), 1 % loss |
+  | 250 ms, ±25 | 4.94 / 5.2 (18 ms) | 4.70 / 7.6 (34 ms), 1 % loss | 67.9 / 70.6 (495 ms), 1 % loss |
+
+  ¹ In the full run, alongside the co-op run on the machine's other core: 51 held steps and 23
+  folded. Alone: 0.39 / 0.74 (2.0 ms) with 26 held and none folded.
+
+  Before the rewind a co-op shooter had to lead an egg by 17 px with no lag at all (the 100 ms
+  delay) and by 47–68 px at 150–250 ms; now it's under half a pixel up to 80 ms and a few px
+  beyond, where commands come late. *Own bullets ended where and when the server ended them* (the
+  same kind of target, within 3 steps): PvP 27 of 28, 39 of 40, 41 of 47, 71 of 84; co-op 90 of 92,
+  225 of 256, 132 of 167, 165 of 204 (of the mismatches, 30 of 31, 28 of 35 and 21 of 39 on an enemy
+  the server already had dead); with current positions 112 of 121, 79 of 108, 42 of 71, 46 of 94.
+
+  *Prediction error around A's PvP events* (p95 px): the first acknowledgement that includes the
+  event, which only the server knew, then the acks over the next second.
+
+  | rtt | hurt (knockback) | died | respawned | laugh starts | duel / fight overall |
+  | --- | --- | --- | --- | --- | --- |
+  | 0 | 3.35, then 0.07 | 3.35, then 0.03 | 1140 (the jump), then 0.03 | 0.06, then 0.06 | 0.07 / 0.06 |
+  | 80 ms | 8.10, then 0.06 | 8.10, then 0.04 | 1091, then 0.06 | 0.06, then 0.07 | 0.08 / 0.06 |
+  | 150 ms | 1.94, then 0.07 | 0.05, then 0.05 | 1135, then 0.06 | 0.07, then 0.08 | 0.08 / 0.07 |
+  | 250 ms | 6.80, then 4.42 | 4.35, then 0.04 | 1368, then 4.43 | 0.06, then 4.33 | 4.42 / 4.41 |
+
+  12–14 hits, 1–4 deaths and respawns, 5–8 laughs per latency. After each event the prediction is
+  back at the wire's rounding at once up to 150 ms; at 250 ms the 4.4 px (one step of walking, a
+  held step at a turn) is there all the time, not around the events. The first ack's error is
+  the push or the steps walked before the death (up to 8.5 px), and the respawn's jump; nothing
+  the browser could have predicted, so nothing to fix. Co-op prediction is unchanged (p95 / max,
+  walk, dash, belt, crate, fight): 0 ms 0.04 / 4.4, 0.13 / 0.3, 0.05 / 0.1, 0.17 / 0.3,
+  0.07 / 0.1; 80 ms 0.04 / 0.0, 0.12 / 0.2, 0.03 / 0.0, 0.16 / 0.2, 0.07 / 0.2; with 1 % loss at
+  150 and 250 ms as in stage 5 (fight 4.3 / 101 and 5.5 / 64).
+- **Checks.**
+  - `node tools/sim-rules.mjs`: 6 new checks (a bullet with `seen` tests players where `sim.seen`
+    says, on each step at `seen` plus its flight; not at all where it says null; current positions
+    without `seen`; co-op enemies the same; a shot's spread from the id and shot count).
+  - `npm run test:server`: 23 tests, 1 new (through a real room and the SDK: commands carry the
+    render time, bullets carry it, the rewind gives where the target was back then, and nothing
+    from before a respawn).
+  - `sim-headless` (1 and 4 players) and the layout check: no errors. `npm run build`: the online
+    chunk 237.37 kB (76.08 kB gzipped).
+  - `tools/bot-clients.mjs`: plain (3 bots, 3 minutes, to wave 5) and `--pvp` (2 rounds, one won
+    at the kill limit, 26 kills, 25 respawns): no errors, 4.3 % and 3.4 % CPU. A busy wave (4 bots
+    from wave 8, 27–31 enemies, the bots' bullets all tested through the rewind): ticks 0.30–0.55 ms,
+    7.6–13.6 KB/s per client, 5.7 % CPU, against stage 5's 0.3–0.5 ms and 5.2 %.
+  - `tools/net-feel.mjs` and `--pvp`: the tables above.
+  - Not checked in a browser in this stage: the own bullets' drawing and sparks go through the
+    view code single-player uses (`syncBullets`, the `bulletHit` / `bulletEnd` effects).
+
 ## Networking with Colyseus
 
 One room type, `NaiwaRoom`, one room per server (the server *is* the room). The map choice, mode and
@@ -883,8 +1028,9 @@ after a drop. `allowReconnection(client, 60)` holds the player's slot.
 
 **Feel:** `Predict` runs the shared movement step for the local player and reconciles against the
 server. Other players and enemies are drawn a fixed delay in the past, between server states. The
-local player's muzzle flash, shell and sound play immediately, and bullets and damage come from the
-server. `@colyseus/sdk/debug` (drift telemetry and a latency simulator) is how we tune it. See
+local player's muzzle flash, shell, sound and own bullets play immediately; others' bullets and
+all damage come from the server, which tests a player's bullets where that player saw their
+targets (stage 6b). `@colyseus/sdk/debug` (drift telemetry and a latency simulator) is how we tune it. See
 "Stage 5 as built".
 
 ## The server program
@@ -958,8 +1104,9 @@ Each stage leaves single-player working and is pushed on its own.
    See "Stage 4 as built" below.
 5. **Feel. Done.** `Predict` reconciliation and interpolation, tuned with the SDK debug panel.
    Reconnect, scoreboard, names, chat. See "Stage 5 as built".
-6. **PvP mode,** with rewind-checked hits. **6a done:** the deathmatch rules, hits checked
-   against the server's current positions (see "Stage 6a as built"). 6b: the rewind.
+6. **PvP mode,** with rewind-checked hits. **Done.** 6a: the deathmatch rules (see "Stage 6a as
+   built"). 6b: bullets tested where their shooter saw the target, in PvP and on co-op enemies
+   (see "Stage 6b as built").
 7. **Packaging and docs.** `docs/hosting.md` (tunnel and Caddy recipes in Chinese and English),
    Docker image, npm package, a `@colyseus/loadtest` run at `maxPlayers`.
 

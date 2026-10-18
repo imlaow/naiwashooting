@@ -22,6 +22,12 @@
 //     a kill's burst plays where the enemy is drawn and bullets leave the drawn muzzle.
 //   Events about the local player play when they arrive; the shots, dashes and gun handling the
 //   prediction already played aren't played again.
+//   - Lag compensation: every command carries the timeline's time T (the SDK stamps it from
+//     Predict's delay, which follows how far T is behind the server), and the server tests the
+//     bullets fired on it against where the others were at T (server/room.js). So the local
+//     player's own bullets fly on the predicted timeline, from the drawn muzzle at once, and end
+//     where they meet a wall or someone as drawn: what the player sees them hit is what the
+//     server tests. The server's copies of them, and their hits, aren't drawn again.
 //
 // One NetSim per run of the room (state.run): once the room has moved on to the next run, it
 // stops following the state and its messages, and main.js starts a new Game for the new run.
@@ -29,6 +35,7 @@
 import { Predict } from '@colyseus/sdk';
 import { StaticWorld } from '../sim/physics.js';
 import { Player, WEAPONS, ENEMY_TYPES, moveBody } from '../sim/entities.js';
+import { STEP } from '../sim/sim.js';
 import { unpackBullet, weaponCode, sanitizeCommand, simCommand } from '../sim/protocol.js';
 
 // How far in the past others are drawn, ms: one patch interval (50 ms) and room for jitter; more
@@ -109,7 +116,15 @@ export class NetSim {
     this.flying = []; // { b, t0, x0, y0, end }: bullets, drawn from t0 (fired at x0, y0) until end
     this.killed = new Set(); // enemies whose kill has played
     this.shots = new Set(); // input seqs the prediction fired a shot on
-    this.tele = opts.telemetry ? { errors: [], corrections: [], starved: 0, over: 0, frames: 0, shots: 0, matched: 0, late: 0 } : null;
+    // The local player's own bullets, predicted: { b, c (this.ms fired), x0, y0, lx, ly (last
+    // tested), pierce, hits }; the pellets of each predicted shot by its seq, until the server's
+    // copies come; and the server's ids of those copies.
+    this.own = [];
+    this.ownShots = new Map();
+    this.ownIds = new Set();
+    this.ownId = 0;
+    this.matchedShot = null; // the predicted seq the server's shot in this tick message matched
+    this.tele = opts.telemetry ? { errors: [], corrections: [], starved: 0, over: 0, frames: 0, shots: 0, matched: 0, late: 0, fired: new Map(), fates: new Map() } : null;
 
     const onPatch = () => this.capture();
     room.onStateChange(onPatch);
@@ -117,9 +132,24 @@ export class NetSim {
       () => room.onStateChange.remove(onPatch),
       room.onMessage('tick', ([t, events, born, gone]) => {
         if (!this.current) return;
+        this.matchedShot = null;
         for (const e of events) this.arrive(t, e);
-        for (const a of born) { const b = unpackBullet(a); this.flying.push({ b, t0: t, end: Infinity, x0: b.x, y0: b.y }); }
+        const me = this.localId, pellets = this.matchedShot != null ? this.ownShots.get(this.matchedShot) : null;
+        if (pellets) this.ownShots.delete(this.matchedShot);
+        let k = 0;
+        for (const a of born) {
+          const b = unpackBullet(a);
+          // The server's copy of a bullet the prediction fired: already flying.
+          if (b.owner === me && pellets) {
+            this.ownIds.add(b.id);
+            const o = pellets[k++];
+            if (this.tele && o) { this.tele.fired.set(b.id, { c: o.c, t0: t }); this.tele.fates.set(b.id, { pred: o, srv: null }); }
+            continue;
+          }
+          this.flying.push({ b, t0: t, end: Infinity, x0: b.x, y0: b.y });
+        }
         for (const id of gone) {
+          if (this.ownIds.delete(id)) continue;
           const f = this.flying.find((o) => o.b.id === id);
           if (f) f.end = t;
         }
@@ -177,7 +207,8 @@ export class NetSim {
       newId: () => s.id,
       // Only a command's first run makes sounds and sparks; replays are silent.
       emit: (e) => { if (live.on && PREDICTED.has(e.type)) this.predicted(e, live.seq); },
-      fireBullet() {}, onPlayerBledOut() {},
+      fireBullet: (o) => { if (live.on) this.fire(o, live.seq); },
+      onPlayerBledOut() {},
     };
     const P = new Player(stand, s.x, s.y);
     this.adopt(P, s);
@@ -238,7 +269,7 @@ export class NetSim {
     P.reloading = s.reloading; P.cooldown = s.cooldown;
     P.dashT = s.dashT; P.dashCd = s.dashCd; P.invuln = s.invuln;
     P.dashDir = { x: Math.cos(s.dashA), y: Math.sin(s.dashA) };
-    P.moving = s.moving; P.laughT = s.laughT;
+    P.moving = s.moving; P.laughT = s.laughT; P.shotN = s.shotN;
     P.down = s.down; P.bleedT = s.bleedT; P.dead = s.dead;
   }
 
@@ -247,6 +278,19 @@ export class NetSim {
   predicted(e, seq) {
     if (e.type === 'shot') { this.shots.add(seq); e.seq = seq; if (this.tele) this.tele.shots++; }
     this.events.push({ ...e, predicted: true });
+  }
+
+  // A bullet the prediction fired (as Sim.fireBullet): it flies from now (this.ms).
+  fire(o, seq) {
+    const b = {
+      id: --this.ownId, x: o.x, y: o.y, ang: o.ang, vx: Math.cos(o.ang) * o.speed, vy: Math.sin(o.ang) * o.speed,
+      life: o.life, h: 36, tint: o.tint ?? 0xffffff, orb: false, scale: o.scale ?? 1,
+    };
+    const f = { b, c: this.ms, x0: o.x, y0: o.y, lx: o.x, ly: o.y, pierce: o.pierce ?? 0, hits: null, end: null };
+    this.own.push(f);
+    let list = this.ownShots.get(seq);
+    if (!list) this.ownShots.set(seq, (list = []));
+    list.push(f);
   }
 
   // The local player's command (see Player.update), as the room's Command.
@@ -269,6 +313,7 @@ export class NetSim {
     this.predict.tick(this.ms);
     const acked = this.input.lastProcessed;
     for (const s of this.shots) if (s < acked - 10) this.shots.delete(s);
+    for (const s of this.ownShots.keys()) if (s < acked - 10) this.ownShots.delete(s);
     this.pingT -= dt;
     if (this.pingT <= 0 && this.room.connection?.isOpen) {
       this.pingT = 2;
@@ -306,13 +351,17 @@ export class NetSim {
       // (a held or folded step moves it by one or two; even the SMG fires only every 4.5 steps,
       // so that can't pair two different shots). One it didn't see coming plays late.
       if (e.type !== 'shot') return;
-      for (const s of [e.seq, e.seq + 1, e.seq - 1, e.seq + 2, e.seq - 2]) if (this.shots.delete(s)) { if (this.tele) this.tele.matched++; return; }
+      for (const s of [e.seq, e.seq + 1, e.seq - 1, e.seq + 2, e.seq - 2]) if (this.shots.delete(s)) { this.matchedShot = s; if (this.tele) this.tele.matched++; return; }
       if (this.tele) this.tele.late++;
       this.events.push(e);
     } else if ((e.id === me && MINE.has(e.type)) || (e.type === 'bite' && e.target === me)) {
       // Drawn on the predicted player, not where the server had him.
       if (e.type === 'hurt' || e.type === 'laugh' || e.type === 'laughEnd') { const C = this.me.world.P; e.x = C.x; e.y = C.y; }
       this.events.push(e);
+    } else if ((e.type === 'bulletHit' || e.type === 'bulletEnd') && this.ownIds.has(e.bid)) {
+      // A hit or the end of a bullet the prediction flew (and ended) itself.
+      const f = this.tele?.fates.get(e.bid);
+      if (f) f.srv = { kind: e.type === 'bulletEnd' ? 'end' : e.target, age: (t - this.tele.fired.get(e.bid).t0) / 1000 };
     } else this.pending.push([t, e]);
   }
 
@@ -366,6 +415,10 @@ export class NetSim {
     this.queue.length = S.queued;
     const T = this.renderTime(dt);
     const [A, B, u] = this.bracket(T);
+    // The commands sent until the next frame are stamped T (as it moves on at real speed): the
+    // SDK stamps serverNow() − (delay + rtt/2), and the server tests their bullets at that time.
+    const c = this.room.clock;
+    if (c.lastServerTime()) this.predict.setDefaults({ delay: Math.max(0, c.serverNow() - T - c.smoothedRtt() / 2) });
 
     // Events up to T, in order.
     let n = 0;
@@ -471,7 +524,63 @@ export class NetSim {
       b.x = f.x0 + b.vx * age; b.y = f.y0 + b.vy * age;
       bullets.push(b);
     }
+    for (let i = this.own.length - 1; i >= 0; i--) {
+      const f = this.own[i];
+      if (this.flyOwn(f)) bullets.push(f.b);
+      else this.own.splice(i, 1);
+    }
     this.bullets = bullets.reverse();
+  }
+
+  // One of the local player's own bullets, on the predicted timeline: from where it was last
+  // tested to where it is now, in steps of 10 px as Sim.updateBullets takes them, against the
+  // walls and props and everyone as drawn this frame. False once it has ended.
+  flyOwn(f) {
+    const b = f.b, age = Math.min(b.life, (this.ms - f.c) / 1000 + STEP);
+    const nx = f.x0 + b.vx * age, ny = f.y0 + b.vy * age;
+    const steps = Math.max(1, Math.ceil(Math.hypot(nx - f.lx, ny - f.ly) / 10));
+    for (let k = 1; k <= steps; k++) {
+      const x = lerp(f.lx, nx, k / steps), y = lerp(f.ly, ny, k / steps);
+      const c = this.statics.pointHit(x, y);
+      if (c) return this.ownEnd(f, age, x, y, c.owner ? c.owner.kind : 'wall');
+      const e = this.ownTarget(f, x, y);
+      if (!e) continue;
+      if (f.pierce > 0) {
+        f.pierce--;
+        (f.hits ??= new Set()).add(e);
+        this.events.push({ type: 'bulletHit', x, y, h: b.h, ang: b.ang, target: e.type ? 'enemy' : 'player', enemyType: e.type, predicted: true });
+      } else return this.ownEnd(f, age, x, y, e.type ? 'enemy' : 'player', e.type, e.id);
+    }
+    b.x = f.lx = nx; b.y = f.ly = ny;
+    if (age < b.life) return true;
+    f.end = { kind: 'end', age };
+    this.events.push({ type: 'bulletEnd', x: nx, y: ny, predicted: true });
+    return false;
+  }
+
+  // Who an own bullet at (x, y) hits as drawn, as Sim.updateBullets decides it: an enemy that
+  // has faded in; in PvP another player who is up and can be hurt (not dashing, protected or
+  // laughing, the round not over).
+  ownTarget(f, x, y) {
+    for (const e of this.enemies) {
+      if (e.spawnT > 0 || f.hits?.has(e)) continue;
+      const m = e.r + 6;
+      if ((e.x - x) ** 2 + (e.y - y) ** 2 <= m * m) return e;
+    }
+    if (!this.pvp || this.state === 'over') return null;
+    const me = this.localId;
+    for (const P of this.players.values()) {
+      if (P.id === me || !P.up || P.dashT > 0 || P.invuln > 0 || P.laughT >= 0 || f.hits?.has(P)) continue;
+      const m = P.r + 4;
+      if ((P.x - x) ** 2 + (P.y - y) ** 2 < m * m) return P;
+    }
+    return null;
+  }
+
+  ownEnd(f, age, x, y, target, enemyType, id) {
+    f.end = { kind: target, age, id };
+    this.events.push({ type: 'bulletHit', x, y, h: f.b.h, ang: f.b.ang, target, enemyType, predicted: true });
+    return false;
   }
 
   player(id) {

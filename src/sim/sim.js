@@ -18,7 +18,8 @@
 //   PvP: died (by: the killer, null for none or a player's own barrel), respawned (joined),
 //        over (winner: player id or null for a draw, why: 'kills' | 'time')
 //   switch, reload, reloaded, empty  the player's gun
-//   bulletHit (target: enemy / crate / barrel / wall), bulletEnd (ran out of range)
+//   bulletHit (bid: the bullet, target: enemy / player (PvP) / crate / barrel / wall), bulletEnd
+//                                    (bid; ran out of range)
 //   propHit, propBroken, explode     crates and barrels
 //   pickup (id, kind, weapon, had, heal)
 //   wave (n, boss, count), waveCleared (n, bonus, heals: [{ id, heal, x, y }])
@@ -32,6 +33,13 @@
 // i-frames), explosions hurt everyone, crates and barrels come back PROP_RESPAWN seconds after
 // they break and weapon spots SPOT_RESPAWN seconds after they are taken. Once over, guns still
 // fire but nobody is hurt.
+//
+// Lag compensation (online): a command may carry `seen`, the time (the server's clock, ms) its
+// player's browser drew the others at when it was sent. Bullets fired on it keep it, and on each
+// step test players and enemies where `sim.seen(target, bullet)` says the shooter saw them in the
+// frame that drew the bullet where it is ({ x, y }, or null: not there then, e.g. before a
+// respawn). The server sets `sim.seen` (server/room.js); without it, or a command without
+// `seen`, bullets test current positions.
 import { WORLD } from '../island.js';
 import { StaticWorld } from './physics.js';
 import { Player, Enemy, WEAPON_ORDER, REVIVE_RANGE, REVIVE_SECONDS, BLEED_SECONDS, moveBody } from './entities.js';
@@ -58,6 +66,7 @@ export class Sim {
     this.time = 0;
     this.lastId = 0;
     this.events = [];
+    this.seen = null;
 
     this.statics = new StaticWorld();
     this.props = [];
@@ -418,15 +427,23 @@ export class Sim {
       id: this.newId(), x: o.x, y: o.y, vx: Math.cos(o.ang) * o.speed, vy: Math.sin(o.ang) * o.speed,
       ang: o.ang, life: o.life, dmg: o.dmg, team: o.team, owner: o.owner ?? null, pierce: o.pierce ?? 0, knock: o.knock ?? 80,
       h: o.h ?? 36, hits: null, tint: o.tint ?? 0xffffff, orb: !!o.orb, scale: o.scale ?? 1,
+      seen: o.team === 'player' ? this.players.get(o.owner)?.seen ?? 0 : 0, age: 0,
     });
+  }
+
+  // Where a player's bullet tests `e`: where its shooter saw it (see the header), else now.
+  seenBy(b, e) {
+    return b.seen > 0 && this.seen ? this.seen(e, b) : e;
   }
 
   // Players' bullets hit enemies only (no friendly fire); enemies' bullets hit players who are up.
   // PvP: players' bullets hit the other players too, with no hit i-frames; they pass through a
-  // player who is dashing or can't be hurt.
+  // player who is dashing or can't be hurt. Players' bullets test where their shooter saw the
+  // target (seenBy); whether it can be hit (alive, dashing, protected) is as it is now.
   updateBullets(dt) {
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
+      b.age += dt;
       let alive = true;
       const dist = Math.hypot(b.vx, b.vy) * dt;
       const steps = Math.max(1, Math.ceil(dist / 10));
@@ -436,29 +453,34 @@ export class Sim {
         const c = this.statics.pointHit(b.x, b.y);
         if (c) {
           if (c.owner) this.damageProp(c.owner, b.dmg, b.owner);
-          this.emit({ type: 'bulletHit', x: b.x, y: b.y, h: b.h, ang: b.ang, target: c.owner ? c.owner.kind : 'wall' });
+          this.emit({ type: 'bulletHit', bid: b.id, x: b.x, y: b.y, h: b.h, ang: b.ang, target: c.owner ? c.owner.kind : 'wall' });
           alive = false;
           break;
         }
         if (b.team === 'player') {
           for (const e of this.enemies) {
             if (e.dead || e.spawnT > 0) continue;
-            const dx = e.x - b.x, dy = e.y - b.y, m = e.r + 6;
+            const at = this.seenBy(b, e);
+            if (!at) continue;
+            const dx = at.x - b.x, dy = at.y - b.y, m = e.r + 6;
             if (dx * dx + dy * dy > m * m) continue;
             if (b.hits && b.hits.has(e)) continue;
             e.hit(b.dmg, b.ang, b.knock, b.owner);
-            this.emit({ type: 'bulletHit', x: b.x, y: b.y, h: b.h, ang: b.ang, target: 'enemy', enemyType: e.type });
+            this.emit({ type: 'bulletHit', bid: b.id, x: b.x, y: b.y, h: b.h, ang: b.ang, target: 'enemy', enemyType: e.type });
             if (b.pierce > 0) { b.pierce--; (b.hits ??= new Set()).add(e); }
             else { alive = false; break; }
           }
           if (alive && this.pvp) {
             for (const P of this.players.values()) {
               if (!P.up || P.id === b.owner || (b.hits && b.hits.has(P))) continue;
-              const dx = P.x - b.x, dy = P.y - b.y, m = P.r + 4;
+              const at = this.seenBy(b, P);
+              if (!at) continue;
+              const dx = at.x - b.x, dy = at.y - b.y, m = P.r + 4;
               if (dx * dx + dy * dy >= m * m || P.dashT > 0) continue;
               // A player who can't be hurt (spawn protection, the laugh, the round over) lets it
               // through, as a dash does: nobody is a shield for someone else.
               if (!P.hurt(b.dmg, b.x - b.vx * 0.05, b.y - b.vy * 0.05, b.owner, b.knock * PVP_PUSH, 0)) continue;
+              this.emit({ type: 'bulletHit', bid: b.id, x: b.x, y: b.y, h: b.h, ang: b.ang, target: 'player' });
               if (b.pierce > 0) { b.pierce--; (b.hits ??= new Set()).add(P); }
               else { alive = false; break; }
             }
@@ -478,7 +500,7 @@ export class Sim {
       b.life -= dt;
       if (alive && b.life <= 0) {
         alive = false;
-        this.emit({ type: 'bulletEnd', x: b.x, y: b.y });
+        this.emit({ type: 'bulletEnd', bid: b.id, x: b.x, y: b.y });
       }
       if (!alive) {
         this.bullets[i] = this.bullets[this.bullets.length - 1];
@@ -661,7 +683,11 @@ export class Sim {
       t.t -= dt;
       if (t.t <= 0) { this.timers.splice(i, 1); t.fn(); }
     }
-    for (const P of this.players.values()) P.update(dt, cmds[P.id]);
+    for (const P of this.players.values()) {
+      const cmd = cmds[P.id];
+      P.seen = cmd?.seen ?? 0;
+      P.update(dt, cmd);
+    }
     this.updateRevives(dt);
     for (const e of this.enemies) if (!e.dead) e.update(dt);
     this.applyDrift(dt);

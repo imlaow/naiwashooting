@@ -38,6 +38,7 @@ export const PlayerState = schema({
   arsenal: t.map(Slot),
   reloading: timer(2, 16),
   cooldown: timer(1, 16), // until the gun can fire again
+  shotN: t.uint16(), // shots fired, which a shot's spread comes from (Player.shoot)
   moving: t.boolean(),
   // Velocity, for the walk lean and so the owner's prediction can replay from it.
   vx: vel(), vy: vel(),

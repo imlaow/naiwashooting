@@ -26,6 +26,16 @@
 // isn't left behind by it. A backlog that builds up anyway (a client sending a little fast) is
 // folded away the same way, slowly.
 //
+// Lag compensation: each command carries the time its browser drew the others at (the SDK's
+// render-time stamp, which src/net/netsim.js keeps on its timeline's time). The bullets it fires
+// keep that time, and on each step test players and enemies where the room's rewind
+// (allowRewindState, recorded at each patch: exactly what the browsers draw between) had them
+// at that time plus the bullet's flight so far (seenAt): the shooter's offset behind the server
+// stays as it was when firing, and counting the flight in steps keeps it exact when Node runs
+// two steps in one go. Whether a target can be hit (alive, dashing, protected) is as it is now.
+// A target that jumped (a respawn, put back on the map) after that time isn't hit: its shooter
+// saw it before the jump. Stamps further back than MAX_REWIND_MS are tested that far back.
+//
 // A dropped connection keeps its seat (it counts as taken) for RECONNECT_SECONDS: the player stays
 // in the sim, standing still, and can be downed. The browser's SDK reconnects with its token,
 // which only works for that held seat, so the version, password and origin checks of the first
@@ -48,6 +58,11 @@ export const DRAIN_STEPS = 60;
 // Late commands are folded only beyond CUSHION waiting; debt is forgotten after DEBT_STEPS.
 export const CUSHION = 2;
 export const DEBT_STEPS = 120;
+// The furthest back a bullet is tested, ms (a browser 250 ms away draws about 300–400 ms back).
+// The rewind keeps this much history and holds older times to it.
+export const MAX_REWIND_MS = 500;
+// A move further than this between two patches is a jump (as the browser's JUMP).
+const JUMP = 150;
 
 // The ways of losing a connection that @colyseus/sdk reconnects after (its Room.connect); a seat
 // is held only for those. A client the server threw out (WITH_ERROR) leaves at once.
@@ -110,6 +125,15 @@ export class NaiwaRoom extends Room {
     this.setState(new NaiwaState());
     this.state.mode = config.mode;
     this.inputs = this.defineInput(Command, { sanitize: sanitizeCommand, idle: holdLast, bufferMaxSize: 240 });
+    // Before anyone joins: attaching decides the stamp the browsers send.
+    this.rewind = this.allowRewindState({ maxRewindMs: MAX_REWIND_MS });
+    this.rewind.attachAll(this.state.players, { fields: ['x', 'y'] });
+    this.rewind.attachAll(this.state.enemies, { fields: ['x', 'y'] });
+    // Which targets bullets are tested against in the past (tools/net-feel.mjs turns them off to
+    // compare), and when each entity in the state last jumped (a patch time).
+    this.lagComp = { players: true, enemies: true };
+    this.jumps = new WeakMap();
+    this.seenXY = { x: 0, y: 0 };
     // sessionId → { id: sim player id (0 until ready), name, colour, cmd, … }
     this.seats = new Map();
     this.onMessage('ready', (client, run) => this.ready(client, run));
@@ -180,6 +204,7 @@ export class NaiwaRoom extends Room {
   newRun() {
     const S = this.state;
     this.sim = new Sim(this.world, this.layout, this.rules());
+    this.sim.seen = (e, b) => this.seenAt(e, b);
     this.bulletIds = new Set();
     this.lastBullet = 0;
     S.run++;
@@ -196,7 +221,7 @@ export class NaiwaRoom extends Room {
     const P = this.sim.addPlayer();
     seat.id = P.id;
     seat.cmd = idleCommand(P.aim);
-    seat.quiet = 0; seat.backlogT = 0; seat.seq = 0;
+    seat.quiet = 0; seat.backlogT = 0; seat.seq = 0; seat.seen = 0;
     // Steps that ran on a held command and whose own commands haven't come yet.
     seat.debt = 0; seat.debtT = 0;
     // How many steps went without a command, and how many commands were folded into another.
@@ -287,6 +312,8 @@ export class NaiwaRoom extends Room {
       let f = acc.next();
       if (acc.wasIdle) {
         seat.idleSteps++;
+        // A held step: the browser's view has moved on by a step.
+        if (seat.seen > 0) seat.seen += STEP * 1000;
         seat.debtT = 0;
         if (seat.dropped || ++seat.quiet > STALE_STEPS) { f.mx = f.my = 0; f.fire = false; seat.debt = 0; }
         else seat.debt++;
@@ -302,9 +329,12 @@ export class NaiwaRoom extends Room {
         if (left > BACKLOG_STEPS) extra += left - BACKLOG_STEPS;
         else if (seat.backlogT >= DRAIN_STEPS) { extra++; seat.backlogT = 0; }
         if (extra) { f = fold(f, acc.take(extra)); seat.folded += extra; }
+        // The newest command's stamp (0: not stamped yet, tested now).
+        seat.seen = acc.renderTime;
       }
       seat.seq = acc.consumedCount;
       cmds[seat.id] = simCommand(f, seat.cmd);
+      cmds[seat.id].seen = seat.seen;
     }
     return cmds;
   }
@@ -354,6 +384,36 @@ export class NaiwaRoom extends Room {
     return [born, gone];
   }
 
+  // Where the shooter of bullet `b` saw `e` (a sim player or enemy) in the frame that drew `b`
+  // where it is now (see the file header), or null if it wasn't there yet. Reused object: read
+  // it at once.
+  seenAt(e, b) {
+    const S = this.state, player = this.sim.players.get(e.id) === e;
+    let s;
+    if (player) { for (const [sid, seat] of this.seats) if (seat.id === e.id) s = S.players.get(sid); }
+    else s = S.enemies.get(String(e.id));
+    if (!s || !(player ? this.lagComp.players : this.lagComp.enemies)) return e;
+    const seen = this.rewind.at(this.seenTime(b));
+    if (seen.time < (this.jumps.get(s) ?? -1)) return null;
+    return seen.read(s, ['x', 'y'], this.seenXY);
+  }
+
+  // The time the shooter of `b` drew the others at in the frame that drew `b` where it is now:
+  // the stamp of the command its shooter is on (one command a step, so the one sent with the
+  // frame that drew the bullet at this age; it follows the browser's timeline as it catches up
+  // after a stall); else (the shooter has left, or stopped stamping) the bullet's own stamp plus
+  // its flight so far. A shot the server fired on a held step (its command came late) is a step
+  // off the frame its browser fired it in, for its whole flight.
+  seenTime(b) {
+    const P = this.sim.players.get(b.owner);
+    return P?.seen > 0 ? P.seen : b.seen + (b.age - STEP) * 1000;
+  }
+
+  // Before a patch writes `s` from (x, y): a jump (or back alive) marks it, at this patch's time.
+  jumped(s, x, y, back) {
+    if (back || Math.hypot(x - s.x, y - s.y) > JUMP) this.jumps.set(s, this.clock.elapsedTime);
+  }
+
   // ---------- Sim → state ----------
   // Before every patch (patchRate, 20 a second), not every step.
   onBeforePatch() { this.sync(); }
@@ -370,13 +430,14 @@ export class NaiwaRoom extends Room {
       const P = sim.players.get(seat.id), ps = S.players.get(sid);
       if (P && ps) this.writePlayer(ps, P, seat);
     }
-    syncMap(S.enemies, sim.enemies.filter((e) => !e.dead), EnemyState, writeEnemy);
+    syncMap(S.enemies, sim.enemies.filter((e) => !e.dead), EnemyState, (s, e) => { this.jumped(s, e.x, e.y, false); writeEnemy(s, e); });
     syncMap(S.pickups, sim.pickups, PickupState, writePickup);
     syncMap(S.props, sim.props, PropState, (s, p) => { s.hp = Math.max(0, Math.ceil(p.hp)); });
   }
 
   writePlayer(s, P, seat) {
     s.ping = seat.ping; s.away = seat.dropped;
+    this.jumped(s, P.x, P.y, s.dead && !P.dead);
     s.x = P.x; s.y = P.y; s.aim = P.aim; s.hp = P.hp;
     s.weapon = P.weapon; s.lastWeapon = P.lastWeapon;
     for (const k of Object.keys(P.arsenal)) {
@@ -386,7 +447,7 @@ export class NaiwaRoom extends Room {
       slot.mag = a.mag; slot.reserve = a.reserve === Infinity ? -1 : Math.min(32767, a.reserve);
     }
     for (const k of [...s.arsenal.keys()]) if (!P.arsenal[k]) s.arsenal.delete(k);
-    s.reloading = nonNeg(P.reloading); s.cooldown = nonNeg(P.cooldown);
+    s.reloading = nonNeg(P.reloading); s.cooldown = nonNeg(P.cooldown); s.shotN = P.shotN;
     s.moving = P.moving; s.vx = P.vx; s.vy = P.vy;
     s.dashT = nonNeg(P.dashT); s.dashCd = nonNeg(P.dashCd); s.invuln = nonNeg(P.invuln);
     if (P.dashDir) s.dashA = Math.atan2(P.dashDir.y, P.dashDir.x);

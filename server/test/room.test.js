@@ -14,6 +14,7 @@ import { NaiwaRoom, NAME_MAX, STALE_STEPS } from '../room.js';
 import { join, joinError, JoinError } from '../../src/net/online.js';
 import { PROTOCOL, CHAT_MAX } from '../../src/sim/protocol.js';
 import { buildMap, makeChoice } from '../../src/sim/maps.js';
+import { STEP } from '../../src/sim/sim.js';
 
 const URL = 'ws://127.0.0.1:2568';
 const CONFIG = { ...DEFAULTS, maps: ['island/cove', 'factory/dairy'], allowedOrigins: ['https://good.example'], password: '', maxPlayers: 4, stats: false, log: false };
@@ -589,5 +590,46 @@ test('pvp: the last one in the round leaves while another still loads: a fresh r
   await until(() => b.state.players.has(b.sessionId), 'in the new round');
   assert.equal(room.sim.state, 'pvp');
   assert.ok(room.sim.roundT === 600, `${room.sim.roundT}`);
+  assert.deepEqual(errors, []);
+});
+
+test('lag compensation: commands carry the browser\'s render time; bullets test where the rewind had the target, never before a respawn', async () => {
+  pvpRoom();
+  const a = await enter('Shooter');
+  const b = await enter('Target');
+  await startRun();
+  const A = simPlayer(a), B = simPlayer(b), seat = room.seats.get(a.sessionId);
+  // The stamp: the SDK's serverNow() − (renderDelay + rtt/2), on the room's clock.
+  await until(() => a.clock.lastServerTime() > 0, 'the clock');
+  const input = a.input({ mode: 'reliable', renderDelay: 200 });
+  for (let i = 0; i < 10; i++) { input.send(); await sleep(16); }
+  await until(() => seat.seen > 0, 'a stamped command');
+  const behind = room.clock.elapsedTime - seat.seen;
+  assert.ok(behind > 150 && behind < 300, `${behind} ms behind`);
+  input.data.fire = true; input.data.aim = 0;
+  await until(() => { input.send(); return room.sim.bullets.some((o) => o.owner === A.id && o.seen > 0); }, 'a bullet with the stamp');
+  input.data.fire = false; input.send();
+  // B stands at p1, then 100 px on (not a jump): the rewind has it at p1 back then.
+  const p1 = { x: B.x, y: B.y };
+  await sleep(200);
+  const t1 = room.clock.elapsedTime;
+  await sleep(150);
+  B.x += 100;
+  await sleep(200);
+  const at = (t) => { const r = room.seenAt(B, { seen: t, age: STEP }); return r && { x: r.x, y: r.y }; };
+  const then = at(t1), now = at(room.clock.elapsedTime);
+  assert.ok(Math.hypot(then.x - p1.x, then.y - p1.y) < 0.1, `then ${JSON.stringify(then)} vs ${JSON.stringify(p1)}`);
+  assert.ok(Math.abs(now.x - p1.x - 100) < 0.1, `now ${now.x - p1.x}`);
+  // Killed and respawned: a shooter whose view is from before the respawn saw no one there.
+  // (lineUp's bullet is tested where B is now: A's view is from before lineUp moved B.)
+  A.seen = 0;
+  lineUp(A, B);
+  await until(() => B.dead, 'the kill');
+  const tDead = room.clock.elapsedTime;
+  await until(() => !B.dead, 'the respawn', 5000);
+  await sleep(150);
+  assert.equal(at(tDead), null);
+  const after = at(room.clock.elapsedTime);
+  assert.ok(Math.hypot(after.x - B.x, after.y - B.y) < 30, 'after the respawn, where it is');
   assert.deepEqual(errors, []);
 });

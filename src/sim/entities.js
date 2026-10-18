@@ -1,6 +1,7 @@
 // Player, enemies and weapon definitions: positions, health, timers and AI, no sprites.
 // PlayerView / EnemyView (view/entities.js) draw them; anything only drawn (walk cycle, recoil,
 // hit flash, footstep dust) lives there. Sounds and particles go out as events (see sim.js).
+import { mulberry32 } from '../noise.js';
 
 export const WEAPONS = {
   pistol: { name: 'Pistol', dmg: 20, rate: 0.24, mag: 12, reload: 0.9, speed: 980, spread: 0.035, pellets: 1, life: 0.72, reserve: Infinity, kick: 3, shake: 2.5, sound: 'pistol', knock: 140 },
@@ -60,6 +61,11 @@ export class Player {
     this.dashT = 0; this.dashCd = 0;
     this.invuln = 0;
     this.moving = false;
+    // Shots fired (wrapping at 2¹⁶): a shot's spread comes from it and the player id, so the
+    // browser's prediction (net/netsim.js) fires the same pellets the server does.
+    this.shotN = 0;
+    // Online: the `seen` time of the command it is running (see Sim's header).
+    this.seen = 0;
     this.laughT = -1; // seconds into the laugh, -1 when not laughing
     this.respawnT = 0; // PvP: seconds until a dead player is back in
     this.kills = 0; this.combo = 0; this.comboT = 0;
@@ -234,11 +240,13 @@ export class Player {
     const cos = Math.cos(this.aim), sin = Math.sin(this.aim);
     const len = muzzleReach(this.weapon);
     const mx = this.x + cos * len, my = this.y + sin * len;
+    const rand = mulberry32((this.id << 16) ^ this.shotN);
+    this.shotN = (this.shotN + 1) & 0xffff;
     for (let i = 0; i < W.pellets; i++) {
-      const a = this.aim + (Math.random() - 0.5) * 2 * W.spread;
+      const a = this.aim + (rand() - 0.5) * 2 * W.spread;
       sim.fireBullet({
-        x: mx, y: my, ang: a, speed: W.speed * (W.pellets > 1 ? 0.85 + Math.random() * 0.25 : 1),
-        dmg: W.dmg, life: W.life * (W.pellets > 1 ? 0.8 + Math.random() * 0.3 : 1), team: 'player', owner: this.id,
+        x: mx, y: my, ang: a, speed: W.speed * (W.pellets > 1 ? 0.85 + rand() * 0.25 : 1),
+        dmg: W.dmg, life: W.life * (W.pellets > 1 ? 0.8 + rand() * 0.3 : 1), team: 'player', owner: this.id,
         pierce: W.pierce ?? 0, knock: W.knock, tint: this.weapon === 'rifle' ? 0x9be7ff : 0xffe28a,
         scale: this.weapon === 'rifle' ? 1.6 : 1,
       });
