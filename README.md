@@ -40,7 +40,8 @@ npm run test:server                # the room tests
 
 | Key | Meaning |
 | --- | --- |
-| `name` | Shown in the server's log |
+| `name` | The server's name (up to 32 characters): in its log, on the players' loading screen and menu, and in their recently joined servers |
+| `motd` | A message of the day under the name (up to 200 characters, `""` for none) |
 | `port` | Local port for plain `ws://` (default 7777) |
 | `mode` | `"coop"` (waves of enemies) or `"pvp"` (deathmatch) |
 | `pvp` | `{ "killLimit": 25, "timeLimit": 600 }`: a PvP round ends when someone reaches killLimit kills (1–999) or after timeLimit seconds (30–3600) |
@@ -48,6 +49,8 @@ npm run test:server                # the room tests
 | `password` | `""` for none |
 | `maps` | The rotation, e.g. `"island/cove"`, `"factory/dairy"`, `"island/random"` (a new island each time) |
 | `allowedOrigins` | Sites whose pages may join (the official domains and `http://localhost:5173` by default); `["*"]` for any |
+| `banAddresses` | `true` (default): a ban also refuses the player's address, not only their browser |
+| `trustProxy` | The tunnel or proxy in front of the server (`["127.0.0.1", "::1"]`: one on the same machine). Only from these is the forwarded `X-Forwarded-For` address believed |
 | `log` | `true` (default) prints a line when someone joins, leaves, loses the connection or comes back |
 | `stats` | `true` prints time per tick, memory and bytes sent per player every 10 s |
 
@@ -55,6 +58,13 @@ The site is served over HTTPS, so browsers can only reach a server through a `ws
 (`ws://localhost:7777` works from the same machine). A run starts 10 s after the first player is
 in, ends when everyone is down or dead, shows the results for 10 s and moves on to the next map.
 In PvP a round ends at the kill or time limit instead; the dead respawn 3 s later with a pistol.
+
+The owner runs the server from its own terminal: type `help` there. `players` lists who is here
+with their numbers; `kick 3`, `ban 3` (or a name, or `ban 1.2.3.4`), `bans`, `unban 1`,
+`say hello`, `map factory/dairy` (or `map next`) and `restart` do what they say. Bans are kept in
+`bans.json` next to `server.json`; they go by the player's browser and address, so another browser
+on another network gets back in. Without a terminal (Docker, a service, started in the background)
+the server runs the same, without the commands.
 
 The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (remembered per browser) or add `?lang=en`.
 
@@ -93,13 +103,16 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/sim/bot.js` | The scripted player: the headless runs' bots and the browser's debug teammates (`?debug&bots=N`) |
 | `src/sim/physics.js` | Static colliders in a spatial hash: push-out, point and line-of-sight tests |
 | `src/sim/protocol.js` | What server and browser must agree on: `PROTOCOL` (bump it whenever the sim, the room state or a message changes), the bullet and event message formats |
-| `server/index.js` | `naiwa-server`: reads and checks `server.json`, refuses WebSocket upgrades from sites not in `allowedOrigins`, runs one `NaiwaRoom` (`npm run server`) |
-| `server/room.js` | `NaiwaRoom` (Colyseus 0.18): joining rules (version, full, password, origin), lobby → run → results → next map, the 1/60 s step taking one command per player per step, the sim's events and bullets out as messages stamped with the room clock, the state written before each patch; seats held for 60 s after a drop, chat, the join/leave log |
+| `server/index.js` | `naiwa-server`: reads and checks `server.json`, refuses WebSocket upgrades from sites not in `allowedOrigins`, notes each socket's address, runs one `NaiwaRoom` and the console (`npm run server`) |
+| `server/room.js` | `NaiwaRoom` (Colyseus 0.18): joining rules (version, full, password, origin, bans), lobby → run → results → next map, the 1/60 s step taking one command per player per step, the sim's events and bullets out as messages stamped with the room clock, the state written before each patch; seats held for 60 s after a drop, chat, the join/leave log; the console's kick, ban, say, map change and restart |
+| `server/console.js` | The owner's console: the commands typed into the server's terminal, read from stdin (and still running without one) |
+| `server/bans.js` | `bans.json`, and the address a player connects from (the socket's, or a trusted proxy's `X-Forwarded-For`) |
 | `server/schema.js` | The room state (`@colyseus/schema`): players, enemies, pickups, living props, the map choice and the sim's wave state; and the `Command` clients send |
 | `server/test/room.test.js` | Room tests with `@colyseus/testing` (`npm run test:server`) |
+| `server/test/console.test.js` | The console in real server processes: stdin piped, empty, closed, or a background job's terminal |
 | `src/net/netsim.js` | `NetSim`: the room's state mirrored with `Sim`'s interface, so `Game`, the views, the HUD and the bot draw and read it as they do a local sim. Predicts the local player (the sim's own `Player.update` on a copy, reconciled by `@colyseus/sdk`'s `SimReconciler`) and draws everything else, events and bullets included, on a timeline a little in the past, between patches |
 | `src/net/online.js` | Joins a server with `@colyseus/sdk` (reconnecting after a drop) and turns refusals into reasons; loads the SDK's debug panel for `?debug`; loaded only when ONLINE is used |
-| `src/online.js` | The ONLINE panel's address rules, recently joined servers and the player's name |
+| `src/online.js` | The ONLINE panel's address rules, recently joined servers, the player's name and the browser's id (which bans go by) |
 | `src/dashboard.js` | The map dashboard: a section per theme, preview cards, random-seed card |
 | `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting; `DEFAULT_SHAPE` lists the knobs a map can turn |
 | `src/factory.js` | The factory map's layout (hall, belts, canal, tank farm, buildings, yard), its floor painting and minimap; same terrain interface as `Island` plus belt `drift` |

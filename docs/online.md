@@ -1,9 +1,10 @@
 # Online play: self-hosted servers (design)
 
-Status: **stages 1–5 of 7 done** (layout extraction, the sim/view split, several players in the
-sim, the Colyseus server with the join screen, 2026-10-17; prediction, interpolation, reconnecting
-and the in-game multiplayer UI, 2026-10-18). This is the agreed design; build it in the stages at
-the end.
+Status: **stages 1–6 and 7a of 7 done** (layout extraction, the sim/view split, several players in
+the sim, the Colyseus server with the join screen, 2026-10-17; prediction, interpolation,
+reconnecting and the in-game multiplayer UI, 2026-10-18; PvP and rewind-checked hits, the owner's
+console, 2026-10-19). 7b, packaging and the hosting docs, is next. This is the agreed design; build
+it in the stages at the end.
 
 ## Decisions
 
@@ -28,7 +29,7 @@ the end.
 | Interpolating other entities | the SDK's server clock (`room.clock`) for a whole-state timeline in `NetSim`; not `attachAll` (see "Stage 5 as built") | our own clock sync |
 | Lag compensation for hits | `allowRewindState()`, the input's render-time stamp, `rewind.at(time)` (stage 6b) | nothing (it was deferred) |
 | Refusing connections (wrong version, banned, bad origin) | `onAuth` / `beforeUpgrade` | custom checks |
-| Admin: player list, kick, inspect rooms | `@colyseus/monitor` / `@colyseus/admin` behind `basicAuth()` | a stdin console |
+| Admin: player list, kick, ban, say, map, restart | a console on the server's own terminal (stdin, `server/console.js`, stage 7a) | `@colyseus/monitor` / `@colyseus/admin` behind `basicAuth()` (see "Stage 7a as built" for why) |
 | Headless tests and bot load tests | `@colyseus/testing`, `@colyseus/loadtest` | our own harness |
 | TLS and a public address | `cloudflared` or Caddy | anything in our code |
 | Distribution | Docker image, plus `npx naiwa-server` | an installer |
@@ -38,7 +39,8 @@ the end.
 - **Server:** don't install the `colyseus` meta-package. It pulls in uWebSockets binaries for every
   platform, plus Redis, auth and pm2 (180 MB, 159 packages). `@colyseus/core` + `@colyseus/ws-transport`
   + `@colyseus/schema` is 20 MB and 84 packages, and idles at about 80 MB of memory on Node 24 (bare
-  Node is 44 MB). Add `@colyseus/monitor` only if the admin page is wanted.
+  Node is 44 MB). No admin page: `@colyseus/monitor` would add 14 MB, 3 packages and 30 MB of idle
+  memory (measured in stage 7a), and the owner's console needs none of it.
 - **Browser:** `@colyseus/sdk` with `Predict` adds about 69 KB gzipped (the game's JS is about 233 KB).
   Load it on demand when ONLINE opens.
 
@@ -95,7 +97,7 @@ The join screen accepts `wss://…`, turns `https://…` into `wss://…`, allow
  │ Input → PlayerCommand ───┼────────────────▶│ Colyseus Room                │
  │ @colyseus/sdk Predict    │                 │  setFixedTimestep → Sim.step │
  │ View: sprites, fx, sfx,  │◀────────────────┼─ schema patches + broadcasts │
- │ HUD                      │  wss (tunnel)   │ server.json, monitor         │
+ │ HUD                      │  wss (tunnel)   │ server.json, console (stdin) │
  └──────────────────────────┘                 └──────────────────────────────┘
  single-player = the same Sim + View in one page, no Colyseus
 ```
@@ -553,7 +555,8 @@ Found in stage 2:
     already in the state; per-player score isn't (the sim only keeps a team score).
   - The loading window: a client is out of the sim until `ready`, so a slow phone joining mid-run
     misses nothing dangerous but also sees nothing until it has loaded.
-  - The server log has no player join / leave lines yet; the admin page is still to come.
+  - The server log has no player join / leave lines yet; the admin page is still to come (stage 7a
+    made it a console on the server's terminal instead).
 
 ## Stage 5 as built
 
@@ -1015,6 +1018,176 @@ co-op enemies. Packages unchanged (`@colyseus/core` 0.18.19, `@colyseus/sdk` 0.1
   - Not checked in a browser in this stage: the own bullets' drawing and sparks go through the
     view code single-player uses (`syncBullets`, the `bulletHit` / `bulletEnd` effects).
 
+## Stage 7a as built
+
+The owner's admin tools (2026-10-19). 7b, packaging, the hosting docs and a load test, comes next.
+
+**A console, not an admin page.** The owner types commands into the terminal the server runs in
+(`server/console.js`). It isn't on the network, so there is no password and no login: whoever has
+the terminal is the owner. There is no `adminPassword`, no admin page, and no admin room message.
+Browsers can't send any of these commands.
+
+| Command | Does |
+| --- | --- |
+| `players` (or `list`) | who is here with their number (`#3`, by join order, never reused while the server runs), loading / playing / away, address and ping, plus the last 10 who left |
+| `kick <player>` | out at once; they may join again |
+| `ban <player\|address>` | a player: out, and refused by browser id and address. An address: everyone here from it goes too, as with Minecraft's `ban-ip`. A player who already left (from the `players` list) can be banned too |
+| `bans`, `unban <n\|name\|address>` | the list (`bans.json`), and lifting one |
+| `say <text>` | a line from the server to everyone, `[Server]: …` in the chat |
+| `map [theme/id\|next]` | another map now (no argument: this one and the rotation) |
+| `restart` | this map from its start, in its lobby |
+| `help` | the list |
+
+A `<player>` is a number from `players` (`3` or `#3`) or a name. A name more than one player has is
+refused, with their numbers.
+
+Why not the monitor, which "Off-the-shelf pieces" first named (measured on the pinned versions):
+
+- **`@colyseus/monitor` 0.18.6** adds 3 packages and 14 MB. Idle memory goes from 96–102 MB to
+  133 MB, mostly zod. It doesn't need express: it mounts through `defineServer({ routes })`, and
+  `basicAuth` is in `@colyseus/core` 0.18.19 itself.
+- Its UI can list rooms and clients, show the state, message clients, edit or delete state fields,
+  disconnect a client and dispose a room. It has nothing for ban, say, map or restart.
+- Its `/api/room/call` calls *any* room method with JSON arguments, so its password is full control
+  of the room, exposed on the tunnel's public address.
+- Its "dispose" would end the only room, and nothing would make another.
+- Its "disconnect" closes without a code, so the browser reconnects instead of saying why.
+- **`@colyseus/admin` 0.18.6** is a panel backed by a database. It needs `@colyseus/auth`,
+  `@colyseus/database` (drizzle), JWT and user accounts: 45 packages, 44 MB.
+
+**The console without a terminal.** It is a `readline` with `terminal: false` over stdin. Ctrl+C
+still stops the server, because readline's terminal mode would catch it.
+
+- **stdin empty, closed, or not a terminal** (Docker without `-it`, a service, `< /dev/null`): it
+  reads what there is. The server runs on after the end of it, and nothing in the console ends the
+  process.
+- **Started with `&` from an interactive shell:** reading the terminal from a background job gets the
+  whole process stopped by SIGTTIN, with the room frozen. This happened when checked here.
+  - Fix: the console catches SIGTTIN. The read then fails, and the error is swallowed.
+  - So a background server just has no console (`fg` it, or restart it in the foreground, to type).
+
+**Who a ban is.** An entry in `bans.json` is `{ name, id, ip, at }`. A join is refused when either
+the id or the address matches.
+
+- **The id** is a random id the browser keeps (localStorage `naiwa-id`, `src/online.js browserId`)
+  and sends with every join.
+  - It is checked in the static `onAuth`, so the refusal (`banned`) reaches the browser's
+    `join()`.
+  - It isn't in the state, so other players never see it.
+- **The address**, behind a tunnel or Caddy, is always the proxy's (127.0.0.1). The real one is in a
+  header that only the proxy may be believed about. `server.json "trustProxy"` (default
+  `["127.0.0.1", "::1"]`) lists the proxies; only for a socket from one of them is the **last**
+  `X-Forwarded-For` entry used (`bans.js clientAddress`):
+  - That last entry is the one the proxy wrote itself: Cloudflare's edge, Caddy and nginx all put
+    the address they saw last. Anything a client sends sits before it.
+  - `CF-Connecting-IP` isn't used: behind Caddy a client can send its own.
+  - A socket from anywhere else is its own address, whatever it claims.
+- **Where the address is read.** Colyseus gives `onAuth` only `context.ip`, which it takes from
+  `x-real-ip` / `X-Forwarded-For` before the socket. The matchmaking request's context has no socket
+  address at all, and the room's own `onAuth` doesn't run once the static one has. So the transport
+  notes the address on each socket:
+  - `server/index.js`: a `WebSocketTransport` subclass whose `onConnection` (protected in the
+    typings) sets `rawClient.address`. ws-transport registers it unbound, so the config comes from a
+    closure.
+  - `onJoin` checks the address and throws `banned`. The browser's `join()` gets that as its error,
+    as it does for `onAuth`'s refusals. Colyseus then runs `onDrop` and `onLeave`, which find no
+    seat.
+- **Address rules.** IPv6 addresses are banned by their /64, since devices change the rest by
+  themselves. An IPv4 address that arrives as `::ffff:a.b.c.d` counts as `a.b.c.d`. This machine's
+  address (loopback) is never banned, because that is the owner's own browser, or everyone when a
+  proxy isn't in `trustProxy`; such a ban goes by id alone. `"banAddresses": false` turns address
+  bans off (then they are neither made nor checked).
+- **What it can't stop:**
+  - a new address: mobile data, a VPN, a router restart;
+  - a new id: another browser, a private window, cleared site data;
+  - collateral bans: an address many share (a mobile carrier's NAT, common in mainland China, or a
+    school) bans everyone behind it;
+  - a proxy chain that isn't trusted (Docker's bridge, Cloudflare in front of Caddy) makes everyone
+    the proxy, so its address must go into `trustProxy` (7b's hosting docs say how).
+  - It's a speed bump, as Minecraft's IP bans are. A server `password` is the real gate.
+- **`bans.json`** sits next to `server.json` (`server/bans.json` on the defaults; gitignored). It is
+  read at start and rewritten whole, to a temporary file then renamed, on every ban and unban. A file
+  someone broke by hand stops the server with the reason, rather than being emptied. Editing it by
+  hand takes effect at the next start.
+
+**Kicked and banned players see why.**
+
+- The room closes their socket with `KICKED` (4100) or `BANNED` (4101), from `src/sim/protocol.js`.
+  The SDK only reconnects after 1001, 1005, 1006 and 4010, so these go straight to `room.onLeave(code)`.
+- The browser's "connection lost" panel then says "Kicked" / "Banned" with a line on it. A later join
+  is refused with "You are banned from this server".
+- Everyone else's chat says "… was kicked" / "… was banned" instead of "left".
+
+**The new calls into older code, and the states they find** (also in the comments of
+`NaiwaRoom.kick`, `ban`, `changeMap` and `restart`). Console lines run in Node's event loop,
+between two steps, never during one.
+
+| Call × state | Handling |
+| --- | --- |
+| kick / ban while the player is still loading the map (no sim player) | `kickClient` → `onDrop` (not a reconnect code: nothing held) → `onLeave`, which only removes the seat. The browser finishes painting behind the panel and stops there (`enterRun` finds no session). |
+| kick / ban of a player in the sim (alive, down, being revived, reviving, dead in PvP) | as a leave: `Sim.removePlayer` clears revives and targets. The last co-op player up gone ends the run into the results. A PvP round left with only loading players starts afresh. |
+| kick / ban of a dropped player whose seat is held | There is no socket, and their token would still get them back (a reconnect never passes `onAuth`). So `seat.held`, the `allowReconnection` deferred, is rejected, and Colyseus runs `onLeave` now rather than after `RECONNECT_SECONDS`. The old token is refused. |
+| kick / ban just as they reconnect (resolved, `onReconnect` not run yet) | The new socket is in `this.clients`, and `kickClient` closes it. |
+| ban of someone who already left | The last 10 who left are kept (`this.recent`) with name, id and address. |
+| `map` / `restart` in the lobby, mid co-op run, mid PvP round, or during the results | `loadMap` / `newRun` drop whatever was happening for a fresh lobby. A PvP round dropped this way has no winner and no `over`. A map given during the results replaces the one coming. |
+| `map` / `restart` while someone still loads the old map | Their `ready` for an old run is ignored, as before. The browser loads the new map at once: `enterRun` now loops while `state.run` moved on during a load. Before, a lobby nobody was in yet sent no state change, which would have left it on the loading screen. |
+| `map` off the rotation | The rotation goes on from where it was once that map ends (`offRotation`); `map next` likewise. A map in the rotation moves the rotation to it. |
+| `restart` on a random island | the same seed (the world isn't rebuilt) |
+| building a map | holds up the steps for about 0.15 s, as the end of every map already does |
+
+**The server's name and motd** are in the state (`NaiwaState.name`, `motd`; `PROTOCOL` 8).
+`server.json` "name" is at most 32 characters and "motd" at most 200. The browser shows them on the
+loading screen and at the top of the in-game menu (online only), and the ONLINE panel's recent
+servers are labelled with the name they had last time.
+
+**Checked:**
+
+- `npm run test:server`: 41 tests, 17 new.
+  - `room.test.js` calls the console's `command()` on the running room:
+    - `help`, `players`, `say`, unknown commands;
+    - kick while playing, and by name: refused when no one or two players match;
+    - kick while loading;
+    - kick of the last co-op player up, which ends the run;
+    - kick and ban of a held seat (gone at once, token refused);
+    - kick during a reconnect;
+    - bans by id and by address: loopback by id only, `banAddresses: false`, `ban <address>`
+      kicking everyone from it, IPv6 /64, and `clientAddress` ignoring headers from untrusted
+      peers;
+    - ban of someone who already left, `unban`, and `bans.json` read back (a broken file is an
+      error);
+    - `map` in the lobby, mid-run and during the results, `map next`, off the rotation, and a bad
+      name;
+    - `map` / `restart` while someone still loads;
+    - `restart` with a random seed;
+    - PvP `map` / `restart` mid-round (no `over`), and a kick of the last player in the round;
+    - the new `server.json` keys.
+  - `console.test.js` starts real servers:
+    - commands from a pipe, and the server running on after it ends;
+    - stdin `/dev/null`, and stdin closed;
+    - started with `&` from an interactive shell through `script`: running, not "Stopped (tty
+      input)". Without the SIGTTIN guard this test fails.
+- A browser (headless Chromium on the built site, `vite preview`) against a real server driven
+  through its console. All steps passed:
+  - the name and MOTD in the in-game menu and on the loading screen;
+  - `say` in the chat as "[Server]: …";
+  - `map` twice, the second arriving while the browser still built the first (page CPU throttled
+    ×6; it went straight on to the second map and in);
+  - "Kicked", then the recent server listed by its name;
+  - "Banned" (this machine: by browser id), then a new join refused with "You are banned from
+    this server".
+  - The same steps against the old `enterRun` also got in. Another state change woke it soon
+    after, so the stuck loading screen didn't show in that test. The loop takes away the
+    dependence on such a change.
+- `sim-headless` (1 and 4 players), `sim-rules`, the layout check: no errors. `npm run build`: the
+  online chunk is 237.46 kB (76.15 kB gzipped).
+- `tools/bot-clients.mjs`: 3 bots, 3 minutes, to wave 5, 4.2 % CPU; and `--pvp`: 2 rounds, one won
+  at the kill limit, 24 kills, 22 respawns, 3.6 % CPU. No errors in either.
+- `tools/net-feel.mjs` (nothing it measures changed; run as a check):
+  - Prediction error p95 0.04–0.17 px at 0 and 80 ms, with no timeline starving.
+  - `--pvp`: the target as seen against as tested, p95 0.36, 0.40 and 0.49 px at 0, 80 and 150 ms,
+    and 3.97 px at 250 ms. The prediction is back at the wire's rounding within a second of each
+    PvP event.
+
 ## Networking with Colyseus
 
 One room type, `NaiwaRoom`, one room per server (the server *is* the room). The map choice, mode and
@@ -1041,10 +1214,10 @@ out locally. Schema allows at most 63 fields per type, far more than these need.
   a straight line until it ends.
 - `chat`: players' lines, and someone joining, leaving, dropping out or coming back.
 
-**Joining:** `client.joinOrCreate("naiwa", { protocol, name, password })`. `onAuth` rejects a wrong
+**Joining:** `client.join("naiwa", { protocol, name, password, id })`. `onAuth` rejects a wrong
 `PROTOCOL` (from `src/sim/protocol.js`, bumped whenever the sim or state changes), a full server, a
-wrong password or a ban, and the reason is shown to the player ("server runs version N, this site
-needs M"). `beforeUpgrade` checks `Origin` against `allowedOrigins`. Colyseus handles reconnecting
+wrong password or a banned browser id, and `onJoin` a banned address (stage 7a); the reason is shown
+to the player ("server runs version N, this site needs M"). `beforeUpgrade` checks `Origin` against `allowedOrigins`. Colyseus handles reconnecting
 after a drop. `allowReconnection(client, 60)` holds the player's slot.
 
 **Feel:** `Predict` runs the shared movement step for the local player and reconciles against the
@@ -1058,8 +1231,10 @@ targets (stage 6b). `@colyseus/sdk/debug` (drift telemetry and a latency simulat
 
 ```
 server/
-  index.js        defineServer(): NaiwaRoom, monitor behind basicAuth, port from server.json
+  index.js        defineServer(): NaiwaRoom, the transport, port from server.json, the console
   room.js         NaiwaRoom: onAuth, onJoin/onLeave, fixed step → Sim, mode rules, map rotation
+  console.js      the owner's commands, typed into the server's terminal
+  bans.js         bans.json, addresses behind a tunnel
   schema.js       NaiwaState and friends
   server.example.json
   Dockerfile
@@ -1078,18 +1253,21 @@ server/
     "mode": "coop",
     "maxPlayers": 4,
     "password": "",
-    "adminPassword": "",
     "maps": ["island/cove", "island/twins", "factory/dairy", "island/random"],
     "pvp": { "killLimit": 25, "timeLimit": 600 },
-    "allowedOrigins": ["https://<official site>", "http://localhost:5173"]
+    "allowedOrigins": ["https://<official site>", "http://localhost:5173"],
+    "banAddresses": true,
+    "trustProxy": ["127.0.0.1", "::1"]
   }
   ```
 
 - Lifecycle: waiting lobby (the run starts 10 s after the first player joins), then the run, results,
   next map. Late joiners in co-op drop in at the dock with a pistol at the next wave break, or right
   away if the run is still in wave 1.
-- Admin: the Colyseus monitor/admin page at `/admin`, protected by `adminPassword`. Kick, ban, `say`,
-  map change and restart are room messages only an admin session may send.
+- Admin: commands typed into the terminal the server runs in (`help`, `players`, `kick`, `ban`,
+  `bans`, `unban`, `say`, `map`, `restart`). The terminal is the owner's, so there is no password,
+  no admin page and nothing an admin could do from a browser. Bans are kept in `bans.json` next to
+  `server.json`. See "Stage 7a as built".
 - Safety: `sanitize` clamps every command field. Also cap chat at 1/s and names at 16 characters.
 
 ## Client changes
@@ -1128,13 +1306,16 @@ Each stage leaves single-player working and is pushed on its own.
 6. **PvP mode,** with rewind-checked hits. **Done.** 6a: the deathmatch rules (see "Stage 6a as
    built"). 6b: bullets tested where their shooter saw the target, in PvP and on co-op enemies
    (see "Stage 6b as built").
-7. **Packaging and docs.** `docs/hosting.md` (tunnel and Caddy recipes in Chinese and English),
-   Docker image, npm package, a `@colyseus/loadtest` run at `maxPlayers`.
+7. **Admin, packaging and docs.** 7a, **done**: the owner's console (kick, ban, say, map, restart;
+   see "Stage 7a as built"). 7b: `docs/hosting.md` (tunnel and Caddy recipes in Chinese and
+   English, `trustProxy` for Docker and proxy chains), Docker image, npm package, a
+   `@colyseus/loadtest` run at `maxPlayers`.
 
 ## Open questions
 
 - Teammates have distinct colours by join order (stage 5); picking a skin is still open.
-- Chat is text, rate-limited and cleaned, with no moderation (stage 5); whether servers want a way
-  to turn it off is open.
+- Chat is text, rate-limited and cleaned (stage 5); the owner can kick and ban from the console
+  (stage 7a), but there is no mute or chat filter. Whether servers want a way to turn chat off is
+  open.
 - Later: an optional public server list (servers announce themselves to the official Worker). Not
   part of option 3 as chosen.

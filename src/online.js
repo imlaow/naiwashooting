@@ -22,17 +22,36 @@ export function serverUrl(text) {
 
 const RECENT_KEY = 'naiwa-servers';
 const NAME_KEY = 'naiwa-name';
+const ID_KEY = 'naiwa-id';
 
+// The recently joined servers, newest first: [{ url, name }] (name: the server's own, '' until
+// joined once; older pages kept bare addresses).
 export function readRecent() {
   try {
     const v = JSON.parse(localStorage.getItem(RECENT_KEY));
-    return Array.isArray(v) ? v.filter((s) => typeof s === 'string').slice(0, 5) : [];
+    if (!Array.isArray(v)) return [];
+    return v.map((s) => (typeof s === 'string' ? { url: s, name: '' } : s))
+      .filter((s) => typeof s?.url === 'string').map((s) => ({ url: s.url, name: typeof s.name === 'string' ? s.name : '' })).slice(0, 5);
   } catch { return []; }
 }
 
-export function rememberServer(url) {
-  const list = [url, ...readRecent().filter((s) => s !== url)].slice(0, 5);
+export function rememberServer(url, name = '') {
+  const old = readRecent();
+  const list = [{ url, name: name || old.find((s) => s.url === url)?.name || '' }, ...old.filter((s) => s.url !== url)].slice(0, 5);
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch { /* storage unavailable */ }
+}
+
+// A random id this browser keeps and sends with every join. Servers ban by it (and by address),
+// so it says nothing about the player: it's made here, once, and only goes to servers joined.
+export function browserId() {
+  try {
+    let id = localStorage.getItem(ID_KEY);
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(id ?? '')) {
+      id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem(ID_KEY, id);
+    }
+    return id;
+  } catch { return ''; }
 }
 
 export function readName() {

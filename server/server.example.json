@@ -1,5 +1,6 @@
 {
   "name": "Naiwa server",
+  "motd": "",
   "port": 7777,
   "mode": "coop",
   "maxPlayers": 4,
@@ -12,6 +13,8 @@
     "https://naiwa.imlaow.us.ci",
     "http://localhost:5173"
   ],
+  "banAddresses": true,
+  "trustProxy": ["127.0.0.1", "::1"],
   "log": true,
   "stats": false
 }

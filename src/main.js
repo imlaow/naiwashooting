@@ -10,7 +10,7 @@ import { t, setLang, applyDom, CJK_TEXT } from './i18n.js';
 import { Dashboard } from './dashboard.js';
 import { initMenu } from './menu.js';
 import { RANDOM_ID, makeChoice, choiceKey, worldFor, findTheme, readSelected, recordRun } from './maps.js';
-import { serverUrl, readRecent, rememberServer, readName, writeName } from './online.js';
+import { serverUrl, readRecent, rememberServer, readName, writeName, browserId } from './online.js';
 import { teamColour } from './skins.js';
 import './style.css';
 
@@ -239,10 +239,11 @@ async function boot() {
   };
   const renderRecent = () => {
     const box = $('net-recent');
-    box.replaceChildren(...readRecent().map((url) => {
+    box.replaceChildren(...readRecent().map(({ url, name }) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.textContent = url.replace(/^wss?:\/\//, '');
+      // The server's name once it has been joined, its address otherwise.
+      b.textContent = name || url.replace(/^wss?:\/\//, '');
       b.title = url;
       b.addEventListener('click', () => { $('net-address').value = url; setStatus(''); });
       return b;
@@ -262,7 +263,7 @@ async function boot() {
   };
   const joinMessage = (err, mod) => {
     if (err.reason === 'version') return t('online.err.version', { server: err.server, client: mod.PROTOCOL });
-    if (['full', 'password', 'origin', 'unreachable'].includes(err.reason)) return t(`online.err.${err.reason}`);
+    if (['full', 'password', 'origin', 'banned', 'unreachable'].includes(err.reason)) return t(`online.err.${err.reason}`);
     return t('online.err.error', { msg: err.message });
   };
 
@@ -282,9 +283,10 @@ async function boot() {
       // ?debug: the SDK's debug panel (drift telemetry, latency simulator), its own chunk.
       if (q.has('debug')) await mod.loadDebug().catch((err) => console.error('debug panel', err));
       setStatus(t('online.connecting'));
-      const room = await mod.join(target.url, { name, password: $('net-password').value });
+      const room = await mod.join(target.url, { name, password: $('net-password').value, id: browserId() });
       writeName(name);
-      rememberServer(target.url);
+      rememberServer(target.url, room.state.name);
+      showServer(room.state);
       session = { room, mod, run: -1, prepared: -1, loading: false, giveUp: null };
       document.body.classList.add('online');
       const mine = (fn) => (...a) => { if (session?.room === room) fn(...a); };
@@ -307,18 +309,23 @@ async function boot() {
   // this player into its sim), then an online Game once the player is in the state. Called on
   // every state change, so it moves on as soon as the room does (also after a reconnect into a
   // run that started while this player was away).
+  // The room may start another run while a map loads (the owner's map or restart command, or a
+  // results countdown ending): that map is loaded next, at once, since a lobby nobody is in yet
+  // sends no state changes to call this again.
   const enterRun = async () => {
     const s = session;
     if (!s || s.loading) return;
     const S = s.room.state;
     if (S.run === s.run) return;
     if (s.prepared !== S.run) {
-      const run = S.run;
-      s.loading = true;
-      try { await prepare(makeChoice(S.map.theme, S.map.id, S.map.seed)); } finally { s.loading = false; }
-      if (session !== s) { if (!session) toDemo(); return; }
-      s.prepared = run;
-      s.room.send('ready', run);
+      while (s.prepared !== S.run) {
+        const run = S.run;
+        s.loading = true;
+        try { await prepare(makeChoice(S.map.theme, S.map.id, S.map.seed)); } finally { s.loading = false; }
+        if (session !== s) { if (!session) toDemo(); return; }
+        s.prepared = run;
+      }
+      s.room.send('ready', s.prepared);
     }
     if (S.run === s.prepared && S.players.has(s.room.sessionId)) {
       s.run = S.run;
@@ -327,6 +334,13 @@ async function boot() {
       newGame(false, new s.mod.NetSim(s.room, built.island, built.layout), s.mod.hueFilter);
       show(null);
     }
+  };
+
+  // The server's name and message of the day, on the loading screen and the in-game menu
+  // (shown only online, body.online).
+  const showServer = (S) => {
+    for (const el of document.querySelectorAll('.sv-name')) el.textContent = S.name;
+    for (const el of document.querySelectorAll('.sv-motd')) el.textContent = S.motd;
   };
 
   const dropped = () => {
@@ -360,9 +374,13 @@ async function boot() {
     s?.room.leave();
     showTitle();
   };
-  const lost = () => {
+  // `code`: the room's close code; the owner's kick or ban says so.
+  const lost = (code) => {
+    const why = session && code === session.mod.KICKED ? 'kicked' : session && code === session.mod.BANNED ? 'banned' : '';
     endSession();
     toDemo();
+    $('lost-title').textContent = t(why ? `lost.${why}Title` : 'lost.title');
+    $('lost-text').textContent = t(why ? `lost.${why}` : 'lost.text');
     show('lost');
   };
   const toggleNetMenu = () => {
@@ -386,7 +404,9 @@ async function boot() {
   function chatLine(m) {
     const line = document.createElement('div');
     line.className = m.k ? 'chat-line system' : 'chat-line';
-    line.append(span(m.n, teamColour(m.c).css), span(m.k ? ` ${t(`chat.${m.k}`)}` : `: ${m.t}`));
+    // The owner's line from the server's console.
+    if (m.k === 'say') line.append(span(t('chat.server'), '#ffd166'), span(`: ${m.t}`));
+    else line.append(span(m.n, teamColour(m.c).css), span(m.k ? ` ${t(`chat.${m.k}`)}` : `: ${m.t}`));
     chatLog.append(line);
     while (chatLog.children.length > 6) chatLog.firstChild.remove();
     setTimeout(() => line.classList.add('gone'), 9000);

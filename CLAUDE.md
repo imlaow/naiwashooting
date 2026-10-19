@@ -14,10 +14,18 @@ See `README.md` for running the game, controls and the code map.
 
 ## Online play
 
-In progress (stages 1–6 of 7 done: 6a the PvP deathmatch rules, 6b rewind-checked hits; stage 7,
-packaging and docs, is next): self-hosted servers in the style of Minecraft (co-op and PvP, owners put a `wss://` tunnel
-or proxy in front), built on Colyseus 0.18 rather than our own netcode. The agreed design and build
-stages are in `docs/online.md`. Keep it up to date as stages land.
+In progress (stages 1–6 and 7a of 7 done: 6a the PvP deathmatch rules, 6b rewind-checked hits, 7a
+the owner's console; 7b, packaging, hosting docs and a load test, is next): self-hosted servers in
+the style of Minecraft (co-op and PvP, owners put a `wss://` tunnel or proxy in front), built on
+Colyseus 0.18 rather than our own netcode. The agreed design and build stages are in
+`docs/online.md`. Keep it up to date as stages land.
+
+Admin is a console on the server's own terminal (`server/console.js`: kick, ban, say, map,
+restart; no admin page, password or admin room message). It must keep working with stdin closed,
+not a terminal, or a background job's terminal (`node --test server/test/console.test.js`).
+Bans go by browser id and address (`server/bans.js`, `bans.json` next to `server.json`); the
+address comes from the socket, or from the last `X-Forwarded-For` entry only when the socket is
+from a `trustProxy` address.
 
 All game logic is in `src/sim/` (no Pixi, DOM, audio or HUD imports); `src/view/` draws it. After
 touching `src/sim/`, run `node tools/sim-headless.mjs` and `node tools/sim-headless.mjs --players 4`
@@ -25,9 +33,9 @@ touching `src/sim/`, run `node tools/sim-headless.mjs` and `node tools/sim-headl
 `node tools/dump-layouts.mjs --check`.
 
 After touching `server/`, `src/net/`, `src/sim/protocol.js` or anything the room state carries,
-run `npm run test:server` (all pass), `node tools/bot-clients.mjs` ("no errors"; it starts its
-own server on port 7790) and `node tools/bot-clients.mjs --pvp --port 7792` (bots shooting each
-other, "no errors"). After touching the prediction, the timeline or how the room takes
+run `npm run test:server` (all pass; `server/test/console.test.js` starts real servers on port
+2571), `node tools/bot-clients.mjs` ("no errors"; it starts its own server on port 7790) and
+`node tools/bot-clients.mjs --pvp --port 7792` (bots shooting each other, "no errors"). After touching the prediction, the timeline or how the room takes
 commands, also run `node tools/net-feel.mjs` (port 7791, about 6 minutes): at 0 and 80 ms the
 prediction error should stay at the wire's rounding (p95 well under 1 px) and B be drawn without
 starving the timeline. After touching lag compensation (the render-time stamp, `Sim.seen`,

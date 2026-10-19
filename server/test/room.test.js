@@ -11,8 +11,10 @@ import { matchMaker } from '@colyseus/core';
 import { Client } from '@colyseus/sdk';
 import { makeServer, DEFAULTS, readConfig } from '../index.js';
 import { NaiwaRoom, NAME_MAX, STALE_STEPS } from '../room.js';
+import { command } from '../console.js';
+import { Bans, clientAddress, addressKey } from '../bans.js';
 import { join, joinError, JoinError } from '../../src/net/online.js';
-import { PROTOCOL, CHAT_MAX, unpackBullet } from '../../src/sim/protocol.js';
+import { PROTOCOL, CHAT_MAX, KICKED, BANNED, unpackBullet } from '../../src/sim/protocol.js';
 import { buildMap, makeChoice } from '../../src/sim/maps.js';
 import { STEP } from '../../src/sim/sim.js';
 import { idleCommand } from '../../src/sim/entities.js';
@@ -700,4 +702,369 @@ test('a point-blank shot the browser predicted plays its hit once, though the se
     ab.stop();
   }
   assert.deepEqual(errors, []);
+});
+
+// ---------- The owner's console (server/console.js) ----------
+// The tests' sockets come from 127.0.0.1, which trustProxy trusts: a client sending its own
+// X-Forwarded-For plays a player behind the tunnel from that address.
+async function enterFrom(ip, name, id, ready = true) {
+  const c = await new Client(URL, { headers: { 'X-Forwarded-For': ip } }).join('naiwa', { protocol: PROTOCOL, name, id });
+  c.reconnection.minUptime = 0;
+  clients.push(c);
+  await until(() => c.state.map?.theme, 'the first state');
+  if (ready) {
+    c.send('ready', c.state.run);
+    await until(() => c.state.players.has(c.sessionId), 'the player in the state');
+  }
+  return c;
+}
+const ID = (n) => `browser-${n}-0123456789`;
+const say = (line) => command(room, line);
+const leftWith = (c) => new Promise((resolve) => c.onLeave((code) => resolve(code)));
+const seatOf = (c) => room.seats.get(c.sessionId);
+
+test('console: help, players, say, unknown commands; no room yet', async () => {
+  const a = await enter('Allen');
+  const b = await join(URL, { name: 'Loader' });
+  clients.push(b);
+  await until(() => room.seats.size === 2, 'both seats');
+  assert.match(say('help'), /kick <player>/);
+  const list = say('players');
+  assert.match(list, /^2\/4 players, co-op on island\/cove, lobby/);
+  assert.match(list, new RegExp(`#${seatOf(a).no} Allen {2}playing {2}127\\.0\\.0\\.1`));
+  assert.match(list, new RegExp(`#${seatOf(b).no} Loader {2}loading`));
+  assert.equal(say('list'), list);
+  const lines = collect(b, 'chat');
+  assert.equal(say('say  hello\u0007 eggs '), '[server] hello eggs');
+  await until(() => lines.length, 'the line');
+  assert.deepEqual(lines[0], { k: 'say', t: 'hello eggs' });
+  assert.equal(say('say'), 'say what?');
+  assert.match(say('frobnicate now'), /unknown command "frobnicate"/);
+  assert.equal(say('   '), '');
+  assert.equal(command(null, 'players'), 'the room isn\'t up yet');
+  assert.match(command(null, 'help'), /Commands:/);
+  assert.deepEqual(errors, []);
+});
+
+test('kick: out with KICKED, no reconnecting, the chat says so, and they may come back', async () => {
+  const a = await enter('Stays');
+  const b = await enter('Pest');
+  await startRun();
+  const lines = collect(a, 'chat');
+  const left = leftWith(b), id = simPlayer(b).id, sid = b.sessionId;
+  assert.equal(say(`kick #${seatOf(b).no}`), 'kicked Pest');
+  assert.equal(await left, KICKED);
+  await until(() => !room.seats.has(sid), 'the seat to go');
+  assert.ok(!room.sim.players.has(id), 'out of the sim');
+  await until(() => lines.some((m) => m.k === 'kick'), 'the chat line');
+  assert.deepEqual(lines.find((m) => m.k === 'kick'), { k: 'kick', n: 'Pest', c: 1 });
+  assert.ok(!lines.some((m) => m.k === 'leave' || m.k === 'drop'), 'not "left" or "lost the connection"');
+  await sleep(300);
+  assert.equal(room.seats.size, 1, 'and it didn\'t reconnect');
+  assert.equal(room.state.phase, 'run', 'the run goes on');
+  clients.push(await join(URL, { name: 'Pest' }));
+  // By name; names that don't match or match twice are refused.
+  assert.match(say('kick nobody'), /nobody here is called nobody/);
+  await enter('Twin'); await enter('twin');
+  assert.match(say('kick Twin'), /2 players are called Twin: use a number/);
+  assert.equal(say('kick stays'), 'kicked Stays');
+  assert.match(say('kick'), /who\?/);
+  assert.deepEqual(errors, []);
+});
+
+test('kick while loading the map: only the seat goes', async () => {
+  const a = await enter('Playing');
+  await startRun();
+  const b = await join(URL, { name: 'Loading' });
+  clients.push(b);
+  await until(() => room.seats.has(b.sessionId), 'the seat');
+  const left = leftWith(b), sid = b.sessionId;
+  say(`kick ${seatOf(b).no}`);
+  assert.equal(await left, KICKED);
+  await until(() => !room.seats.has(sid), 'the seat to go');
+  assert.equal(room.sim.players.size, 1);
+  assert.equal(room.state.phase, 'run');
+  // Its 'ready' arriving after all changes nothing (it's gone).
+  a.send('ready', a.state.run);
+  await sleep(100);
+  assert.deepEqual(errors, []);
+});
+
+test('kicking the only co-op player still up ends the run into the results', async () => {
+  const a = await enter('Down');
+  const b = await enter('Up');
+  await startRun();
+  const P = simPlayer(a); P.invuln = 0; P.hurt(1000, P.x + 5, P.y);
+  await until(() => P.down, 'down');
+  say(`kick ${seatOf(b).no}`);
+  await until(() => a.state.phase === 'results', 'results');
+  assert.deepEqual(errors, []);
+});
+
+test('kick and ban of a dropped player whose seat is held: the seat goes now, and the token with it', async () => {
+  const a = await enter('Here');
+  const b = await enterFrom('203.0.113.5', 'Away', ID(1));
+  await startRun();
+  const token = b.reconnectionToken, sid = b.sessionId, id = simPlayer(b).id;
+  b.reconnection.enabled = false;
+  drop(b);
+  await until(() => seatOf(b)?.dropped, 'held');
+  assert.match(say('players'), /Away {2}away \(seat held/);
+  assert.equal(say('ban Away'), 'banned Away by browser and address 203.0.113.5');
+  // Not after RECONNECT_SECONDS (60 s here): at once.
+  await until(() => !room.seats.has(sid), 'the seat to go', 1000);
+  assert.ok(!room.sim.players.has(id));
+  await assert.rejects(new Client(URL).reconnect(token));
+  // Refused from then on, by id from anywhere, and by address with any id.
+  await assert.rejects(join(URL, { name: 'Again', id: ID(1) }), (e) => e instanceof JoinError && e.reason === 'banned');
+  const other = await new Client(URL, { headers: { 'X-Forwarded-For': '203.0.113.5' } }).join('naiwa', { protocol: PROTOCOL, name: 'New', id: ID(2) }).catch((e) => e);
+  assert.equal(joinError(other).reason, 'banned');
+  await until(() => room.seats.size === 1, 'no seat left behind by the refusal');
+  assert.equal(room.clients.length, 1);
+  // A held seat kicked: the same, with KICKED.
+  const c = await enter('AlsoAway');
+  c.reconnection.enabled = false;
+  drop(c);
+  await until(() => seatOf(c)?.dropped, 'held');
+  say(`kick ${seatOf(c).no}`);
+  await until(() => room.seats.size === 1, 'the held seat to go', 1000);
+  assert.equal(a.state.phase, 'run');
+  assert.deepEqual(errors, []);
+});
+
+test('a player kicked as they reconnect stays out', async () => {
+  await enter('Here');
+  const b = await enter('Back');
+  const sid = b.sessionId;
+  b.reconnection.delay = 50;
+  const back = new Promise((resolve) => b.onReconnect(resolve));
+  drop(b);
+  await until(() => seatOf(b)?.dropped, 'held');
+  await back;
+  const left = leftWith(b);
+  say('kick Back');
+  assert.equal(await left, KICKED);
+  await until(() => !room.seats.has(sid), 'the seat to go');
+  assert.deepEqual(errors, []);
+});
+
+test('ban: by browser id and address; this machine never by address; "banAddresses": false', async () => {
+  const a = await enter('Local', { id: ID(3) });
+  const b = await enterFrom('198.51.100.20', 'Remote', ID(4));
+  const left = leftWith(b);
+  assert.equal(say(`ban ${seatOf(b).no}`), 'banned Remote by browser and address 198.51.100.20');
+  assert.equal(await left, BANNED);
+  // Loopback (the owner's own browser, or everyone if the tunnel forwarded nothing): id only.
+  assert.equal(say('ban local'), 'banned Local by browser');
+  await until(() => room.seats.size === 0, 'both out');
+  assert.equal(room.bans.find({ ip: '127.0.0.1' }), null);
+  clients.push(await join(URL, { name: 'Local again', id: ID(5) }));
+  await assert.rejects(join(URL, { name: 'x', id: ID(3) }), (e) => e.reason === 'banned');
+  // A join without an id can still be banned by its address; one with neither can't be banned.
+  await enterFrom('198.51.100.30', 'NoId', undefined);
+  assert.equal(say('ban NoId'), 'banned NoId by address 198.51.100.30');
+  const anon = await join(URL, { name: 'Anon' });
+  clients.push(anon);
+  await until(() => room.seats.has(anon.sessionId), 'the seat');
+  assert.match(say('ban anon'), /no browser id and an address that can't be banned: kick them instead/);
+  // Address bans off: the id only.
+  room.config = { ...CONFIG, banAddresses: false };
+  await enterFrom('198.51.100.40', 'IdOnly', ID(6));
+  assert.equal(say('ban IdOnly'), 'banned IdOnly by browser');
+  assert.equal(room.bans.find({ ip: '198.51.100.40' }), null);
+  assert.match(say('ban 198.51.100.41'), /address bans are off/);
+  // An address banned earlier doesn't keep anyone out while they are off.
+  await enterFrom('198.51.100.20', 'BackWhileOff', ID(7), false);
+  room.config = { ...CONFIG };
+  assert.deepEqual(errors, []);
+});
+
+test('ban <address>: everyone here from it goes; IPv6 by its /64; spoofed addresses from outside the tunnel are ignored', async () => {
+  const a = await enterFrom('192.0.2.1', 'One', ID(8));
+  const b = await enterFrom('192.0.2.1', 'Two', ID(9));
+  const c = await enterFrom('192.0.2.2', 'Three', ID(10));
+  const gone = [leftWith(a), leftWith(b)];
+  assert.equal(say('ban 192.0.2.1'), 'banned 192.0.2.1 (and out: One, Two)');
+  assert.deepEqual(await Promise.all(gone), [BANNED, BANNED]);
+  await until(() => room.seats.size === 1, 'only Three left');
+  assert.ok(room.seats.has(c.sessionId));
+  assert.match(say('ban 127.0.0.1'), /this machine/);
+  say('ban 2001:db8:5:6::1');
+  const v6 = await new Client(URL, { headers: { 'X-Forwarded-For': '2001:db8:5:6:abcd::99' } }).join('naiwa', { protocol: PROTOCOL, name: 'v6', id: ID(11) }).catch((e) => e);
+  assert.equal(joinError(v6).reason, 'banned');
+  // What bans.js believes: the last forwarded address, from a trusted peer only.
+  assert.equal(clientAddress('::ffff:127.0.0.1', '6.6.6.6, 203.0.113.9', ['127.0.0.1']), '203.0.113.9');
+  assert.equal(clientAddress('203.0.113.50', '6.6.6.6', ['127.0.0.1', '::1']), '203.0.113.50');
+  assert.equal(clientAddress('::1', 'not an address', ['::1']), '::1');
+  assert.equal(addressKey('2001:0db8:0005:0006:0:0:0:1'), '2001:db8:5:6::/64');
+  assert.equal(addressKey('::ffff:192.0.2.7'), '192.0.2.7');
+  assert.deepEqual(errors, []);
+});
+
+test('ban of a player who already left; unban; bans.json survives a restart', async () => {
+  const { mkdtempSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const file = `${mkdtempSync(`${tmpdir()}/naiwa-bans-`)}/bans.json`;
+  room.bans = new Bans(file);
+  const a = await enterFrom('203.0.113.70', 'Quitter', ID(12));
+  const no = seatOf(a).no;
+  await a.leave();
+  await until(() => room.seats.size === 0, 'gone');
+  assert.match(say('players'), new RegExp(`Left lately \\(you can still ban them\\):\\n {2}#${no} Quitter`));
+  assert.match(say('kick Quitter'), /nobody here is called Quitter \(see "players"\)$/);
+  assert.equal(say(`ban #${no}`), 'banned Quitter by browser and address 203.0.113.70 (they had already left)');
+  say('ban 203.0.113.71');
+  assert.match(say('bans'), /1\. Quitter {2}203\.0\.113\.70 {2}browser browser-…/);
+  // Kept in the file, read back as the server would at its next start.
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).length, 2);
+  const again = new Bans(file);
+  assert.equal(again.find({ id: ID(12) })?.name, 'Quitter');
+  assert.ok(again.find({ ip: '203.0.113.71' }));
+  room.bans = again;
+  await assert.rejects(join(URL, { name: 'Quitter', id: ID(12) }), (e) => e.reason === 'banned');
+  assert.match(say('unban nobody'), /no ban matches nobody/);
+  assert.equal(say('unban quitter'), 'unbanned Quitter');
+  assert.equal(say('unban 1'), 'unbanned 203.0.113.71');
+  assert.equal(say('bans'), 'Nobody is banned.');
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), []);
+  clients.push(await join(URL, { name: 'Quitter', id: ID(12) }));
+  // A file someone broke by hand stops the server with the reason, rather than being emptied.
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(file, '[{ oops');
+  assert.throws(() => new Bans(file), /bans\.json: /);
+  assert.deepEqual(errors, []);
+});
+
+test('map: in the lobby, mid co-op run, during the results; next; off the rotation; a bad name', async () => {
+  const a = await enter('Here');
+  const run0 = room.state.run;
+  assert.match(say('map'), /^now island\/cove; rotation: \[island\/cove\], factory\/dairy$/);
+  assert.match(say('map island/nowhere'), /unknown map "island\/nowhere"\. Maps: island\/cove/);
+  assert.equal(room.state.run, run0, 'nothing changed');
+  // Lobby → another map.
+  assert.match(say('map factory/dairy'), /^map factory\/dairy: everyone loads it/);
+  await until(() => a.state.run === run0 + 1 && a.state.map.theme === 'factory', 'the new map');
+  assert.equal(a.state.phase, 'lobby');
+  assert.equal(a.state.players.size, 0, 'everyone loads it first');
+  a.send('ready', a.state.run);
+  await until(() => a.state.players.size === 1, 'back in');
+  // Mid-run: dropped for a fresh lobby.
+  await startRun();
+  room.sim.startWave(3);
+  say('map next');
+  await until(() => a.state.map.theme === 'island' && a.state.run === run0 + 2, 'the next one, island/cove');
+  assert.equal(room.sim.wave, 0);
+  assert.equal(a.state.phase, 'lobby');
+  // Off the rotation, then the results: back to where the rotation was.
+  say('map island/twins');
+  await until(() => a.state.map.id === 'twins', 'twins');
+  assert.match(say('map'), /now island\/twins \(outside the rotation\); rotation: \[island\/cove\]/);
+  a.send('ready', a.state.run);
+  await until(() => a.state.players.size === 1, 'in');
+  await startRun();
+  const P = simPlayer(a); P.invuln = 0; P.hurt(1000, P.x + 5, P.y);
+  await until(() => a.state.phase === 'results', 'results');
+  // During the results: that map replaces the one coming.
+  const run = room.state.run;
+  say('map factory/dairy');
+  await until(() => a.state.run === run + 1, 'the map, now');
+  assert.equal(a.state.map.id, 'dairy');
+  assert.equal(a.state.phase, 'lobby');
+  assert.deepEqual(errors, []);
+});
+
+test('map or restart while someone still loads the old map: their old ready is ignored, the new one counts', async () => {
+  await enter('Here');
+  const b = await join(URL, { name: 'Slow' });
+  clients.push(b);
+  await until(() => room.seats.has(b.sessionId), 'the seat');
+  const old = b.state.run;
+  say('map factory/dairy');
+  say('restart');
+  await until(() => b.state.run === old + 2, 'two runs on');
+  b.send('ready', old);
+  b.send('ready', old + 1);
+  await sleep(100);
+  assert.ok(!b.state.players.has(b.sessionId), 'not in on an old run');
+  b.send('ready', b.state.run);
+  await until(() => b.state.players.has(b.sessionId), 'in on the new one');
+  assert.deepEqual(errors, []);
+});
+
+test('restart: the same map (a random island keeps its seed) from the lobby, mid-run or during the results', async () => {
+  room.config = { ...CONFIG, maps: ['island/random'] };
+  room.rotation = 0;
+  room.loadMap();
+  const a = await enter('Here');
+  const seed = a.state.map.seed;
+  assert.ok(seed);
+  await startRun();
+  room.sim.startWave(2);
+  const run = room.state.run;
+  assert.equal(say('restart'), 'island/random from the start: its lobby');
+  await until(() => a.state.run === run + 1, 'the new run');
+  assert.equal(a.state.map.seed, seed);
+  assert.equal(a.state.phase, 'lobby');
+  assert.equal(room.sim.wave, 0);
+  a.send('ready', a.state.run);
+  await until(() => a.state.players.size === 1, 'in');
+  await startRun();
+  const P = simPlayer(a); P.invuln = 0; P.hurt(1000, P.x + 5, P.y);
+  await until(() => a.state.phase === 'results', 'results');
+  say('restart');
+  await until(() => a.state.run === run + 2, 'restarted');
+  assert.equal(a.state.phase, 'lobby');
+  assert.equal(a.state.map.seed, seed, 'not the next random island');
+  assert.deepEqual(errors, []);
+});
+
+test('pvp: map change and restart mid-round: no winner, no results, a fresh PvP lobby; kicking the last one in the round', async () => {
+  pvpRoom();
+  const a = await enter('A');
+  const b = await enter('B');
+  await startRun();
+  room.sim.players.get(seatOf(a).id).kills = 3;
+  const ticks = collect(a, 'tick');
+  const run = room.state.run;
+  say('map factory/dairy');
+  await until(() => a.state.run === run + 1, 'the new round');
+  assert.equal(a.state.mode, 'pvp');
+  assert.equal(a.state.phase, 'lobby');
+  assert.equal(a.state.winner, 0);
+  assert.ok(!ticks.some(([, ev]) => ev.some((e) => e.type === 'over')), 'no "over"');
+  for (const c of [a, b]) c.send('ready', c.state.run);
+  await until(() => a.state.players.size === 2, 'both in');
+  assert.ok([a, b].every((c) => a.state.players.get(c.sessionId).kills === 0));
+  await startRun();
+  say('restart');
+  await until(() => a.state.run === run + 2 && a.state.phase === 'lobby', 'restarted');
+  assert.equal(room.sim.state, 'pvp');
+  // Mid-round, the last one in it kicked while another still loads: a fresh round (onLeave).
+  for (const c of [a]) c.send('ready', c.state.run);
+  await until(() => a.state.players.size === 1, 'A in');
+  await startRun();
+  const r = room.state.run;
+  say('kick A');
+  await until(() => room.state.run === r + 1, 'a fresh round for B');
+  assert.equal(room.state.phase, 'lobby');
+  assert.deepEqual(errors, []);
+});
+
+test('server.json: name and motd reach the browser; banAddresses and trustProxy are checked; bans.json sits next to it', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(`${tmpdir()}/naiwa-cfg-`);
+  const write = (o) => { writeFileSync(`${dir}/s.json`, JSON.stringify(o)); return `${dir}/s.json`; };
+  assert.equal(readConfig(write({})).bansFile, `${dir}/bans.json`);
+  assert.throws(() => readConfig(write({ banAddresses: 'yes' })), /"banAddresses" must be true or false/);
+  assert.throws(() => readConfig(write({ trustProxy: ['localhost'] })), /"trustProxy" must be a list of addresses/);
+  assert.throws(() => readConfig(write({ motd: 'x'.repeat(201) })), /"motd" must be text of at most 200/);
+  assert.throws(() => readConfig(write({ name: 5 })), /"name" must be text/);
+  assert.equal(DEFAULTS.adminPassword, undefined, 'no admin password: the console is the owner\'s');
+  // The running room's state (CONFIG's, from server.example.json).
+  const a = await enter('Reader');
+  assert.equal(a.state.name, 'Naiwa server');
+  assert.equal(a.state.motd, '');
+  room.state.motd = 'Be nice to the eggs';
+  await until(() => a.state.motd === 'Be nice to the eggs', 'the motd');
 });

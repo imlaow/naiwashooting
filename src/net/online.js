@@ -2,12 +2,12 @@
 // ONLINE panel opens (main.js imports it dynamically), so single-player downloads none of it.
 import { Client } from '@colyseus/sdk';
 import { ColorMatrixFilter } from 'pixi.js';
-import { PROTOCOL, RECONNECT_SECONDS } from '../sim/protocol.js';
+import { PROTOCOL, RECONNECT_SECONDS, KICKED, BANNED } from '../sim/protocol.js';
 export { NetSim } from './netsim.js';
-export { PROTOCOL, RECONNECT_SECONDS };
+export { PROTOCOL, RECONNECT_SECONDS, KICKED, BANNED };
 
 // A refused or failed join. `reason`: 'version' (`server` has the server's protocol),
-// 'full', 'password', 'origin', 'unreachable' or 'error' (`message` says more).
+// 'full', 'password', 'origin', 'banned', 'unreachable' or 'error' (`message` says more).
 export class JoinError extends Error {
   constructor(reason, message, server) {
     super(message || reason);
@@ -22,7 +22,7 @@ export function joinError(err) {
   const m = /^version:(\d+)$/.exec(msg);
   if (m) return new JoinError('version', msg, Number(m[1]));
   if (msg === 'full' || /already full|no rooms found/.test(msg)) return new JoinError('full', msg);
-  if (msg === 'password' || msg === 'origin') return new JoinError(msg, msg);
+  if (msg === 'password' || msg === 'origin' || msg === 'banned') return new JoinError(msg, msg);
   // fetch() failing outright: nothing answered at that address.
   if (err instanceof TypeError || /fetch|ECONNREFUSED|network/i.test(msg)) return new JoinError('unreachable', msg);
   return new JoinError('error', msg);
@@ -43,10 +43,12 @@ export const loadDebug = () => import('@colyseus/sdk/debug');
 // Joins the room at `url` (ws:// or wss://) and resolves once its first state has arrived.
 // A dropped connection reconnects by itself (the SDK, with the room's token) for up to
 // RECONNECT_SECONDS: room.onDrop, then room.onReconnect or, once it gives up, room.onLeave.
-export async function join(url, { name, password }) {
+// Put out by the owner, room.onLeave gets KICKED or BANNED as its code, with no reconnecting.
+// `id`: the browser's id (src/online.js browserId), which bans go by.
+export async function join(url, { name, password, id }) {
   let room;
   try {
-    room = await new Client(url).join('naiwa', { protocol: PROTOCOL, name, password });
+    room = await new Client(url).join('naiwa', { protocol: PROTOCOL, name, password, id });
   } catch (err) {
     throw joinError(err);
   }

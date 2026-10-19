@@ -11,3 +11,5 @@ Screenshot_20261012-191423.png
 egg.png
 server/node_modules
 server/server.json
+server/bans.json
+server/bans.json.tmp

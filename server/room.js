@@ -40,16 +40,25 @@
 // in the sim, standing still, and can be downed. The browser's SDK reconnects with its token,
 // which only works for that held seat, so the version, password and origin checks of the first
 // join still stand.
+//
+// The owner's console (server/console.js) kicks, bans, says, changes the map and restarts the run
+// through kick(), ban(), say(), changeMap() and restart() below, between two steps; each says
+// which states it can find the room and the player in.
 import { Room, ServerError, ErrorCode, CloseCode, Protocol } from '@colyseus/core';
-import { makeChoice, buildMap, RANDOM_ID } from '../src/sim/maps.js';
+import { makeChoice, buildMap, RANDOM_ID, THEMES } from '../src/sim/maps.js';
 import { Sim, STEP } from '../src/sim/sim.js';
 import { idleCommand } from '../src/sim/entities.js';
-import { PROTOCOL, RECONNECT_SECONDS, CHAT_MAX, CHAT_GAP, packBullet, packEvents, cleanText, sanitizeCommand, simCommand } from '../src/sim/protocol.js';
+import { PROTOCOL, RECONNECT_SECONDS, CHAT_MAX, CHAT_GAP, KICKED, BANNED, packBullet, packEvents, cleanText, sanitizeCommand, simCommand } from '../src/sim/protocol.js';
+import { Bans, isLoopback } from './bans.js';
 import { NaiwaState, PlayerState, EnemyState, PickupState, PropState, Slot, Command } from './schema.js';
 
 export const LOBBY_SECONDS = 10;
 export const RESULTS_SECONDS = 10;
 export const NAME_MAX = 16;
+export const SERVER_NAME_MAX = 32;
+export const MOTD_MAX = 200;
+// Players who left, kept for the console's ban (someone who quit before the owner typed it).
+export const RECENT_MAX = 10;
 export const STALE_STEPS = 60; // 1 s: a slow phone still sends several commands a second
 // Commands waiting beyond BACKLOG_STEPS are folded into the step's command at once; a smaller
 // backlog, more than CUSHION, that stands for DRAIN_STEPS loses one the same way.
@@ -69,7 +78,7 @@ const JUMP = 150;
 const MAY_RECONNECT = new Set([CloseCode.GOING_AWAY, CloseCode.NO_STATUS_RECEIVED, CloseCode.ABNORMAL_CLOSURE, CloseCode.MAY_TRY_RECONNECT]);
 
 // Why a join was refused; the browser turns these into messages (src/net/online.js).
-export const REFUSED = { version: 'version', full: 'full', password: 'password', origin: 'origin' };
+export const REFUSED = { version: 'version', full: 'full', password: 'password', origin: 'origin', banned: 'banned' };
 
 // Whether a browser from `origin` may play: an empty list or '*' lets any site in. Used by the
 // room's join check and the server's WebSocket upgrade alike.
@@ -77,6 +86,18 @@ export const originAllowed = (list, origin) => !list?.length || list.includes('*
 
 // A display name: printable, trimmed, at most NAME_MAX characters.
 export const cleanName = (name) => cleanText(name, NAME_MAX) || 'Naiwa';
+
+// The random id a browser keeps (src/online.js browserId), or '' for anything else.
+export const cleanId = (id) => (typeof id === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(id) ? id : '');
+
+// Why "theme/id" isn't a map a server can run (null: it is), with every map listed.
+export function mapError(entry) {
+  const [theme, id] = String(entry).split('/');
+  const th = THEMES.find((x) => x.id === theme);
+  if (th && (th.variants.some((v) => v.id === id) || (th.random && id === RANDOM_ID))) return null;
+  const all = THEMES.flatMap((x) => [...x.variants.map((v) => `${x.id}/${v.id}`), ...(x.random ? [`${x.id}/${RANDOM_ID}`] : [])]);
+  return `unknown map "${entry}". Maps: ${all.join(', ')}`;
+}
 
 // "island/cove", "factory/dairy", "island/random" (a new seed each time) → a map choice.
 export function parseMap(entry) {
@@ -112,7 +133,7 @@ export class NaiwaRoom extends Room {
     if (!room) throw new ServerError(ErrorCode.MATCHMAKE_UNHANDLED, 'not ready');
     const why = room.refuse(options ?? {}, context?.headers?.get('origin'));
     if (why) throw new ServerError(ErrorCode.AUTH_FAILED, why);
-    return { name: cleanName(options?.name) };
+    return { name: cleanName(options?.name), id: cleanId(options?.id) };
   }
 
   // options.config: the server.json settings (see server/index.js).
@@ -124,6 +145,13 @@ export class NaiwaRoom extends Room {
     this.reconnectSeconds = RECONNECT_SECONDS;
     this.setState(new NaiwaState());
     this.state.mode = config.mode;
+    this.state.name = cleanText(config.name, SERVER_NAME_MAX);
+    this.state.motd = cleanText(config.motd, MOTD_MAX);
+    // config.bansFile: bans.json next to server.json (none: kept in memory, as in the tests).
+    this.bans = new Bans(config.bansFile ?? null);
+    this.recent = [];
+    // Numbers players by joining, for the console (`kick 3`): never reused while the server runs.
+    this.joins = 0;
     this.inputs = this.defineInput(Command, { sanitize: sanitizeCommand, idle: holdLast, bufferMaxSize: 240 });
     // Before anyone joins: attaching decides the stamp the browsers send.
     this.rewind = this.allowRewindState({ maxRewindMs: MAX_REWIND_MS });
@@ -177,15 +205,20 @@ export class NaiwaRoom extends Room {
     if (options.protocol !== PROTOCOL) return `${REFUSED.version}:${PROTOCOL}`;
     if (origin && !originAllowed(cfg.allowedOrigins, origin)) return REFUSED.origin;
     if (cfg.password && options.password !== cfg.password) return REFUSED.password;
+    // By the browser's id here; by address in onJoin, the first place the socket's address is known.
+    if (this.bans.find({ id: cleanId(options.id) })) return REFUSED.banned;
     // A seat held for a dropped player counts too.
     if (this.hasReachedMaxClients()) return REFUSED.full;
     return null;
   }
 
   // ---------- Maps and runs ----------
-  loadMap() {
+  // `entry` ("theme/id"): a map outside the rotation (the console's map command); the rotation
+  // then goes on from where it was.
+  loadMap(entry) {
     const maps = this.config.maps;
-    const choice = parseMap(maps[this.rotation % maps.length]);
+    this.offRotation = entry != null;
+    const choice = parseMap(entry ?? maps[this.rotation % maps.length]);
     const { world, layout } = buildMap(choice);
     this.world = world; this.layout = layout;
     const m = this.state.map;
@@ -234,12 +267,19 @@ export class NaiwaRoom extends Room {
     this.state.players.set(sid, ps);
   }
 
+  // `client.ref.address` is who the socket is from (server/index.js, NaiwaTransport). A refusal
+  // thrown here reaches the browser's join() as its error, as onAuth's do; Colyseus then runs
+  // onDrop and onLeave for the client, which find no seat.
   onJoin(client, options, auth) {
+    const ip = client.ref?.address ?? null;
+    if (this.config.banAddresses !== false && ip && this.bans.find({ ip })) throw new ServerError(ErrorCode.AUTH_FAILED, REFUSED.banned);
     // Colours by join order: the lowest one nobody here has.
     const taken = new Set([...this.seats.values()].map((s) => s.colour));
     let colour = 0;
     while (taken.has(colour)) colour++;
-    const seat = { id: 0, name: auth?.name ?? cleanName(options?.name), colour, cmd: null, ping: 0, chatAt: -Infinity, dropped: false };
+    // no: the console's number for them; bid: their browser's id; held: the reconnection the
+    // room waits for while they are dropped; out: KICKED or BANNED once the console took them out.
+    const seat = { id: 0, no: ++this.joins, name: auth?.name ?? cleanName(options?.name), bid: auth?.id ?? '', ip, colour, cmd: null, ping: 0, chatAt: -Infinity, dropped: false, held: null, out: 0 };
     this.seats.set(client.sessionId, seat);
     if (this.stats) this.countBytes(client);
     this.log(`${seat.name} joined (${this.seats.size}/${this.maxClients})`);
@@ -264,7 +304,8 @@ export class NaiwaRoom extends Room {
     seat.dropped = true;
     this.log(`${seat.name} lost the connection; holding the seat for ${this.reconnectSeconds} s`);
     this.broadcast('chat', { k: 'drop', n: seat.name, c: seat.colour }, { except: client });
-    this.allowReconnection(client, this.reconnectSeconds).catch(() => {});
+    seat.held = this.allowReconnection(client, this.reconnectSeconds);
+    seat.held.catch(() => {});
   }
 
   // Keep it synchronous: the server attaches the reconnected client's message listener only after
@@ -275,6 +316,9 @@ export class NaiwaRoom extends Room {
     const seat = this.seats.get(client.sessionId);
     if (!seat) return;
     seat.dropped = false;
+    seat.held = null;
+    // From wherever they are now (Wi-Fi to mobile data); a ban by address checks the next join.
+    seat.ip = client.ref?.address ?? seat.ip;
     if (this.stats) this.countBytes(client);
     this.log(`${seat.name} reconnected`);
     this.broadcast('chat', { k: 'back', n: seat.name, c: seat.colour }, { except: client });
@@ -288,8 +332,11 @@ export class NaiwaRoom extends Room {
     if (seat.id) this.sim.removePlayer(seat.id);
     this.state.players.delete(client.sessionId);
     this.stats?.bytes.delete(client.sessionId);
-    this.log(`${seat.name} left${seat.dropped ? ' (did not come back)' : ''} (${this.seats.size}/${this.maxClients})`);
-    this.broadcast('chat', { k: 'leave', n: seat.name, c: seat.colour });
+    this.recent.unshift({ no: seat.no, name: seat.name, bid: seat.bid, ip: seat.ip, at: Date.now() });
+    this.recent.length = Math.min(this.recent.length, RECENT_MAX);
+    const how = seat.out === BANNED ? 'was banned' : seat.out === KICKED ? 'was kicked' : `left${seat.dropped ? ' (did not come back)' : ''}`;
+    this.log(`${seat.name} ${how} (${this.seats.size}/${this.maxClients})`);
+    this.broadcast('chat', { k: seat.out === BANNED ? 'ban' : seat.out === KICKED ? 'kick' : 'leave', n: seat.name, c: seat.colour });
     // A PvP round nobody is in any more, with the players left still loading it: a fresh one for
     // them in the lobby, rather than its clock running out on nobody into a draw. (Co-op ends
     // such a run when the first of them comes in, see Sim.addPlayer.)
@@ -304,6 +351,80 @@ export class NaiwaRoom extends Room {
     if (!seat || !line || now - seat.chatAt < CHAT_GAP) return;
     seat.chatAt = now;
     this.broadcast('chat', { n: seat.name, c: seat.colour, t: line });
+  }
+
+  // ---------- The owner's console (server/console.js) ----------
+  // These run between two steps (the console reads its line in Node's event loop), so never
+  // halfway through one.
+
+  // Takes a seat out for good, at once, with `code` (protocol.js KICKED or BANNED) as its close
+  // code: the browser shows why and doesn't try to reconnect. onLeave then does what a leave
+  // does (the sim player goes, the chat says "was kicked"), in whatever state the seat is in:
+  // - still loading the map (no sim player yet, seat.id 0): only the seat goes; its browser
+  //   finishes painting the island behind the "kicked" panel and stops there;
+  // - in the sim (alive, down, being revived, reviving someone, dead in PvP): Sim.removePlayer, as
+  //   for a leave: the last co-op player up gone ends the run into the results, and a PvP round
+  //   left with only players still loading it starts afresh (onLeave);
+  // - dropped, its seat held (seat.held): there is no socket to close, and the browser's token
+  //   would still bring it back (a reconnect never passes onAuth), so the held reconnection is
+  //   rejected, which makes Colyseus run onLeave now instead of when the window runs out;
+  // - dropped and just reconnecting (the reconnection already resolved, onReconnect not run
+  //   yet): the new socket is in this.clients, and kickClient closes it.
+  // Returns false when there is no such seat.
+  kick(sid, code = KICKED) {
+    const seat = this.seats.get(sid);
+    if (!seat) return false;
+    seat.out = code;
+    seat.held?.reject(false);
+    this.kickClient(sid, code, code === BANNED ? 'banned' : 'kicked');
+    return true;
+  }
+
+  // Bans `who` ({ name, bid, ip }: a seat, or one of this.recent who already left) by browser
+  // id and, unless server.json's "banAddresses" is false, by address. This machine's address
+  // (loopback: the owner's own browser, or every player when the tunnel's forwarded address is
+  // missing) is never banned; that ban goes by id alone. A seat of theirs here (`sid`) is kicked
+  // with BANNED, in any of kick's states; others from the same address stay until they leave
+  // and are refused when they come back. Returns the ban, or null when there is nothing to ban
+  // them by (no id and no usable address).
+  ban(who, sid = null) {
+    const ip = this.config.banAddresses !== false && who.ip && !isLoopback(who.ip) ? who.ip : null;
+    if (!who.bid && !ip) return null;
+    const entry = this.bans.add({ name: who.name, id: who.bid, ip });
+    if (sid) this.kick(sid, BANNED);
+    return entry;
+  }
+
+  // A line from the server to everyone, in any phase (browsers still loading get it too).
+  say(text) {
+    const t = cleanText(text, CHAT_MAX * 2);
+    if (t) this.broadcast('chat', { k: 'say', t });
+    return t;
+  }
+
+  // Another map now: "next" (the rotation's next one), a map in the rotation (the rotation goes
+  // on from it) or any other map (the rotation goes on from where it was once it ends). Whatever
+  // was happening is dropped for a fresh lobby on it (loadMap → newRun): a co-op run mid-wave,
+  // a PvP round mid-fight (no winner, no results), the results' countdown (that map replaces
+  // the one coming). Seats keep their place and come back in once their browser has loaded it:
+  // those still loading the old map have their 'ready' for the old run ignored and load again
+  // (src/main.js enterRun), a dropped seat finds the new map when it reconnects. Building an
+  // island holds up the steps for about 0.15 s, as at the end of every map. Returns null, or why
+  // it can't.
+  changeMap(entry) {
+    const maps = this.config.maps;
+    if (entry === 'next') { this.rotation = this.offRotation ? this.rotation : this.rotation + 1; this.loadMap(); return null; }
+    const why = mapError(entry);
+    if (why) return why;
+    const i = maps.indexOf(entry);
+    if (i >= 0) { this.rotation = i; this.loadMap(); } else this.loadMap(entry);
+    return null;
+  }
+
+  // The same map from its start: a fresh sim and the lobby (newRun), in any phase, as changeMap
+  // drops whatever was happening. A random island keeps its seed (the world isn't rebuilt).
+  restart() {
+    this.newRun();
   }
 
   // ---------- The fixed step ----------
@@ -356,7 +477,7 @@ export class NaiwaRoom extends Room {
       sim.step(STEP, cmds);
       if (S.phase === 'results') {
         S.phaseT = nonNeg(S.phaseT - STEP);
-        if (S.phaseT <= 0) { this.rotation++; this.loadMap(); this.record(t0); return; }
+        if (S.phaseT <= 0) { if (!this.offRotation) this.rotation++; this.loadMap(); this.record(t0); return; }
       }
     }
     const events = sim.takeEvents();

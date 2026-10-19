@@ -11,15 +11,23 @@
 //                        player's 'shot' also carries `seq`, the input it came from
 //                born    new bullets, each packBullet(b); clients fly them in a straight line
 //                gone    ids of bullets that hit something or ran out of range
-//   chat       { n: name, c: colour, t: text } a player's line, or { k: 'join' | 'leave' |
-//              'drop' | 'back', n, c } someone joining, leaving, dropping out or reconnecting
+//   chat       { n: name, c: colour, t: text } a player's line, { k: 'join' | 'leave' | 'drop' |
+//              'back' | 'kick' | 'ban', n, c } someone joining, leaving, dropping out,
+//              reconnecting or being put out by the owner, or { k: 'say', t } a line the owner
+//              typed into the server's console
 //   pong       t: the answer to a client's 'ping', with the clock it sent
 // Clients send commands (server/schema.js Command) and the messages 'ready' (run number),
 // 'chat' (text) and 'ping' ([their clock, their last measured round trip in ms] — the round
-// trip goes on the scoreboard).
+// trip goes on the scoreboard). They send their browser's id (src/online.js browserId) with the
+// join, which a ban goes by.
 import { WEAPON_ORDER } from './entities.js';
 
-export const PROTOCOL = 7;
+export const PROTOCOL = 8;
+
+// Close codes the room puts a player out with (server/console.js kick and ban): the browser
+// says why, and doesn't try to reconnect (the SDK only does after 1001, 1005, 1006 and 4010).
+export const KICKED = 4100;
+export const BANNED = 4101;
 
 // How long a dropped player's seat is held, and the browser keeps reconnecting, in seconds.
 export const RECONNECT_SECONDS = 60;

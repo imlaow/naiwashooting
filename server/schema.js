@@ -88,6 +88,9 @@ export const NaiwaState = schema({
   phaseT: timer(30, 16),
   run: t.uint16().default(0),
   mode: t.string().default('coop'),
+  // server.json's name and motd (the message of the day), for the loading screen and the menu.
+  name: t.string(),
+  motd: t.string(),
   map: MapChoice,
   // The sim: its state ('intro', 'fight', 'break', 'dead'; PvP 'pvp', 'over') and timer, team
   // score and kills, enemies still queued for the wave, King Naiwa's enemy id (0: none).

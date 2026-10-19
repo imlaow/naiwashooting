@@ -601,3 +601,10 @@ body.touch .chat-line { align-self: flex-end; font-size: 12px; }
 .scoreboard tr.me td { background: rgba(255, 255, 255, 0.1); }
 .scoreboard tr.out td { opacity: 0.5; }
 body.compact .scoreboard table { font-size: 14px; }
+
+/* The server's name and message of the day (loading screen, in-game menu), online only. */
+.server-info { display: none; margin: -6px auto 14px; max-width: 420px; line-height: 1.4; }
+body.online .server-info { display: block; }
+.server-info .sv-name { display: block; font-size: 17px; }
+.server-info .sv-motd { display: block; font-weight: 600; opacity: 0.85; overflow-wrap: anywhere; }
+.server-info .sv-motd:empty { display: none; }
