@@ -16,6 +16,7 @@ import { defineServer, defineRoom, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { NaiwaRoom, originAllowed, mapError, SERVER_NAME_MAX, MOTD_MAX } from './room.js';
 import { clientAddress } from './bans.js';
+import { BANNED } from '../src/sim/protocol.js';
 import { openConsole } from './console.js';
 
 const here = (f) => fileURLToPath(new URL(f, import.meta.url));
@@ -59,10 +60,16 @@ export function readConfig(path) {
 // address taken from the headers, which any client can write, so it is read here, where the
 // socket is (onConnection runs for every join and reconnect). ws-transport 0.18.4 registers
 // onConnection unbound (`this` is the ws server there), so the config comes from the closure.
+// A reconnect with the token of a held seat the console kicked or banned is closed with that
+// code (NaiwaRoom.kick): Colyseus would close it with FAILED_TO_RECONNECT, which the browser
+// shows as a lost connection.
 function transport(config, options) {
   class NaiwaTransport extends WebSocketTransport {
     onConnection(rawClient, req, upgrade) {
       rawClient.address = clientAddress(req.socket.remoteAddress, req.headers['x-forwarded-for'], config.trustProxy);
+      const token = (upgrade?.url ?? new URL(`ws://server${req.url ?? '/'}`)).searchParams.get('reconnectionToken');
+      const out = token && NaiwaRoom.current?.outTokens.get(token);
+      if (out) return rawClient.close(out, out === BANNED ? 'banned' : 'kicked');
       return super.onConnection(rawClient, req, upgrade);
     }
   }

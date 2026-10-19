@@ -79,8 +79,8 @@ function ban(room, q) {
   if (!q) return 'ban whom? A number from "players", a name or an address';
   if (isIP(q)) {
     if (room.config.banAddresses === false) return 'address bans are off in server.json ("banAddresses": false)';
-    const entry = room.ban({ name: '', bid: '', ip: q });
-    if (!entry) return `${q} is this machine: it can't be banned by address`;
+    const { entry } = room.ban({ name: '', bid: '', ip: q }) ?? {};
+    if (!entry) return `${q} is this machine or a proxy in "trustProxy": it can't be banned by address`;
     // As Minecraft's ban-ip: everyone here from it goes too.
     const out = [...room.seats].filter(([, s]) => addressKey(s.ip) === entry.ip);
     for (const [sid] of out) room.kick(sid, BANNED);
@@ -89,10 +89,13 @@ function ban(room, q) {
   const t = findPlayer(room, q, { left: true });
   if (t.error) return t.error;
   const who = t.seat ?? t.gone;
-  const entry = room.ban(who, t.sid ?? null);
-  if (!entry) return `${who.name} has no browser id and an address that can't be banned: kick them instead`;
+  const done = room.ban(who, t.sid ?? null);
+  if (!done) return `${who.name} has no browser id and an address that can't be banned: kick them instead`;
+  const { entry, out } = done;
   const by = [entry.id && 'browser', entry.ip && `address ${entry.ip}`].filter(Boolean).join(' and ');
-  return `banned ${who.name} by ${by}${t.sid ? '' : ' (they had already left)'}`;
+  // Their other seats (back since they left, another tab): out too.
+  const also = out.filter((s) => s !== t.seat);
+  return `banned ${who.name} by ${by}${also.length ? ` (and out: ${also.map((s) => `#${s.no} ${s.name}`).join(', ')})` : t.sid ? '' : ' (they had already left)'}`;
 }
 
 function unban(room, q) {

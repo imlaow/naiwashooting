@@ -1031,7 +1031,7 @@ Browsers can't send any of these commands.
 | --- | --- |
 | `players` (or `list`) | who is here with their number (`#3`, by join order, never reused while the server runs), loading / playing / away, address and ping, plus the last 10 who left |
 | `kick <player>` | out at once; they may join again |
-| `ban <player\|address>` | a player: out, and refused by browser id and address. An address: everyone here from it goes too, as with Minecraft's `ban-ip`. A player who already left (from the `players` list) can be banned too |
+| `ban <player\|address>` | a player: out, with every other seat that has their browser id (back since, another tab), and refused by browser id and address. An address: everyone here from it goes too, as with Minecraft's `ban-ip`. A player who already left (from the `players` list) can be banned too |
 | `bans`, `unban <n\|name\|address>` | the list (`bans.json`), and lifting one |
 | `say <text>` | a line from the server to everyone, `[Server]: …` in the chat |
 | `map [theme/id\|next]` | another map now (no argument: this one and the rotation) |
@@ -1094,9 +1094,10 @@ the id or the address matches.
     seat.
 - **Address rules.** IPv6 addresses are banned by their /64, since devices change the rest by
   themselves. An IPv4 address that arrives as `::ffff:a.b.c.d` counts as `a.b.c.d`. This machine's
-  address (loopback) is never banned, because that is the owner's own browser, or everyone when a
-  proxy isn't in `trustProxy`; such a ban goes by id alone. `"banAddresses": false` turns address
-  bans off (then they are neither made nor checked).
+  address (loopback, and anything in `::1`'s /64, which its ban would cover) and the addresses in
+  `trustProxy` are never banned (`bans.js bannable`), because that is the owner's own browser, or
+  everyone when a proxy forwarded nothing or isn't in `trustProxy`; such a ban goes by id alone.
+  `"banAddresses": false` turns address bans off (then they are neither made nor checked).
 - **What it can't stop:**
   - a new address: mobile data, a VPN, a router restart;
   - a new id: another browser, a private window, cleared site data;
@@ -1106,7 +1107,9 @@ the id or the address matches.
     the proxy, so its address must go into `trustProxy` (7b's hosting docs say how).
   - It's a speed bump, as Minecraft's IP bans are. A server `password` is the real gate.
 - **`bans.json`** sits next to `server.json` (`server/bans.json` on the defaults; gitignored). It is
-  read at start and rewritten whole, to a temporary file then renamed, on every ban and unban. A file
+  read at start and rewritten whole, to a temporary file then renamed, on every ban and unban. A
+  ban or unban whose write fails changes nothing (the console says "that failed: …", and nobody is
+  kicked), so the bans in force are always the ones in the file. A file
   someone broke by hand stops the server with the reason, rather than being emptied. Editing it by
   hand takes effect at the next start.
 
@@ -1114,6 +1117,10 @@ the id or the address matches.
 
 - The room closes their socket with `KICKED` (4100) or `BANNED` (4101), from `src/sim/protocol.js`.
   The SDK only reconnects after 1001, 1005, 1006 and 4010, so these go straight to `room.onLeave(code)`.
+- A dropped player whose held seat was kicked or banned has no socket to close: their browser's
+  next reconnect with its old token is closed with the code instead (`NaiwaRoom.outTokens`, the
+  last 10, checked in `index.js NaiwaTransport` before Colyseus, which would close it with
+  `FAILED_TO_RECONNECT` and the browser would say "connection lost").
 - The browser's "connection lost" panel then says "Kicked" / "Banned" with a line on it. A later join
   is refused with "You are banned from this server".
 - Everyone else's chat says "… was kicked" / "… was banned" instead of "left".
@@ -1126,10 +1133,10 @@ between two steps, never during one.
 | --- | --- |
 | kick / ban while the player is still loading the map (no sim player) | `kickClient` → `onDrop` (not a reconnect code: nothing held) → `onLeave`, which only removes the seat. The browser finishes painting behind the panel and stops there (`enterRun` finds no session). |
 | kick / ban of a player in the sim (alive, down, being revived, reviving, dead in PvP) | as a leave: `Sim.removePlayer` clears revives and targets. The last co-op player up gone ends the run into the results. A PvP round left with only loading players starts afresh. |
-| kick / ban of a dropped player whose seat is held | There is no socket, and their token would still get them back (a reconnect never passes `onAuth`). So `seat.held`, the `allowReconnection` deferred, is rejected, and Colyseus runs `onLeave` now rather than after `RECONNECT_SECONDS`. The old token is refused. |
+| kick / ban of a dropped player whose seat is held | There is no socket, and their token would still get them back (a reconnect never passes `onAuth`). So `seat.held`, the `allowReconnection` deferred, is rejected, and Colyseus runs `onLeave` now rather than after `RECONNECT_SECONDS`. The old token is refused, with `KICKED` / `BANNED` as the close code. |
 | kick / ban just as they reconnect (resolved, `onReconnect` not run yet) | The new socket is in `this.clients`, and `kickClient` closes it. |
-| ban of someone who already left | The last 10 who left are kept (`this.recent`) with name, id and address. |
-| `map` / `restart` in the lobby, mid co-op run, mid PvP round, or during the results | `loadMap` / `newRun` drop whatever was happening for a fresh lobby. A PvP round dropped this way has no winner and no `over`. A map given during the results replaces the one coming. |
+| ban of someone who already left | The last 10 who left are kept (`this.recent`) with name, id and address. If they came back since (a new seat with the same browser id), that seat goes. |
+| `map` / `restart` in the lobby, mid co-op run, mid PvP round, or during the results | `loadMap` / `newRun` drop whatever was happening for a fresh lobby. A PvP round dropped this way has no winner and no `over`. A map given during the results replaces the one coming: the rotation moves past the map that just ended, so the one after it follows. |
 | `map` / `restart` while someone still loads the old map | Their `ready` for an old run is ignored, as before. The browser loads the new map at once: `enterRun` now loops while `state.run` moved on during a load. Before, a lobby nobody was in yet sent no state change, which would have left it on the loading screen. |
 | `map` off the rotation | The rotation goes on from where it was once that map ends (`offRotation`); `map next` likewise. A map in the rotation moves the rotation to it. |
 | `restart` on a random island | the same seed (the world isn't rebuilt) |
@@ -1142,7 +1149,7 @@ servers are labelled with the name they had last time.
 
 **Checked:**
 
-- `npm run test:server`: 41 tests, 17 new.
+- `npm run test:server`: 46 tests, 22 new (5 of them after a review of 7a).
   - `room.test.js` calls the console's `command()` on the running room:
     - `help`, `players`, `say`, unknown commands;
     - kick while playing, and by name: refused when no one or two players match;
@@ -1160,7 +1167,11 @@ servers are labelled with the name they had last time.
     - `map` / `restart` while someone still loads;
     - `restart` with a random seed;
     - PvP `map` / `restart` mid-round (no `over`), and a kick of the last player in the round;
-    - the new `server.json` keys.
+    - the new `server.json` keys;
+    - after the review: a held seat kicked or banned closes the browser's next try with the code; a
+      ban takes every seat with that browser id; `::1`'s /64 and `trustProxy` addresses aren't
+      banned; a ban or unban `bans.json` can't take changes nothing; a map off the rotation picked
+      during a rotation map's results is followed by the next one.
   - `console.test.js` starts real servers:
     - commands from a pipe, and the server running on after it ends;
     - stdin `/dev/null`, and stdin closed;

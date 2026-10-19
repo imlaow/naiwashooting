@@ -832,6 +832,22 @@ test('kick and ban of a dropped player whose seat is held: the seat goes now, an
   assert.deepEqual(errors, []);
 });
 
+test('a dropped player banned or kicked while their seat is held hears why when their browser tries again', async () => {
+  await enter('Here');
+  for (const [cmd, code] of [['ban', BANNED], ['kick', KICKED]]) {
+    const b = await enterFrom(`203.0.113.${6 + code % 10}`, `Away${code}`, ID(20 + code % 10));
+    // The SDK's first try after the ban, not before it.
+    b.reconnection.minDelay = 500;
+    const left = leftWith(b);
+    drop(b);
+    await until(() => seatOf(b)?.dropped, 'held');
+    say(`${cmd} ${seatOf(b).no}`);
+    assert.equal(await left, code, 'not FAILED_TO_RECONNECT ("connection lost")');
+  }
+  assert.equal(room.seats.size, 1);
+  assert.deepEqual(errors, []);
+});
+
 test('a player kicked as they reconnect stays out', async () => {
   await enter('Here');
   const b = await enter('Back');
@@ -876,6 +892,56 @@ test('ban: by browser id and address; this machine never by address; "banAddress
   // An address banned earlier doesn't keep anyone out while they are off.
   await enterFrom('198.51.100.20', 'BackWhileOff', ID(7), false);
   room.config = { ...CONFIG };
+  assert.deepEqual(errors, []);
+});
+
+test('ban of someone who left and came back, or has two tabs: every seat with their browser id goes', async () => {
+  const a = await enterFrom('203.0.113.80', 'Pest', ID(13));
+  const no = seatOf(a).no;
+  await a.leave();
+  await until(() => room.seats.size === 0, 'gone');
+  const b = await enterFrom('203.0.113.81', 'Pest', ID(13));
+  const c = await enterFrom('203.0.113.82', 'Tab2', ID(13));
+  const d = await enterFrom('203.0.113.83', 'Other', ID(14));
+  const gone = [leftWith(b), leftWith(c)];
+  assert.equal(say(`ban #${no}`), `banned Pest by browser and address 203.0.113.80 (and out: #${seatOf(b).no} Pest, #${seatOf(c).no} Tab2)`);
+  assert.deepEqual(await Promise.all(gone), [BANNED, BANNED]);
+  await until(() => room.seats.size === 1, 'only Other left');
+  assert.ok(room.seats.has(d.sessionId));
+  assert.deepEqual(errors, []);
+});
+
+test('ban: never an address that covers this machine or a trusted proxy', async () => {
+  for (const ip of ['::1', '::2', '0:0:0:0:0:0:0:1', '127.0.0.5', '::ffff:127.0.0.1']) assert.match(say(`ban ${ip}`), /this machine or a proxy/, ip);
+  room.config = { ...CONFIG, trustProxy: [...CONFIG.trustProxy, '172.18.0.2'] };
+  assert.match(say('ban 172.18.0.2'), /this machine or a proxy/);
+  assert.equal(room.bans.list.length, 0);
+  // A player who seems to come from the proxy (it forwarded nothing): by browser id only.
+  const a = await enterFrom('172.18.0.2', 'Behind', ID(15));
+  assert.equal(say('ban Behind'), 'banned Behind by browser');
+  await until(() => room.seats.size === 0, 'out');
+  assert.equal(room.bans.find({ ip: '172.18.0.2' }), null);
+  assert.equal(room.bans.find({ ip: '::1' }), null);
+  assert.deepEqual(errors, []);
+});
+
+test('a ban bans.json can\'t take changes nothing: no kick, nothing in force that a restart would lose', async () => {
+  const { mkdtempSync, mkdirSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(`${tmpdir()}/naiwa-bans-`);
+  room.bans = new Bans(`${dir}/bans.json`);
+  say('ban 203.0.113.90');
+  // The write fails (the console prints "that failed: …"): its temporary file's name is taken.
+  mkdirSync(`${dir}/bans.json.tmp`);
+  const a = await enterFrom('203.0.113.91', 'Pest', ID(16));
+  assert.throws(() => say('ban Pest'), /EISDIR/);
+  await sleep(200);
+  assert.ok(room.seats.has(a.sessionId), 'still in');
+  assert.equal(room.bans.find({ id: ID(16) }), null);
+  assert.throws(() => say('unban 1'), /EISDIR/);
+  assert.ok(room.bans.find({ ip: '203.0.113.90' }), 'still banned, as in the file');
+  rmSync(`${dir}/bans.json.tmp`, { recursive: true });
+  assert.equal(say('ban Pest'), 'banned Pest by browser and address 203.0.113.91');
   assert.deepEqual(errors, []);
 });
 
@@ -970,6 +1036,27 @@ test('map: in the lobby, mid co-op run, during the results; next; off the rotati
   await until(() => a.state.run === run + 1, 'the map, now');
   assert.equal(a.state.map.id, 'dairy');
   assert.equal(a.state.phase, 'lobby');
+  assert.deepEqual(errors, []);
+});
+
+test('map: a map outside the rotation picked during a rotation map\'s results is followed by the one after it', async () => {
+  const a = await enter('Here');
+  assert.equal(a.state.map.id, 'cove');
+  const results = async () => {
+    a.send('ready', a.state.run);
+    await until(() => room.sim.players.size === 1, 'in');
+    await startRun();
+    const P = simPlayer(a); P.invuln = 0; P.hurt(1000, P.x + 5, P.y);
+    await until(() => a.state.phase === 'results', 'results');
+  };
+  await results();
+  say('map island/twins');
+  await until(() => a.state.map.id === 'twins', 'twins');
+  await results();
+  const run = room.state.run;
+  room.state.phaseT = 0;
+  await until(() => a.state.run === run + 1, 'the results to end');
+  assert.equal(a.state.map.id, 'dairy', 'not cove again');
   assert.deepEqual(errors, []);
 });
 

@@ -1,8 +1,9 @@
 // Bans: who may not join, kept in bans.json next to server.json (server/console.js's ban and
 // unban change it). An entry is { name, id, ip, at }: `id` is the random id the player's browser
 // keeps (src/online.js browserId), `ip` the address they joined from (null when address bans are
-// off in server.json, "banAddresses": false, or the address is this machine). A join matching
-// either is refused (NaiwaRoom.refuse by id, NaiwaRoom.onJoin by address).
+// off in server.json, "banAddresses": false, or the address is this machine's or a trusted
+// proxy's, see bannable). A join matching either is refused (NaiwaRoom.refuse by id,
+// NaiwaRoom.onJoin by address).
 //
 // Neither is proof of who someone is: a new address (mobile data, a VPN, a router restart) or a
 // new id (another browser, a private window, cleared site data) gets them back in, and an address
@@ -29,6 +30,14 @@ export function addressKey(ip) {
 }
 
 export const isLoopback = (ip) => plain(ip) === '::1' || /^127\./.test(plain(ip));
+
+// Whether a ban by this address keeps out only whoever is behind it: not this machine (loopback,
+// or any address in ::1's /64, which its ban would cover) and not one of `trust` (server.json
+// "trustProxy"), which every player through that proxy appears from when it forwards nothing.
+export function bannable(ip, trust = []) {
+  const k = addressKey(ip);
+  return !!k && !isLoopback(ip) && k !== addressKey('::1') && !trust.some((t) => addressKey(t) === k);
+}
 
 // Who is on the other end of a connection. `peer` is the socket's address; only when it is one
 // of `trust` (server.json "trustProxy": the tunnel or proxy on this machine) is the forwarded
@@ -66,22 +75,23 @@ export class Bans {
 
   add({ name, id, ip }) {
     const entry = { name, id: id || '', ip: addressKey(ip), at: new Date().toISOString() };
-    this.list.push(entry);
-    this.save();
+    this.save([...this.list, entry]);
     return entry;
   }
 
   remove(entry) {
-    this.list = this.list.filter((b) => b !== entry);
-    this.save();
+    this.save(this.list.filter((b) => b !== entry));
   }
 
-  // Written whole to a new file that then replaces the old one, so a crash mid-write can't leave
-  // half a list.
-  save() {
-    if (!this.file) return;
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(this.list, null, 2)}\n`);
-    renameSync(tmp, this.file);
+  // `list` becomes the list once it is written (a failed write throws and changes nothing, so
+  // the bans in force are the ones in bans.json). Written whole to a new file that then replaces
+  // the old one, so a crash mid-write can't leave half a list.
+  save(list) {
+    if (this.file) {
+      const tmp = `${this.file}.tmp`;
+      writeFileSync(tmp, `${JSON.stringify(list, null, 2)}\n`);
+      renameSync(tmp, this.file);
+    }
+    this.list = list;
   }
 }
