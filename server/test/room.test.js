@@ -668,7 +668,7 @@ test('a point-blank shot the browser predicted plays its hit once, though the se
   let spot;
   for (let i = 0; i < 20000 && !spot; i++) {
     const x = 100 + Math.random() * 3000, y = 100 + Math.random() * 3000;
-    if (sim.openSpot(x, y) && sim.openSpot(x + 40, y) && sim.statics.clearLine(x, y, x + 40, y, 30)) spot = { x, y };
+    if (sim.openSpot(x, y) && sim.openSpot(x + 40, y) && sim.statics.clearLine(x, y, x + 40, y, 2)) spot = { x, y };
   }
   Object.assign(A, { x: spot.x, y: spot.y, vx: 0, vy: 0, aim: 0, invuln: 0 });
   Object.assign(B, { x: spot.x + 40, y: spot.y, vx: 0, vy: 0, invuln: 0, hp: 1e6 });

@@ -178,7 +178,7 @@ function pvp(n, rules = RULES) {
 function openPair(sim, gap) {
   for (let i = 0; i < 20000; i++) {
     const x = 100 + Math.random() * 3000, y = 100 + Math.random() * 3000;
-    if (sim.openSpot(x, y) && sim.openSpot(x + gap, y) && !world.isWading(x, y) && !world.isWading(x + gap, y) && sim.statics.clearLine(x, y, x + gap, y, 30)) return { x, y };
+    if (sim.openSpot(x, y) && sim.openSpot(x + gap, y) && !world.isWading(x, y) && !world.isWading(x + gap, y) && sim.statics.clearLine(x, y, x + gap, y, 2)) return { x, y };
   }
   throw new Error('no open ground on the map');
 }
@@ -226,7 +226,7 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   // Bring A over to B's new spot: protected, then not.
   const bx = B.x, by = B.y;
   A.x = bx - 100; A.y = by;
-  const clear = sim.statics.clearLine(A.x, A.y, bx, by, 30) && world.isWalkable(A.x, A.y);
+  const clear = sim.statics.clearLine(A.x, A.y, bx, by, 2) && world.isWalkable(A.x, A.y);
   if (clear) {
     shoot(sim, A); run(sim, 0.2);
     const during = B.hp;
