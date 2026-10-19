@@ -3,8 +3,7 @@
 开一个 **奶蛙射击 (Naiwa Shootout)** 的联机服务器，朋友从官网的 **联机 / ONLINE** 按钮加入。
 Run a server for **奶蛙射击 (Naiwa Shootout)**; friends join it from the official site's **联机 / ONLINE** button.
 
-- 官网 / Official site: <https://naiwashootout.laow.dev>
-- [中文](#中文) · [English](#english)
+[中文](#中文) · [English](#english)
 
 Commands marked *(not run here)* / *（未在本机运行）* weren't run while writing this guide: they
 need an account, a domain or a machine that wasn't available. Everything else was run as written.
