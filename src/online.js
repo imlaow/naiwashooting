@@ -1,6 +1,7 @@
 // The ONLINE panel's pieces that load with the page: server address rules, the recently joined
 // servers and the player's name (both kept in the browser). Joining itself is in net/online.js,
 // loaded on demand with the Colyseus SDK.
+import { BROWSER_ID } from './sim/protocol.js';
 
 const LOCAL = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -46,7 +47,7 @@ export function rememberServer(url, name = '') {
 export function browserId() {
   try {
     let id = localStorage.getItem(ID_KEY);
-    if (!/^[A-Za-z0-9_-]{8,64}$/.test(id ?? '')) {
+    if (!BROWSER_ID.test(id ?? '')) {
       id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
       localStorage.setItem(ID_KEY, id);
     }

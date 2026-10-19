@@ -39,16 +39,20 @@ export function bannable(ip, trust = []) {
   return !!k && !isLoopback(ip) && k !== addressKey('::1') && !trust.some((t) => addressKey(t) === k);
 }
 
+// A forwarded address without the port some proxies add ("1.2.3.4:5678", "[2001:db8::1]:5678")
+// or the brackets around IPv6 ("[2001:db8::1]").
+const withoutPort = (s) => (/^\[([^\]]+)\](?::\d+)?$/.exec(s) ?? /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(s))?.[1] ?? s;
+
 // Who is on the other end of a connection. `peer` is the socket's address; only when it is one
 // of `trust` (server.json "trustProxy": the tunnel or proxy on this machine) is the forwarded
 // address believed, and then only the last X-Forwarded-For entry: the one that proxy wrote
 // itself (Cloudflare's edge, Caddy and nginx all put the address they saw last). Anything a
 // client wrote into the header comes before it. CF-Connecting-IP isn't read: behind Caddy a
-// client could send its own.
+// client could send its own. A port or brackets around the entry are dropped (withoutPort).
 export function clientAddress(peer, forwarded, trust = []) {
   const p = plain(peer);
   if (!trust.some((t) => plain(t) === p)) return p || null;
-  const last = plain(String(forwarded ?? '').split(',').pop());
+  const last = plain(withoutPort(String(forwarded ?? '').split(',').pop().trim()));
   return isIP(last) ? last : p || null;
 }
 

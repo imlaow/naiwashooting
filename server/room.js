@@ -48,7 +48,7 @@ import { Room, ServerError, ErrorCode, CloseCode, Protocol } from '@colyseus/cor
 import { makeChoice, buildMap, RANDOM_ID, THEMES } from '../src/sim/maps.js';
 import { Sim, STEP } from '../src/sim/sim.js';
 import { idleCommand } from '../src/sim/entities.js';
-import { PROTOCOL, RECONNECT_SECONDS, CHAT_MAX, CHAT_GAP, KICKED, BANNED, packBullet, packEvents, cleanText, sanitizeCommand, simCommand } from '../src/sim/protocol.js';
+import { PROTOCOL, RECONNECT_SECONDS, CHAT_MAX, CHAT_GAP, KICKED, BANNED, BROWSER_ID, packBullet, packEvents, cleanText, sanitizeCommand, simCommand } from '../src/sim/protocol.js';
 import { Bans, bannable } from './bans.js';
 import { NaiwaState, PlayerState, EnemyState, PickupState, PropState, Slot, Command } from './schema.js';
 
@@ -88,7 +88,7 @@ export const originAllowed = (list, origin) => !list?.length || list.includes('*
 export const cleanName = (name) => cleanText(name, NAME_MAX) || 'Naiwa';
 
 // The random id a browser keeps (src/online.js browserId), or '' for anything else.
-export const cleanId = (id) => (typeof id === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(id) ? id : '');
+export const cleanId = (id) => (typeof id === 'string' && BROWSER_ID.test(id) ? id : '');
 
 // Why "theme/id" isn't a map a server can run (null: it is), with every map listed.
 export function mapError(entry) {

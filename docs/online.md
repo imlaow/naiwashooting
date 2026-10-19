@@ -1081,6 +1081,8 @@ the id or the address matches.
   - That last entry is the one the proxy wrote itself: Cloudflare's edge, Caddy and nginx all put
     the address they saw last. Anything a client sends sits before it.
   - `CF-Connecting-IP` isn't used: behind Caddy a client can send its own.
+  - A port or brackets some proxies put around the entry (`1.2.3.4:5678`, `[2001:db8::1]:5678`)
+    are dropped. An entry that still isn't an address leaves the proxy's own.
   - A socket from anywhere else is its own address, whatever it claims.
 - **Where the address is read.** Colyseus gives `onAuth` only `context.ip`, which it takes from
   `x-real-ip` / `X-Forwarded-For` before the socket. The matchmaking request's context has no socket
@@ -1171,7 +1173,8 @@ servers are labelled with the name they had last time.
     - after the review: a held seat kicked or banned closes the browser's next try with the code; a
       ban takes every seat with that browser id; `::1`'s /64 and `trustProxy` addresses aren't
       banned; a ban or unban `bans.json` can't take changes nothing; a map off the rotation picked
-      during a rotation map's results is followed by the next one.
+      during a rotation map's results is followed by the next one; forwarded addresses with a
+      port or brackets; the browser id pattern, shared as `protocol.js BROWSER_ID`.
   - `console.test.js` starts real servers:
     - commands from a pipe, and the server running on after it ends;
     - stdin `/dev/null`, and stdin closed;

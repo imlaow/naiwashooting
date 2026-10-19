@@ -10,11 +10,11 @@ import { boot } from '@colyseus/testing';
 import { matchMaker } from '@colyseus/core';
 import { Client } from '@colyseus/sdk';
 import { makeServer, DEFAULTS, readConfig } from '../index.js';
-import { NaiwaRoom, NAME_MAX, STALE_STEPS } from '../room.js';
+import { NaiwaRoom, NAME_MAX, STALE_STEPS, cleanId } from '../room.js';
 import { command } from '../console.js';
 import { Bans, clientAddress, addressKey } from '../bans.js';
 import { join, joinError, JoinError } from '../../src/net/online.js';
-import { PROTOCOL, CHAT_MAX, KICKED, BANNED, unpackBullet } from '../../src/sim/protocol.js';
+import { PROTOCOL, CHAT_MAX, KICKED, BANNED, BROWSER_ID, unpackBullet } from '../../src/sim/protocol.js';
 import { buildMap, makeChoice } from '../../src/sim/maps.js';
 import { STEP } from '../../src/sim/sim.js';
 import { idleCommand } from '../../src/sim/entities.js';
@@ -907,6 +907,10 @@ test('ban of someone who left and came back, or has two tabs: every seat with th
   assert.equal(say(`ban #${no}`), `banned Pest by browser and address 203.0.113.80 (and out: #${seatOf(b).no} Pest, #${seatOf(c).no} Tab2)`);
   assert.deepEqual(await Promise.all(gone), [BANNED, BANNED]);
   await until(() => room.seats.size === 1, 'only Other left');
+  // The browser's id (src/online.js browserId) is what the server keeps: one pattern for both.
+  assert.ok(BROWSER_ID.test('0123456789abcdef0123456789abcdef'));
+  assert.equal(cleanId('short'), '');
+  assert.equal(cleanId(ID(1)), ID(1));
   assert.ok(room.seats.has(d.sessionId));
   assert.deepEqual(errors, []);
 });
@@ -962,6 +966,12 @@ test('ban <address>: everyone here from it goes; IPv6 by its /64; spoofed addres
   assert.equal(clientAddress('::ffff:127.0.0.1', '6.6.6.6, 203.0.113.9', ['127.0.0.1']), '203.0.113.9');
   assert.equal(clientAddress('203.0.113.50', '6.6.6.6', ['127.0.0.1', '::1']), '203.0.113.50');
   assert.equal(clientAddress('::1', 'not an address', ['::1']), '::1');
+  // A port or brackets some proxies add around the entry.
+  assert.equal(clientAddress('127.0.0.1', '6.6.6.6, 203.0.113.9:5678', ['127.0.0.1']), '203.0.113.9');
+  assert.equal(clientAddress('127.0.0.1', '[2001:db8::1]:5678', ['127.0.0.1']), '2001:db8::1');
+  assert.equal(clientAddress('127.0.0.1', ' [2001:db8::2] ', ['127.0.0.1']), '2001:db8::2');
+  assert.equal(clientAddress('127.0.0.1', '[::ffff:192.0.2.8]:80', ['127.0.0.1']), '192.0.2.8');
+  assert.equal(clientAddress('127.0.0.1', '2001:db8::3:5678', ['127.0.0.1']), '2001:db8::3:5678', 'bare IPv6 has no port to drop');
   assert.equal(addressKey('2001:0db8:0005:0006:0:0:0:1'), '2001:db8:5:6::/64');
   assert.equal(addressKey('::ffff:192.0.2.7'), '192.0.2.7');
   assert.deepEqual(errors, []);

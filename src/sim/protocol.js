@@ -29,6 +29,10 @@ export const PROTOCOL = 8;
 export const KICKED = 4100;
 export const BANNED = 4101;
 
+// The id a browser keeps and sends with its joins (src/online.js browserId), which bans go by;
+// the server takes anything else as none (server/room.js cleanId).
+export const BROWSER_ID = /^[A-Za-z0-9_-]{8,64}$/;
+
 // How long a dropped player's seat is held, and the browser keeps reconnecting, in seconds.
 export const RECONNECT_SECONDS = 60;
 
