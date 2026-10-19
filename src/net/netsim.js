@@ -47,6 +47,9 @@ const JUMP = 150;
 const GAP = 400;
 // How long the timeline keeps patches, ms.
 const KEEP = 1500;
+// How long the server's ids of the local player's own bullets are kept, ms: longer than any of
+// them lives (the rifle's 0.85 s).
+const OWN_KEEP = 3000;
 // Events about the local player that play as they arrive (it is drawn ahead of the timeline).
 const MINE = new Set(['hurt', 'downed', 'revived', 'died', 'respawned', 'laugh', 'laughEnd', 'pickup']);
 // The local player's own events that its prediction plays (the server's copies are dropped).
@@ -118,12 +121,11 @@ export class NetSim {
     this.shots = new Set(); // input seqs the prediction fired a shot on
     // The local player's own bullets, predicted: { b, c (this.ms fired), x0, y0, lx, ly (last
     // tested), pierce, hits }; the pellets of each predicted shot by its seq, until the server's
-    // copies come; and the server's ids of those copies.
+    // shot comes; and the server's ids of those copies (→ the server time of their shot).
     this.own = [];
     this.ownShots = new Map();
-    this.ownIds = new Set();
+    this.ownIds = new Map();
     this.ownId = 0;
-    this.matchedShot = null; // the predicted seq the server's shot in this tick message matched
     this.tele = opts.telemetry ? { errors: [], corrections: [], starved: 0, over: 0, frames: 0, shots: 0, matched: 0, late: 0, fired: new Map(), fates: new Map() } : null;
 
     const onPatch = () => this.capture();
@@ -132,20 +134,11 @@ export class NetSim {
       () => room.onStateChange.remove(onPatch),
       room.onMessage('tick', ([t, events, born, gone]) => {
         if (!this.current) return;
-        this.matchedShot = null;
         for (const e of events) this.arrive(t, e);
-        const me = this.localId, pellets = this.matchedShot != null ? this.ownShots.get(this.matchedShot) : null;
-        if (pellets) this.ownShots.delete(this.matchedShot);
-        let k = 0;
         for (const a of born) {
           const b = unpackBullet(a);
           // The server's copy of a bullet the prediction fired: already flying.
-          if (b.owner === me && pellets) {
-            this.ownIds.add(b.id);
-            const o = pellets[k++];
-            if (this.tele && o) { this.tele.fired.set(b.id, { c: o.c, t0: t }); this.tele.fates.set(b.id, { pred: o, srv: null }); }
-            continue;
-          }
+          if (this.ownIds.has(b.id)) continue;
           this.flying.push({ b, t0: t, end: Infinity, x0: b.x, y0: b.y });
         }
         for (const id of gone) {
@@ -153,6 +146,9 @@ export class NetSim {
           const f = this.flying.find((o) => o.b.id === id);
           if (f) f.end = t;
         }
+        // Those that ended on their first step are never gone: forgotten once older than any
+        // bullet lives.
+        for (const [id, t0] of this.ownIds) if (t - t0 > OWN_KEEP) this.ownIds.delete(id);
       }),
       room.onMessage('pong', (t) => { if (Number.isFinite(t)) this.ping = Math.round(performance.now() - t); }),
     ];
@@ -291,6 +287,21 @@ export class NetSim {
     let list = this.ownShots.get(seq);
     if (!list) this.ownShots.set(seq, (list = []));
     list.push(f);
+    return b.id;
+  }
+
+  // The server's shot `e` (at server time t) is the one the prediction fired on `seq`: its
+  // bullets (e.bid, e.bid + 1, … as the pellets were fired) are already flying here, and their
+  // hits and ends play here. Claimed with the shot, which comes before them in its tick: a bullet
+  // that hits on its first step is never born.
+  claim(t, e, seq) {
+    const pellets = this.ownShots.get(seq);
+    this.ownShots.delete(seq);
+    for (let k = 0; k < WEAPONS[e.weapon].pellets; k++) {
+      const id = e.bid + k, o = pellets?.[k];
+      this.ownIds.set(id, t);
+      if (this.tele && o) { this.tele.fired.set(id, { c: o.c, t0: t }); this.tele.fates.set(id, { pred: o, srv: null }); }
+    }
   }
 
   // The local player's command (see Player.update), as the room's Command.
@@ -351,7 +362,7 @@ export class NetSim {
       // (a held or folded step moves it by one or two; even the SMG fires only every 4.5 steps,
       // so that can't pair two different shots). One it didn't see coming plays late.
       if (e.type !== 'shot') return;
-      for (const s of [e.seq, e.seq + 1, e.seq - 1, e.seq + 2, e.seq - 2]) if (this.shots.delete(s)) { this.matchedShot = s; if (this.tele) this.tele.matched++; return; }
+      for (const s of [e.seq, e.seq + 1, e.seq - 1, e.seq + 2, e.seq - 2]) if (this.shots.delete(s)) { this.claim(t, e, s); if (this.tele) this.tele.matched++; return; }
       if (this.tele) this.tele.late++;
       this.events.push(e);
     } else if ((e.id === me && MINE.has(e.type)) || (e.type === 'bite' && e.target === me)) {

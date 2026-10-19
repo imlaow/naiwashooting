@@ -12,9 +12,11 @@ import { Client } from '@colyseus/sdk';
 import { makeServer, DEFAULTS, readConfig } from '../index.js';
 import { NaiwaRoom, NAME_MAX, STALE_STEPS } from '../room.js';
 import { join, joinError, JoinError } from '../../src/net/online.js';
-import { PROTOCOL, CHAT_MAX } from '../../src/sim/protocol.js';
+import { PROTOCOL, CHAT_MAX, unpackBullet } from '../../src/sim/protocol.js';
 import { buildMap, makeChoice } from '../../src/sim/maps.js';
 import { STEP } from '../../src/sim/sim.js';
+import { idleCommand } from '../../src/sim/entities.js';
+import { NetSim } from '../../src/net/netsim.js';
 
 const URL = 'ws://127.0.0.1:2568';
 const CONFIG = { ...DEFAULTS, maps: ['island/cove', 'factory/dairy'], allowedOrigins: ['https://good.example'], password: '', maxPlayers: 4, stats: false, log: false };
@@ -631,5 +633,55 @@ test('lag compensation: commands carry the browser\'s render time; bullets test 
   assert.equal(at(tDead), null);
   const after = at(room.clock.elapsedTime);
   assert.ok(Math.hypot(after.x - B.x, after.y - B.y) < 30, 'after the respawn, where it is');
+  assert.deepEqual(errors, []);
+});
+
+// A browser on client `c`: a NetSim stepped a frame (STEP) at a time, sending `cmd` and keeping
+// the events it plays.
+function browser(c) {
+  const S = c.state, { world, layout } = buildMap(makeChoice(S.map.theme, S.map.id, S.map.seed));
+  const net = new NetSim(c, world, layout), events = [];
+  const b = { net, events, cmd: idleCommand(0) };
+  const timer = setInterval(() => { net.tick(STEP); net.send(b.cmd); net.sync(STEP); events.push(...net.takeEvents()); }, STEP * 1000);
+  b.stop = () => { clearInterval(timer); net.destroy(); };
+  return b;
+}
+
+test('a point-blank shot the browser predicted plays its hit once, though the server never sends its bullet', async () => {
+  pvpRoom();
+  const a = await enter('Shooter');
+  const b = await enter('Target');
+  await startRun();
+  const A = simPlayer(a), B = simPlayer(b), sim = room.sim;
+  // B 40 px right of A on open ground: the pistol's bullet hits on its first step.
+  let spot;
+  for (let i = 0; i < 20000 && !spot; i++) {
+    const x = 100 + Math.random() * 3000, y = 100 + Math.random() * 3000;
+    if (sim.openSpot(x, y) && sim.openSpot(x + 40, y) && sim.statics.clearLine(x, y, x + 40, y, 30)) spot = { x, y };
+  }
+  Object.assign(A, { x: spot.x, y: spot.y, vx: 0, vy: 0, aim: 0, invuln: 0 });
+  Object.assign(B, { x: spot.x + 40, y: spot.y, vx: 0, vy: 0, invuln: 0, hp: 1e6 });
+  // What the server sends A's browser in the tick with the shot.
+  const ticks = [];
+  a.onMessage('tick', ([, ev, born]) => { if (ev.some((e) => e.type === 'shot' && e.id === A.id)) ticks.push({ ev, born }); });
+  const ab = browser(a);
+  try {
+    // Long enough for the prediction to take A's new spot and the timeline to draw B at its own.
+    await sleep(600);
+    ab.events.length = 0;
+    ab.cmd = { ...idleCommand(0), fire: true };
+    await until(() => ab.events.some((e) => e.type === 'shot'), 'the predicted shot');
+    ab.cmd = idleCommand(0);
+    await until(() => ticks.length, 'the server\'s shot');
+    await sleep(500);
+    const [{ ev, born }] = ticks;
+    assert.ok(ev.some((e) => e.type === 'bulletHit' && e.target === 'player'), 'the server hit B on the first step');
+    assert.ok(!born.some((x) => unpackBullet(x).owner === A.id), 'so it never sent the bullet');
+    assert.equal(ab.events.filter((e) => e.type === 'shot').length, 1, 'one shot');
+    const hits = ab.events.filter((e) => e.type === 'bulletHit');
+    assert.deepEqual(hits.map((e) => [e.target, !!e.predicted]), [['player', true]], 'the predicted hit, and only that');
+  } finally {
+    ab.stop();
+  }
   assert.deepEqual(errors, []);
 });

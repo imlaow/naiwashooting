@@ -913,10 +913,22 @@ co-op enemies. Packages unchanged (`@colyseus/core` 0.18.19, `@colyseus/sdk` 0.1
     spread differently); the rules don't.
   - Bullets carry their `owner` (`packBullet`), and `bulletHit` / `bulletEnd` the bullet's id
     (`bid`). The server's copies of a shot the prediction fired (matched through the shot's `seq`,
-    as before) aren't drawn, nor their hits and ends; a shot the prediction didn't fire is drawn on
-    `T` as before. `bulletHit` now also has `target: 'player'` (PvP), which every browser draws.
+    as before; claimed by the shot's `bid` since `PROTOCOL` 7, below) aren't drawn, nor their hits
+    and ends; a shot the prediction didn't fire is drawn on `T` as before. `bulletHit` now also has `target: 'player'` (PvP), which every browser draws.
 - **`PROTOCOL` 6:** the input's render-time stamp, `shotN` in the state, the bullet's `owner`,
   `bid` on bullet events, `target: 'player'`, and the deterministic spread.
+- **`PROTOCOL` 7 (review fixes after stage 6b):** `shot` carries `bid`, its first bullet (its
+  pellets are `bid`, `bid + 1`, …). The browser claims the server's copies of a shot it predicted
+  when the shot arrives, rather than from the tick's born bullets: a bullet that hits on its first
+  step (point-blank, an enemy biting the shooter) is never born, and its hit (as a piercing
+  bullet's first-step hit, which came before its born in the tick) played a second spark on top of
+  the predicted one. Telemetry pairs each predicted pellet with the server's by id, i.e. in firing
+  order; the born order isn't that (the sim's swap-remove reorders bullets). Checked by a sim-rules
+  check (a shotgun shot's `bid` is its first pellet and the other 7 follow) and a 24th server test
+  (through a real `NetSim`: a pistol shot at B 40 px away hits on the server's first step and is
+  never born, and A's browser plays one hit, the predicted one; two before the fix). net-feel
+  unchanged within run-to-run spread (seen vs tested p95: co-op 0.23 / 0.29 px at 0 / 80 ms, PvP
+  0.46 / 0.38 / 0.41 / 4.41 px at 0–250 ms).
 - **Teleport thresholds against PvP respawns.** A respawn lands at the best of 24 open spots by
   distance to the nearest living player, the killer included: in 2,000 tries on each of
   `island/cove`, `factory/dairy` and `island/twins` with the killer 150–400 px from the corpse, it

@@ -457,6 +457,17 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const one = fire(); Math.random(); const two = fire();
   check('a shot\'s spread comes from the player\'s id and shot count (the prediction fires the same pellets)', one.b === two.b && one.b.split(';').length === 8 && one.n === 78);
 }
+{
+  // The browser claims the server's copies of a shot it predicted by the shot's bid
+  // (NetSim.claim): its pellets are bid, bid + 1, …
+  const { sim, ps: [A] } = pvp(2);
+  A.giveWeapon('shotgun');
+  A.cooldown = 0;
+  const before = new Set(sim.bullets.map((b) => b.id));
+  const shot = run(sim, STEP, { [A.id]: { mx: 0, my: 0, aim: 1, fire: true } }).find((e) => e.type === 'shot');
+  const ids = sim.bullets.filter((b) => b.owner === A.id && !before.has(b.id)).map((b) => b.id).sort((x, y) => x - y);
+  check('a shot\'s bid is its first pellet, and its pellets follow it', shot && ids.length === 8 && ids.every((id, k) => id === shot.bid + k), `bid ${shot?.bid}, pellets ${ids}`);
+}
 
 console.log(failed ? `\n${failed} rule(s) failed` : '\nall rules hold');
 if (failed) process.exitCode = 1;

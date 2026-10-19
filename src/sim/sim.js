@@ -10,7 +10,8 @@
 //
 // Every step is STEP seconds. Events are plain objects with a `type`; `id` is the player's (or
 // the enemy's / prop's) id, `by` the player who did it (null when nobody did):
-//   shot, enemyShot, ring            a gun went off (ring: the boss's orb ring)
+//   shot (bid: its first bullet; its pellets are bid, bid + 1, …), enemyShot, ring
+//                                    a gun went off (ring: the boss's orb ring)
 //   hit (by), kill (by, pts), spawn, bite (target)  enemy hit / killed / appeared; an egg bit a player
 //   hurt, dash, laugh, laughEnd (heal)
 //   downed, revived (by), died, respawned (joined)  co-op: down, back up, bled out, back in at the dock
@@ -422,13 +423,16 @@ export class Sim {
   }
 
   // ---------- Bullets ----------
+  // The new bullet's id.
   fireBullet(o) {
-    this.bullets.push({
+    const b = {
       id: this.newId(), x: o.x, y: o.y, vx: Math.cos(o.ang) * o.speed, vy: Math.sin(o.ang) * o.speed,
       ang: o.ang, life: o.life, dmg: o.dmg, team: o.team, owner: o.owner ?? null, pierce: o.pierce ?? 0, knock: o.knock ?? 80,
       h: o.h ?? 36, hits: null, tint: o.tint ?? 0xffffff, orb: !!o.orb, scale: o.scale ?? 1,
       seen: o.team === 'player' ? this.players.get(o.owner)?.seen ?? 0 : 0, age: 0,
-    });
+    };
+    this.bullets.push(b);
+    return b.id;
   }
 
   // Where a player's bullet tests `e`: where its shooter saw it (see the header), else now.

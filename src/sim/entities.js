@@ -242,19 +242,21 @@ export class Player {
     const mx = this.x + cos * len, my = this.y + sin * len;
     const rand = mulberry32((this.id << 16) ^ this.shotN);
     this.shotN = (this.shotN + 1) & 0xffff;
+    let bid = 0;
     for (let i = 0; i < W.pellets; i++) {
       const a = this.aim + (rand() - 0.5) * 2 * W.spread;
-      sim.fireBullet({
+      const id = sim.fireBullet({
         x: mx, y: my, ang: a, speed: W.speed * (W.pellets > 1 ? 0.85 + rand() * 0.25 : 1),
         dmg: W.dmg, life: W.life * (W.pellets > 1 ? 0.8 + rand() * 0.3 : 1), team: 'player', owner: this.id,
         pierce: W.pierce ?? 0, knock: W.knock, tint: this.weapon === 'rifle' ? 0x9be7ff : 0xffe28a,
         scale: this.weapon === 'rifle' ? 1.6 : 1,
       });
+      bid ||= id;
     }
     this.slot.mag--;
     this.cooldown = W.rate;
     this.vx -= cos * W.kick * 14; this.vy -= sin * W.kick * 14;
-    sim.emit({ type: 'shot', id: this.id, weapon: this.weapon, x: mx, y: my, ang: this.aim, px: this.x, py: this.y });
+    sim.emit({ type: 'shot', id: this.id, weapon: this.weapon, x: mx, y: my, ang: this.aim, px: this.x, py: this.y, bid });
   }
 
   // A downed player can't be hurt any more; the bleed-out timer is all that's left. Nobody is
