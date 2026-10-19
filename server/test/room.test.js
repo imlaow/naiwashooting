@@ -492,12 +492,14 @@ function pvpRoom(pvp = { killLimit: 25, timeLimit: 600 }) {
   room.state.mode = 'pvp';
   room.loadMap();
 }
-// A stands 100 px left of B on open ground, neither protected; A's next bullet kills B.
+// A stands 100 px left of B on open ground, neither protected; A's next bullet kills B. The line
+// between them is sampled every 2 px (clearLine's last argument is the spacing: every 30 px
+// missed a thin collider about one time in 80, which stopped the bullet).
 function lineUp(A, B) {
   const sim = room.sim;
   for (let i = 0; i < 20000; i++) {
     const x = 100 + Math.random() * 3000, y = 100 + Math.random() * 3000;
-    if (!sim.openSpot(x, y) || !sim.openSpot(x + 100, y) || !sim.statics.clearLine(x, y, x + 100, y, 30)) continue;
+    if (!sim.openSpot(x, y) || !sim.openSpot(x + 100, y) || !sim.statics.clearLine(x, y, x + 100, y, 2)) continue;
     Object.assign(A, { x, y, vx: 0, vy: 0, invuln: 0 });
     Object.assign(B, { x: x + 100, y, vx: 0, vy: 0, invuln: 0, hp: 1 });
     sim.fireBullet({ x: x + 24, y, ang: 0, speed: 980, dmg: 20, life: 0.5, team: 'player', owner: A.id, knock: 140 });
@@ -611,12 +613,21 @@ test('lag compensation: commands carry the browser\'s render time; bullets test 
   input.data.fire = true; input.data.aim = 0;
   await until(() => { input.send(); return room.sim.bullets.some((o) => o.owner === A.id && o.seen > 0); }, 'a bullet with the stamp');
   input.data.fire = false; input.send();
-  // B stands at p1, then 100 px on (not a jump): the rewind has it at p1 back then.
-  const p1 = { x: B.x, y: B.y };
+  // B stands at p1, then 100 px on (not a jump): the rewind has it at p1 back then. Both spots
+  // are open ground and A's shots are gone, so nothing pushes B off either (a spot in a
+  // collider's reach was pushed out a few px on the next step).
+  await until(() => !room.sim.bullets.some((o) => o.owner === A.id), 'A\'s bullets gone');
+  let p1;
+  for (let i = 0; i < 20000 && !p1; i++) {
+    const x = 100 + Math.random() * 3000, y = 100 + Math.random() * 3000;
+    if (room.sim.openSpot(x, y) && room.sim.openSpot(x + 100, y)) p1 = { x, y };
+  }
+  assert.ok(p1, 'two open spots 100 px apart');
+  Object.assign(B, { ...p1, vx: 0, vy: 0 });
   await sleep(200);
   const t1 = room.clock.elapsedTime;
   await sleep(150);
-  B.x += 100;
+  Object.assign(B, { x: p1.x + 100, vx: 0, vy: 0 });
   await sleep(200);
   const at = (t) => { const r = room.seenAt(B, { seen: t, age: STEP }); return r && { x: r.x, y: r.y }; };
   const then = at(t1), now = at(room.clock.elapsedTime);

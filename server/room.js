@@ -267,6 +267,10 @@ export class NaiwaRoom extends Room {
     this.allowReconnection(client, this.reconnectSeconds).catch(() => {});
   }
 
+  // Keep it synchronous: the server attaches the reconnected client's message listener only after
+  // this returns, which is safe only while nothing here waits on I/O or a timer. Awaiting anything
+  // real (a database, presence) would lose the inputs the browser sends meanwhile, silently, and
+  // leave its prediction off for the rest of the connection.
   onReconnect(client) {
     const seat = this.seats.get(client.sessionId);
     if (!seat) return;
