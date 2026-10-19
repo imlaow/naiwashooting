@@ -947,6 +947,15 @@ co-op enemies. Packages unchanged (`@colyseus/core` 0.18.19, `@colyseus/sdk` 0.1
     250 ms with ±25 ms jitter beyond the 2-step cushion) is a step off the frame its browser fired
     it in for its whole flight: ±16 ms, about 4 px for a walking target, the same step the
     prediction is off by there.
+  - A short tap of the trigger can be lost after a stall. `fold()` takes the trigger from the
+    newest command, like the stick (stage 5 treated it as held, not as a press), so when every
+    fire command of a tap lands in a folded batch that ends after the release, the server never
+    fires it. The browser has already drawn the muzzle flash, the bullet and maybe a predicted
+    hit; no damage is dealt and the next correction puts the round back. Only a backlog after a
+    stall does this (the once-a-second drain folds one command, so it loses only a one-frame
+    tap). "Fire if any folded command fired" would trade it for an extra shot after a release
+    inside the batch, aimed and stamped by the newest command, and its `seq` could fall outside
+    the browser's ±2 match; left as it is until real play says the lost tap is noticeable.
 - **Measured** (`tools/net-feel.mjs`; `--pvp` for the PvP scenario, `--rewind off` for current
   positions). *Seen vs tested:* each server test of one of A's bullets against a target within
   30 px of it, the tested position against where A drew that target in the frame that drew the
