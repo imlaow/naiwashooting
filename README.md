@@ -27,7 +27,12 @@ Anyone can run a `naiwa-server` and friends join it from the site's **联机 / O
 it: your own player is predicted so it answers at once, everyone else is drawn a moment in the
 past so they move smoothly, and a dropped connection reconnects by itself (the server keeps the
 seat for 60 s). Teammates wear their own colour and name; Tab shows the scoreboard and Enter opens
-the chat. See `docs/online.md` for the design and what is still to come.
+the chat. See `docs/online.md` for the design.
+
+**Hosting a server for friends:** `npx naiwa-server@latest` (Node 22+) or the Docker image
+`ghcr.io/imlaow/naiwa-server`, then a Cloudflare tunnel or Caddy for the `wss://` address. The whole
+recipe, in Chinese and English, is in [`docs/hosting.md`](docs/hosting.md) (it is also the npm
+package's README). From the repo:
 
 ```bash
 npm install --prefix server        # once: the server's own packages (Colyseus), kept out of the site build
@@ -50,7 +55,7 @@ npm run test:server                # the room tests
 | `maps` | The rotation, e.g. `"island/cove"`, `"factory/dairy"`, `"island/random"` (a new island each time) |
 | `allowedOrigins` | Sites whose pages may join (the official domains and `http://localhost:5173` by default); `["*"]` for any |
 | `banAddresses` | `true` (default): a ban also refuses the player's address, not only their browser |
-| `trustProxy` | The tunnel or proxy in front of the server (`["127.0.0.1", "::1"]`: one on the same machine). Only from these is the forwarded `X-Forwarded-For` address believed |
+| `trustProxy` | The tunnel or proxy in front of the server (`["127.0.0.1", "::1"]`: one on the same machine). Only from these is the forwarded `X-Forwarded-For` address believed. In Docker it is the network's gateway (`172.17.0.1`), behind a raw TCP tunnel `[]`: see `docs/hosting.md` |
 | `log` | `true` (default) prints a line when someone joins, leaves, loses the connection or comes back |
 | `stats` | `true` prints time per tick, memory and bytes sent per player every 10 s |
 
@@ -63,8 +68,9 @@ The owner runs the server from its own terminal: type `help` there. `players` li
 with their numbers; `kick 3`, `ban 3` (or a name, or `ban 1.2.3.4`), `bans`, `unban 1`,
 `say hello`, `map factory/dairy` (or `map next`) and `restart` do what they say. Bans are kept in
 `bans.json` next to `server.json`; they go by the player's browser and address, so another browser
-on another network gets back in. Without a terminal (Docker, a service, started in the background)
-the server runs the same, without the commands.
+on another network gets back in. Without a terminal (Docker without `-it`, a service, started in
+the background) the server runs the same, without the commands; `docs/hosting.md` says how to reach
+the console under tmux, Docker and Compose.
 
 The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (remembered per browser) or add `?lang=en`.
 
@@ -103,6 +109,8 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/sim/bot.js` | The scripted player: the headless runs' bots and the browser's debug teammates (`?debug&bots=N`) |
 | `src/sim/physics.js` | Static colliders in a spatial hash: push-out, point and line-of-sight tests |
 | `src/sim/protocol.js` | What server and browser must agree on: `PROTOCOL` (bump it whenever the sim, the room state or a message changes), the bullet and event message formats |
+| `server/cli.js` | The npm package's and Docker image's command (`npx naiwa-server [server.json]`): `./server.json` (made from the example on a first run), a Node 22+ check, `--version` |
+| `server/Dockerfile` | The image `ghcr.io/imlaow/naiwa-server` (build from the repo root; amd64 and arm64 without an emulator), config on the `/data` volume |
 | `server/index.js` | `naiwa-server`: reads and checks `server.json`, refuses WebSocket upgrades from sites not in `allowedOrigins`, notes each socket's address, runs one `NaiwaRoom` and the console (`npm run server`) |
 | `server/room.js` | `NaiwaRoom` (Colyseus 0.18): joining rules (version, full, password, origin, bans), lobby → run → results → next map, the 1/60 s step taking one command per player per step, the sim's events and bullets out as messages stamped with the room clock, the state written before each patch; seats held for 60 s after a drop, chat, the join/leave log; the console's kick, ban, say, map change and restart |
 | `server/console.js` | The owner's console: the commands typed into the server's terminal, read from stdin (and still running without one) |
@@ -130,7 +138,8 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/audio.js` | WebAudio-synthesised sound effects |
 | `tools/dump-layouts.mjs` | Dumps every preset map's colliders, props and weapon spots; `--check` compares them with `tools/layout-baseline.txt` (run it after touching layout code) |
 | `tools/sim-headless.mjs` | Plays 10 minutes of every preset map in plain Node with scripted bots and reports waves, kills, deaths and errors; `--players 2`–`4` plays co-op with bots joining and leaving mid-run (kills per bot, downs, revives, respawns); `--trace` prints the state every game second for diffing two versions (run it after touching `src/sim`) |
-| `tools/bot-clients.mjs` | Starts a server and plays it with 2–8 bot clients over real WebSockets (`sim/bot.js` through `NetSim`); reports waves, kills per client, errors and the server's tick time, memory, CPU and bytes per client. `--rtt/--jitter/--loss` for a bad network, `--wave 8` to start runs at a busy wave (`tools/server-tweaks.mjs`), `--pvp` for bots shooting each other |
+| `tools/pack-server.mjs` | Builds the npm package in `build/`: the server and the `src/` files it imports, copied at the same paths, an `npm-shrinkwrap.json` from the server's lock, and a check that nothing else goes in |
+| `tools/bot-clients.mjs` | Starts a server (or joins one already running, `--server wss://…`) and plays it with 2–8 bot clients over real WebSockets (`sim/bot.js` through `NetSim`); reports waves, kills per client, errors and the server's tick time, memory, CPU and bytes per client. `--rtt/--jitter/--loss` for a bad network, `--wave 8` to start runs at a busy wave (`tools/server-tweaks.mjs`), `--pvp` for bots shooting each other |
 | `tools/net-feel.mjs` | Online feel without a browser: a server and two lagged clients through `NetSim`, scripted walks, dashes, a belt, a crate and a fight; reports prediction errors and corrections, how smoothly the other player is drawn, shots predicted vs the server's, and lag compensation: targets as the shooter saw them vs as the server tested them, and own bullets ended as the server ended them (0, 80, 150 and 250 ms by default; `--pvp` a duel and a bot fight with the prediction around PvP events, `--rewind off` to compare) |
 | `tools/lag.mjs` | Delay, jitter and TCP-like loss for a joined SDK room in Node (as the SDK's debug latency simulator does in the browser) |
 | `tools/sim-rules.mjs` | Sets up each co-op rule by hand (downed, revive, bleed-out, respawn, late joiners, targeting, laugh, pickups, scaling) and checks it |

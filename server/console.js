@@ -165,5 +165,7 @@ export function openConsole(room, { input = process.stdin, print = console.log }
     try { out = command(room(), line); } catch (err) { out = `that failed: ${err.message}`; }
     if (out) print(out);
   });
+  // stdin /dev/null or closed (a service, Docker without -it) ends at once: say why typing does nothing.
+  rl.on('close', () => print('(stdin ended: the console takes no more commands; the server runs on. For a console, run it in a terminal, tmux or docker run -it: https://www.npmjs.com/package/naiwa-server)'));
   return rl;
 }

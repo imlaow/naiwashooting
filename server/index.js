@@ -15,11 +15,15 @@ import { fileURLToPath } from 'node:url';
 import { defineServer, defineRoom, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { NaiwaRoom, originAllowed, mapError, SERVER_NAME_MAX, MOTD_MAX } from './room.js';
-import { clientAddress } from './bans.js';
-import { BANNED } from '../src/sim/protocol.js';
+import { clientAddress, trusted } from './bans.js';
+import { BANNED, PROTOCOL } from '../src/sim/protocol.js';
 import { openConsole } from './console.js';
 
 const here = (f) => fileURLToPath(new URL(f, import.meta.url));
+
+// server/package.json in the repo; in the npm package (tools/pack-server.mjs) the package.json is
+// one level up, next to server/ and src/.
+export const VERSION = JSON.parse(readFileSync([here('./package.json'), here('../package.json')].find(existsSync), 'utf8')).version;
 
 // The defaults are server.example.json's.
 export const DEFAULTS = JSON.parse(readFileSync(here('./server.example.json'), 'utf8'));
@@ -63,10 +67,21 @@ export function readConfig(path) {
 // A reconnect with the token of a held seat the console kicked or banned is closed with that
 // code (NaiwaRoom.kick): Colyseus would close it with FAILED_TO_RECONNECT, which the browser
 // shows as a lost connection.
+//
+// A socket that sent X-Forwarded-For came through a proxy. When that proxy isn't trusted (in
+// Docker, a tunnel or Caddy on the host arrives from the bridge's gateway, 172.17.0.1), everyone
+// through it is the proxy's address, and banning one of them by address would refuse them all:
+// the log says so, once per address.
 function transport(config, options) {
+  const named = new Set();
   class NaiwaTransport extends WebSocketTransport {
     onConnection(rawClient, req, upgrade) {
-      rawClient.address = clientAddress(req.socket.remoteAddress, req.headers['x-forwarded-for'], config.trustProxy);
+      const peer = req.socket.remoteAddress, forwarded = req.headers['x-forwarded-for'];
+      rawClient.address = clientAddress(peer, forwarded, config.trustProxy);
+      if (forwarded && !trusted(peer, config.trustProxy) && !named.has(rawClient.address)) {
+        named.add(rawClient.address);
+        console.log(`naiwa-server: a connection from ${rawClient.address} came through a proxy (it sent X-Forwarded-For), but ${rawClient.address} isn't in "trustProxy". So everyone through it counts as ${rawClient.address}, and they can only be banned by browser. If it is your tunnel or proxy (cloudflared, Caddy, nginx; not a raw TCP tunnel), add "${rawClient.address}" to "trustProxy" in ${config.file ?? 'server.json'} and restart (https://www.npmjs.com/package/naiwa-server, "trustProxy").`);
+      }
       const token = (upgrade?.url ?? new URL(`ws://server${req.url ?? '/'}`)).searchParams.get('reconnectionToken');
       const out = token && NaiwaRoom.current?.outTokens.get(token);
       if (out) return rawClient.close(out, out === BANNED ? 'banned' : 'kicked');
@@ -95,24 +110,37 @@ export function makeServer(config) {
 // Listens and creates the one room.
 export async function start(config) {
   const server = makeServer(config);
-  await server.listen(config.port);
+  // A port in use: ws-transport 0.18.4 prints the error, but Colyseus 0.18.19 only listens for
+  // the HTTP server's errors once it is listening, so listen() would never settle.
+  const failed = new Promise((_, reject) => server.transport.server.once('error', reject));
+  await Promise.race([server.listen(config.port), failed]);
   await matchMaker.createRoom('naiwa', {});
   return server;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// Reads the config (`file`, else server/server.json, else the defaults), starts the server and
+// the console, and says how it is set up. Exits on a config an owner must fix.
+export async function main(file) {
   let config;
   try {
-    config = readConfig(process.argv[2]);
+    config = readConfig(file);
   } catch (err) {
     console.error(`naiwa-server: ${err.message}`);
     process.exit(1);
   }
-  await start(config);
+  try {
+    await start(config);
+  } catch (err) {
+    if (err.code !== 'EADDRINUSE') throw err;
+    console.error(`naiwa-server: port ${config.port} is in use (another naiwa-server?). Stop it, or set another "port" in ${config.file ?? 'server.json'}.`);
+    process.exit(1);
+  }
   openConsole(() => NaiwaRoom.current);
-  console.log(`naiwa-server "${config.name}" on ws://localhost:${config.port} (${config.file ?? 'defaults: copy server/server.example.json to server/server.json to change them'})`);
+  console.log(`naiwa-server ${VERSION} (protocol ${PROTOCOL}) "${config.name}" on ws://localhost:${config.port} (${config.file ?? 'defaults: copy server/server.example.json to server/server.json to change them'})`);
   const mode = config.mode === 'pvp' ? `PvP deathmatch to ${config.pvp.killLimit} kills or ${config.pvp.timeLimit} s` : 'co-op';
   console.log(`  ${mode}, ${config.maxPlayers} players, maps: ${config.maps.join(', ')}${config.password ? ', password set' : ''}`);
   console.log(`  allowed sites: ${config.allowedOrigins.join(', ') || 'any'}`);
   console.log('  type "help" here for the owner\'s commands (kick, ban, say, map, restart, players)');
 }
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await main(process.argv[2]);

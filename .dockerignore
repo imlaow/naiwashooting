@@ -1,0 +1,11 @@
+# server/Dockerfile's context is the repo root: send only what tools/pack-server.mjs reads.
+*
+!server/
+server/node_modules
+server/test
+server/server.json
+server/bans.json*
+!src/
+!tools/pack-server.mjs
+!docs/hosting.md
+!LICENSE

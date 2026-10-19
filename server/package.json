@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Self-hosted co-op and PvP server for 奶蛙射击 (Naiwa Shootout)",
+  "license": "Apache-2.0",
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {

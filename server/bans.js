@@ -39,6 +39,10 @@ export function bannable(ip, trust = []) {
   return !!k && !isLoopback(ip) && k !== addressKey('::1') && !trust.some((t) => addressKey(t) === k);
 }
 
+// Whether `peer` (a socket's address) is one of `trust`, the proxies whose X-Forwarded-For is
+// believed.
+export const trusted = (peer, trust = []) => trust.some((t) => plain(t) === plain(peer));
+
 // A forwarded address without the port some proxies add ("1.2.3.4:5678", "[2001:db8::1]:5678")
 // or the brackets around IPv6 ("[2001:db8::1]").
 const withoutPort = (s) => (/^\[([^\]]+)\](?::\d+)?$/.exec(s) ?? /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(s))?.[1] ?? s;
@@ -49,9 +53,18 @@ const withoutPort = (s) => (/^\[([^\]]+)\](?::\d+)?$/.exec(s) ?? /^(\d+\.\d+\.\d
 // itself (Cloudflare's edge, Caddy and nginx all put the address they saw last). Anything a
 // client wrote into the header comes before it. CF-Connecting-IP isn't read: behind Caddy a
 // client could send its own. A port or brackets around the entry are dropped (withoutPort).
+//
+// So "trustProxy" must list exactly the proxies that write the header themselves:
+// - cloudflared or Caddy on this machine: the default, ["127.0.0.1", "::1"];
+// - in Docker, the address the container sees them from (docs/hosting.md);
+// - Cloudflare in front of Caddy: Caddy only, and Caddy's trusted_proxies set to Cloudflare's
+//   ranges, so that the last entry it writes is the client's and not Cloudflare's edge;
+// - a raw TCP tunnel (playit.gg, ngrok tcp, ssh -R): [] (none). It hands over the bytes as they
+//   came, so its connections arrive from 127.0.0.1 with the header the client wrote itself, and
+//   trusting loopback would let anyone pick the address their ban goes by.
 export function clientAddress(peer, forwarded, trust = []) {
   const p = plain(peer);
-  if (!trust.some((t) => plain(t) === p)) return p || null;
+  if (!trusted(peer, trust)) return p || null;
   const last = plain(withoutPort(String(forwarded ?? '').split(',').pop().trim()));
   return isIP(last) ? last : p || null;
 }

@@ -1,10 +1,10 @@
 # Online play: self-hosted servers (design)
 
-Status: **stages 1–6 and 7a of 7 done** (layout extraction, the sim/view split, several players in
-the sim, the Colyseus server with the join screen, 2026-10-17; prediction, interpolation,
-reconnecting and the in-game multiplayer UI, 2026-10-18; PvP and rewind-checked hits, the owner's
-console, 2026-10-19). 7b, packaging and the hosting docs, is next. This is the agreed design; build
-it in the stages at the end.
+Status: **all 7 stages done** (layout extraction, the sim/view split, several players in the sim,
+the Colyseus server with the join screen, 2026-10-17; prediction, interpolation, reconnecting and
+the in-game multiplayer UI, 2026-10-18; PvP and rewind-checked hits, the owner's console, the npm
+package `naiwa-server`, the image `ghcr.io/imlaow/naiwa-server` and `docs/hosting.md`, 2026-10-19).
+This was the agreed design, built in the stages at the end; "Open questions" lists what is left.
 
 ## Decisions
 
@@ -30,7 +30,7 @@ it in the stages at the end.
 | Lag compensation for hits | `allowRewindState()`, the input's render-time stamp, `rewind.at(time)` (stage 6b) | nothing (it was deferred) |
 | Refusing connections (wrong version, banned, bad origin) | `onAuth` / `beforeUpgrade` | custom checks |
 | Admin: player list, kick, ban, say, map, restart | a console on the server's own terminal (stdin, `server/console.js`, stage 7a) | `@colyseus/monitor` / `@colyseus/admin` behind `basicAuth()` (see "Stage 7a as built" for why) |
-| Headless tests and bot load tests | `@colyseus/testing`, `@colyseus/loadtest` | our own harness |
+| Headless tests and bot load tests | `@colyseus/testing`; bots: `tools/bot-clients.mjs`, not `@colyseus/loadtest` (see "Stage 7b as built") | our own harness |
 | TLS and a public address | `cloudflared` or Caddy | anything in our code |
 | Distribution | Docker image, plus `npx naiwa-server` | an installer |
 
@@ -46,7 +46,8 @@ it in the stages at the end.
 
 **Server size.** Measured on one Neoverse-N1 (ARM) core, Node 24: building the island takes 140 ms
 and 15 MB, the factory 3 ms. A synthetic heavy tick (20 enemies steering, 120 bullets, line-of-sight
-checks, 8 players moving) takes 0.22 ms, so 1.3 % of a core at 60 Hz. Allowing ×5 for the real sim plus
+checks, 8 players moving) takes 0.22 ms, so 1.3 % of a core at 60 Hz. (Stage 7b measured the real thing
+with bots: 4–8 % of a core, 91–122 MB, 2–16 KB/s per player; see "Stage 7b as built".) Allowing ×5 for the real sim plus
 schema encoding, that's under 10 % of one core and about 100–150 MB of memory with Colyseus. Upload
 bandwidth is the real limit. The estimate is 15–25 KB/s per player (20 Hz delta patches + bullet and
 event messages), so about 0.8 Mbps for 4 players and 1.5 Mbps for 8. Measure it in stage 7. (Stage 4 measured
@@ -1202,6 +1203,157 @@ servers are labelled with the name they had last time.
     and 3.97 px at 250 ms. The prediction is back at the wire's rounding within a second of each
     PvP event.
 
+## Stage 7b as built
+
+Packaging, publishing, the hosting docs and a load test (2026-10-19). Owners now run
+`npx naiwa-server@latest` or the Docker image, and follow `docs/hosting.md`.
+
+**The npm package `naiwa-server`** (public on npmjs.com, Apache-2.0 like the repo; the repo stays
+private). `tools/pack-server.mjs` builds it in `build/`:
+
+- **Copied, not bundled.** The server's files and what they import (`src/sim/` and `src/island.js`,
+  `factory.js` and `noise.js`, which the sim's map builders use) go in at the same relative
+  paths. So every import works unchanged, a stack trace points at the same file and line as in the
+  repo, and there is no bundler to add or configure. Only files reachable by imports from
+  `server/cli.js` go in: not `sim/bot.js`, the view or the tests.
+- The Colyseus packages stay dependencies at their pinned versions, and an `npm-shrinkwrap.json`
+  (the server's `package-lock.json` pruned of its devDependencies) gives every install the tree
+  that was tested, transitive dependencies included. A newer `ws` reaches owners only with a new
+  release.
+- The script lists what npm would publish and fails on anything outside an allowlist
+  (`package.json`, `README.md`, `LICENSE`, `npm-shrinkwrap.json`, `server/*.js` outside `test/`,
+  `server/server.example.json`, `src/**/*.js`). The 0.1.0 tarball: 21 files, 92 kB packed,
+  281 kB unpacked (35 kB of it the README). No tests, `.env`, `server.json`, `bans.json` or scratch files.
+- The package's README is `docs/hosting.md`, so the guide is on npmjs.com, the one public page
+  owners can read (the repo is private).
+- `server/cli.js` is the package's command. Its config is `./server.json` in the directory it is
+  started from, or the path given; `bans.json` goes next to it. With neither, it copies the example
+  there and says where. It refuses Node < 22 with a message (checked on Node 20: npm only warns
+  `EBADENGINE`), and a directory it can't write with what to do. `--version`, `--help`.
+  `npm run server` in the repo keeps `server/server.json` or the defaults, as before.
+- `server/index.js` prints `naiwa-server <version> (protocol N)` on start (`VERSION` from
+  `server/package.json` in the repo, the package's own `package.json` one level up in the package).
+
+**The Docker image `ghcr.io/imlaow/naiwa-server`** (`server/Dockerfile`, built from the repo root
+with `.dockerignore` sending only `server/`, `src/`, the pack script, `docs/hosting.md` and
+`LICENSE`):
+
+- Two stages. The first runs `tools/pack-server.mjs` and installs the tarball into `/app`, on the
+  build machine's own platform (`FROM --platform=$BUILDPLATFORM`): the packages are plain JS, so the
+  amd64 image builds on this arm64 machine with no QEMU. The second is `node:24-alpine` with only
+  `COPY` lines (no `RUN`, which would need the emulator), `USER node` (uid 1000), `WORKDIR /data`,
+  `VOLUME /data`, the entrypoint `node /app/node_modules/naiwa-server/server/cli.js`. So it runs
+  exactly what `npx` runs, with `/data/server.json` made on a first start.
+- About 66 MB compressed per platform (`node:24-alpine` is 62 MB of that); 263 MB on disk for arm64.
+  The amd64 image was inspected (an x86-64 musl `node`, the same package, user and entrypoint) but
+  can't run here without a binfmt emulator.
+- Node is PID 1. Colyseus handles SIGTERM, so `docker stop` takes 0.17 s, not the 10 s kill.
+- **The console in a container** (all checked here through a pseudo-terminal):
+  - `docker run -dit` then `docker attach`: commands work. Ctrl+P Ctrl+Q detaches and the server
+    runs on. Ctrl+C in the attach stops it (exit 0; `docker start` brings it back).
+  - Without `-it`, stdin is empty: the server runs on, and the console now says so in the log
+    (`(stdin ended: …)`, `console.js`), which also covers a service and `< /dev/null`.
+  - Compose with `stdin_open` and `tty`: `docker attach` and `docker compose attach` both work.
+  - Editing the config: `docker exec -it naiwa vi /data/server.json` works (busybox vi).
+  - A bind-mounted directory owned by root: the first start couldn't write `server.json` and
+    crashed with a stack trace. `cli.js` now says to `chown 1000:1000` it, and that fix was checked.
+- **What address the server sees through Docker's port mapping** (checked with `players`):
+  connections to the host's `127.0.0.1` or `::1` come through docker-proxy from the network's
+  gateway: `172.17.0.1` on the default bridge, `172.22.0.1` on the Compose project's network here.
+  A connection to the host's own LAN address kept its address (10.0.0.115). So a tunnel or Caddy
+  on the host arrives as the gateway, and `trustProxy` must hold it: `["172.17.0.1"]` for
+  `docker run`. Without that, everyone was 172.17.0.1, and banning one player's address would have
+  refused them all. The docs publish the port on `127.0.0.1` only (Docker's published ports bypass
+  ufw, and nothing but the tunnel or Caddy on the host needs it).
+- **A new log line for an untrusted proxy** (`index.js transport`): a socket that sent
+  `X-Forwarded-For` from an address not in `trustProxy` is named once per address
+  (`a connection from 172.17.0.1 came through a proxy …, add it to "trustProxy"`), unless it is a
+  raw TCP tunnel. That is how a Docker or Compose owner finds the gateway to trust. It can't spot the
+  opposite mistake (a raw TCP tunnel on a trusted 127.0.0.1), which only the docs can warn about.
+
+**Proxy chains, checked with real Caddy 2.11.7 and cloudflared 2026.10.1:**
+
+- Caddy alone: it replaces whatever `X-Forwarded-For` the client sent with the address it saw, so
+  the default `trustProxy` is right (a forged header from 10.0.0.115 came out as 10.0.0.115).
+- **Cloudflare in front of Caddy needs more than 7a thought.** Trusting Cloudflare in Caddy
+  (`trusted_proxies`) makes Caddy *append* Cloudflare's edge (`client, edge`), and not trusting it
+  makes the header just the edge. Either way the last entry, the one `clientAddress` reads, is
+  Cloudflare's edge, so the server would ban Cloudflare edges. The recipe: `trusted_proxies static
+  <Cloudflare's ranges>`, `client_ip_headers Cf-Connecting-Ip` and
+  `header_up X-Forwarded-For {client_ip}`. Checked with 127.0.0.1 standing in for Cloudflare: a
+  request from "Cloudflare" gets the `CF-Connecting-IP` address; one from elsewhere with a forged
+  `CF-Connecting-IP` gets its own address.
+- The whole chain: bots over `wss://` through Caddy (`tls internal`) into the arm64 container, and
+  through a real quick tunnel (`trycloudflare.com`) into the container and into the npm install.
+  Through the tunnel, `players` showed this machine's public address in both.
+- Raw TCP tunnels: simulated with a local relay that adds `X-Forwarded-For: 6.6.6.6`, as a client
+  can through playit.gg or ngrok tcp. With the default `trustProxy` the player was 6.6.6.6, with
+  `[]` 127.0.0.1. Hence `[]` in the docs and the `bans.js clientAddress` comment, with the exception
+  of an `ssh -R` port only Caddy on the VPS can reach. These tunnels carry no TLS, so browsers can't
+  join through them alone.
+- Ban by address and `bans.json` in the volume, through Caddy and Docker with the gateway trusted:
+  the banned address refused (`banned`), `unban` lifting it.
+
+**Smaller fixes found on the way:**
+
+- A port in use made `npm run server` hang for good. ws-transport prints the error, but Colyseus
+  0.18.19 only rejects `listen()` for errors after it listens. `start()` now races the HTTP server's
+  first `error`, and the owner is told which port and file.
+- `tools/bot-clients.mjs --server <url> [--pid N]` joins a server already running (the package, the
+  container, a tunnel), whose own `server.json` sets the rules, and reports its CPU from `--pid`.
+
+**The load test: `tools/bot-clients.mjs`, not `@colyseus/loadtest`.** loadtest 0.18.3 is a blessed
+terminal UI that starts N copies of a client script. The CPU, memory and bytes it shows are its own
+process's and what its clients received, not the server's, and its clients would have been our bots
+anyway (a client that only joins never says `ready`, so the server never runs a fight). It would add
+blessed, typescript and a second `@colyseus/sdk`, and give nothing bot-clients doesn't. bot-clients
+reports the server's own `stats` (tick time, memory, bytes sent per client) and its CPU from
+`/proc`. Run alone on this machine (2 Neoverse-N1 cores, Node 24, other services idling at a load of
+about 0.5), 3 minutes each, `maxPlayers` = the bots:
+
+| Run | Server CPU (one core) | RSS | Tick avg / max | Sent per client (mean / peak 10 s) | Estimate ("Server size") |
+| --- | --- | --- | --- | --- | --- |
+| co-op 4, from wave 8 (to wave 10, up to 28 enemies) | 5.3 % | 102–121 MB | 0.30 / 11.2 ms | 7.5 / 12.5 KB/s | < 10 %, 100–150 MB, 15–25 KB/s |
+| co-op 8, from wave 8 (to wave 10) | 8.0 % | 95–122 MB | 0.45 / 6.2 ms | 10.9 / 16.4 KB/s | the same; 1.5 Mbps in all |
+| PvP 4 (44 kills) | 3.7 % | 91–106 MB | 0.10 / 2.7 ms | 2.3 / 2.8 KB/s | |
+| PvP 8 (107 kills) | 6.0 % | 92–117 MB | 0.21 / 3.3 ms | 4.9 / 5.7 KB/s | |
+
+- Every figure is under the estimate. Eight players in a busy co-op wave send about 1 Mbps at the
+  peak (0.7 Mbps on average), against 1.5 Mbps estimated, and use under a tenth of a core.
+- PvP sends far less than co-op: no enemies, and players' bullets are few.
+- The 11 ms tick is a single one in the co-op 4 run: a GC or a map build, still under the 16.7 ms
+  step.
+- The bots themselves (one process, 8 NetSims) took 11–13 % of a core for 8 players. The recommended
+  minimum stays 1 vCPU and 512 MB–1 GB.
+
+**`docs/hosting.md`**, in Chinese and English: install with npx or Docker (and Compose), updating,
+`server.json`, localhost testing, the quick tunnel, a named tunnel, Caddy, Cloudflare in front of
+Caddy, raw TCP tunnels, a `trustProxy` table for each setup, every console command and how to reach
+the console under npx, tmux, Docker, Compose and systemd, bans, firewall and ports, mainland China,
+and the measured machine size. Commands not run here are marked: the named tunnel, Caddy with a
+real domain, apt and ufw, the system service (the same command ran under `systemd-run --user`; a
+node from nvm needs its full path there), the macOS and Windows installs, playit.gg / ngrok /
+ssh -R. The ONLINE panel has no help text to link it from. The README links it.
+
+**Published** (2026-10-19), once every check above had passed:
+
+- npm `naiwa-server@0.1.0` (`latest`), published by `laowdev` with a one-time code (the account
+  needs 2FA to publish; a plain `npm publish` is refused with 403). Its shasum is the tarball
+  tested here. Checked from outside: `npx --yes naiwa-server@0.1.0` in an empty directory with an
+  empty npm cache made `server.json`, and bots and the console worked against it. In a terminal,
+  npx first asks `Ok to proceed? (y)`.
+- `ghcr.io/imlaow/naiwa-server:0.1.0` and `:latest`: one index with linux/arm64 and linux/amd64
+  (plus the build's attestation), pushed with `docker buildx … --push`. A new ghcr package starts
+  private, and GitHub's API can't change a container package's visibility. So it has to be made
+  public by hand, under the package's settings ("Change visibility"). Checked with `docker pull`, the
+  guide's `docker run -dit …` and its Compose file word for word: bots, the console, and
+  `172.17.0.1` through the port mapping.
+- Found by running the guide's commands against the published artifacts: `tmux new -s naiwa
+  'npx …'` dies at once with an nvm node (tmux runs the command without the shell's PATH). The
+  guide now opens the session first. The README on npm is still the old text until the next
+  version.
+
+
 ## Networking with Colyseus
 
 One room type, `NaiwaRoom`, one room per server (the server *is* the room). The map choice, mode and
@@ -1247,6 +1399,7 @@ targets (stage 6b). `@colyseus/sdk/debug` (drift telemetry and a latency simulat
 server/
   index.js        defineServer(): NaiwaRoom, the transport, port from server.json, the console
   room.js         NaiwaRoom: onAuth, onJoin/onLeave, fixed step → Sim, mode rules, map rotation
+  cli.js          the package's command (npx naiwa-server, the image): ./server.json
   console.js      the owner's commands, typed into the server's terminal
   bans.js         bans.json, addresses behind a tunnel
   schema.js       NaiwaState and friends
@@ -1255,8 +1408,9 @@ server/
 ```
 
 - Node 22+ (Colyseus 0.18's minimum). Imports `src/sim/` directly, so map and rule changes reach the
-  server with no copying. Run from the repo with `npm run server`. Later publish a bundled
-  `naiwa-server` package (`npx naiwa-server`) and a Docker image.
+  server with no copying. Run from the repo with `npm run server`. Published as the npm package
+  `naiwa-server` (`npx naiwa-server`, with `src/sim/` copied in) and the Docker image
+  `ghcr.io/imlaow/naiwa-server` (stage 7b).
 - `server.json`:
 
   ```json
@@ -1320,10 +1474,10 @@ Each stage leaves single-player working and is pushed on its own.
 6. **PvP mode,** with rewind-checked hits. **Done.** 6a: the deathmatch rules (see "Stage 6a as
    built"). 6b: bullets tested where their shooter saw the target, in PvP and on co-op enemies
    (see "Stage 6b as built").
-7. **Admin, packaging and docs.** 7a, **done**: the owner's console (kick, ban, say, map, restart;
+7. **Admin, packaging and docs. Done.** 7a: the owner's console (kick, ban, say, map, restart;
    see "Stage 7a as built"). 7b: `docs/hosting.md` (tunnel and Caddy recipes in Chinese and
-   English, `trustProxy` for Docker and proxy chains), Docker image, npm package, a
-   `@colyseus/loadtest` run at `maxPlayers`.
+   English, `trustProxy` for Docker and proxy chains), the Docker image, the npm package, a bot
+   load test at `maxPlayers` 4 and 8 (see "Stage 7b as built").
 
 ## Open questions
 

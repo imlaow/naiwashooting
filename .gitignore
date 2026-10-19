@@ -13,3 +13,4 @@ server/node_modules
 server/server.json
 server/bans.json
 server/bans.json.tmp
+build

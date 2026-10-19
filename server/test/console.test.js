@@ -1,17 +1,20 @@
 // The owner's console in a real naiwa-server process (server/index.js) on 127.0.0.1:2571: commands
 // read from stdin, and a server that keeps running when stdin is closed, empty, ends, or is the
 // terminal of a shell that put the server in the background (which would stop a process reading
-// it, SIGTTIN). The commands themselves are tested in room.test.js.
+// it, SIGTTIN). The commands themselves are tested in room.test.js. Also what the log says about
+// an untrusted proxy, and the package's command (cli.js) making a server.json on a first run.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from '../../src/net/online.js';
 
 const PORT = 2571;
 const INDEX = fileURLToPath(new URL('../index.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../cli.js', import.meta.url));
 const dir = mkdtempSync(`${tmpdir()}/naiwa-console-`);
 const CFG = `${dir}/server.json`;
 writeFileSync(CFG, JSON.stringify({ port: PORT, maps: ['factory/dairy'], log: false }));
@@ -80,4 +83,50 @@ test('started in the background of a terminal: not stopped by it', { skip: !hasS
   assert.ok(r.stdout.includes('type "help" here'), `didn't start:\n${r.stdout}`);
   assert.ok(!/Stopped/.test(r.stdout), `stopped by the terminal:\n${r.stdout}`);
   assert.match(r.stdout, /Running/);
+});
+
+// A WebSocket upgrade with these headers, closed once it is accepted.
+const upgrade = (headers) => new Promise((resolve, reject) => {
+  const req = request({ host: '127.0.0.1', port: PORT, path: '/', headers: {
+    Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==', ...headers,
+  } });
+  req.on('upgrade', (res, socket) => { socket.destroy(); resolve(); });
+  req.on('response', (res) => reject(new Error(`no upgrade: ${res.statusCode}`)));
+  req.on('error', reject);
+  req.end();
+});
+
+test('a proxy that is not in trustProxy is named in the log, once', async () => {
+  const cfg = `${dir}/untrusted.json`;
+  writeFileSync(cfg, JSON.stringify({ port: PORT, maps: ['factory/dairy'], log: false, trustProxy: [] }));
+  const p = await start(process.execPath, [INDEX, cfg], 'ignore');
+  await upgrade({});
+  await upgrade({ 'X-Forwarded-For': '203.0.113.7' });
+  await upgrade({ 'X-Forwarded-For': '198.51.100.9' });
+  await waitFor(p, 'came through a proxy', 'the untrusted proxy line');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(p.out.split('came through a proxy').length - 1, 1, p.out);
+  assert.match(p.out, /from 127\.0\.0\.1 came through a proxy/);
+  await stop(p);
+  // Trusted (the default): nothing said.
+  const q = await start(process.execPath, [INDEX, CFG], 'ignore');
+  await upgrade({ 'X-Forwarded-For': '203.0.113.7' });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(!q.out.includes('came through a proxy'), q.out);
+  await stop(q);
+});
+
+test('cli.js on a first run makes ./server.json from the example', async () => {
+  const cwd = mkdtempSync(`${tmpdir()}/naiwa-cli-`);
+  // The example's port (7777) may be taken here: making the file comes first either way.
+  const p = spawn(process.execPath, [CLI], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+  running.add(p);
+  let out = '';
+  for (const s of [p.stdout, p.stderr]) s.on('data', (d) => { out += d; });
+  const t0 = Date.now();
+  while (!out.includes('created') && Date.now() - t0 < 10000) await new Promise((r) => setTimeout(r, 20));
+  p.kill('SIGKILL');
+  assert.match(out, /created .*server\.json from the example/);
+  assert.ok(existsSync(`${cwd}/server.json`));
+  assert.deepEqual(JSON.parse(readFileSync(`${cwd}/server.json`, 'utf8')), JSON.parse(readFileSync(new URL('../server.example.json', import.meta.url), 'utf8')));
 });
