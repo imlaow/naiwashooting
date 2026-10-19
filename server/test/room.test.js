@@ -138,6 +138,13 @@ test('a browser from a site not in allowedOrigins is refused', async () => {
   // At matchmaking: the reason reaches the client.
   const evil = new Client(URL, { headers: { Origin: 'https://evil.example' } });
   await assert.rejects(evil.join('naiwa', { protocol: PROTOCOL }), (e) => e.message === 'origin');
+  // Not a 52x status: behind Cloudflare that is replaced by its own error page with no CORS header,
+  // and the browser could only say "can't reach the server".
+  for (const [origin, protocol] of [['https://evil.example', PROTOCOL], ['https://good.example', 0]]) {
+    const res = await fetch('http://127.0.0.1:2568/matchmake/joinOrCreate/naiwa', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ protocol }) });
+    assert.equal(res.status, 403);
+    assert.equal(res.headers.get('access-control-allow-origin'), origin);
+  }
   const good = new Client(URL, { headers: { Origin: 'https://good.example' } });
   clients.push(await good.join('naiwa', { protocol: PROTOCOL }));
   // At the WebSocket upgrade (beforeUpgrade), for anything that skips matchmaking.

@@ -1299,6 +1299,17 @@ with `.dockerignore` sending only `server/`, `src/`, the pack script, `docs/host
 - A port in use made `npm run server` hang for good. ws-transport prints the error, but Colyseus
   0.18.19 only rejects `listen()` for errors after it listens. `start()` now races the HTTP server's
   first `error`, and the owner is told which port and file.
+- **Refusals behind Cloudflare looked like a dead server** (found after publishing 0.1.0, in a
+  real test). The static `onAuth` threw `ServerError(ErrorCode.AUTH_FAILED)`, and Colyseus uses
+  the code as the HTTP status: 525. Cloudflare (every tunnel, and its proxy) takes 520–530 for its
+  own errors ("525: SSL handshake failed") and puts its own page in their place, with no CORS
+  header. So the browser's fetch failed, and every refusal (origin, password, full, banned,
+  version) showed as "can't reach the server". Refusals are now 403 (and "not ready" 503 instead
+  of 523), with the reason in the body as before. Checked through a quick tunnel: `403` with
+  `{"error":"origin"}` and the CORS header, and the SDK's error mapped to the `origin` and
+  `version` reasons. A test in `room.test.js` keeps the status at 403.
+- `server.example.json` also allows the Worker's own address,
+  `https://naiwa-shootout.yuchenweng2010.workers.dev`, which players use too.
 - `tools/bot-clients.mjs --server <url> [--pid N]` joins a server already running (the package, the
   container, a tunnel), whose own `server.json` sets the rules, and reports its CPU from `--pid`.
 

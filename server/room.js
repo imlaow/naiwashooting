@@ -44,7 +44,7 @@
 // The owner's console (server/console.js) kicks, bans, says, changes the map and restarts the run
 // through kick(), ban(), say(), changeMap() and restart() below, between two steps; each says
 // which states it can find the room and the player in.
-import { Room, ServerError, ErrorCode, CloseCode, Protocol } from '@colyseus/core';
+import { Room, ServerError, CloseCode, Protocol } from '@colyseus/core';
 import { makeChoice, buildMap, RANDOM_ID, THEMES } from '../src/sim/maps.js';
 import { Sim, STEP } from '../src/sim/sim.js';
 import { idleCommand } from '../src/sim/entities.js';
@@ -79,6 +79,12 @@ const MAY_RECONNECT = new Set([CloseCode.GOING_AWAY, CloseCode.NO_STATUS_RECEIVE
 
 // Why a join was refused; the browser turns these into messages (src/net/online.js).
 export const REFUSED = { version: 'version', full: 'full', password: 'password', origin: 'origin', banned: 'banned' };
+
+// The HTTP status of a refused matchmaking request (the reason is in the body, which the SDK reads
+// for any status). Not Colyseus's AUTH_FAILED (525) or MATCHMAKE_UNHANDLED (523): Cloudflare (a
+// tunnel, its proxy) takes 520–530 for its own errors and puts its own page in their place, with
+// no CORS header, so the browser could only say it can't reach the server.
+const REFUSED_STATUS = 403, NOT_READY_STATUS = 503;
 
 // Whether a browser from `origin` may play: an empty list or '*' lets any site in. Used by the
 // room's join check and the server's WebSocket upgrade alike.
@@ -130,9 +136,9 @@ export class NaiwaRoom extends Room {
   // browser as an error with the reason.
   static async onAuth(token, options, context) {
     const room = NaiwaRoom.current;
-    if (!room) throw new ServerError(ErrorCode.MATCHMAKE_UNHANDLED, 'not ready');
+    if (!room) throw new ServerError(NOT_READY_STATUS, 'not ready');
     const why = room.refuse(options ?? {}, context?.headers?.get('origin'));
-    if (why) throw new ServerError(ErrorCode.AUTH_FAILED, why);
+    if (why) throw new ServerError(REFUSED_STATUS, why);
     return { name: cleanName(options?.name), id: cleanId(options?.id) };
   }
 
@@ -275,7 +281,7 @@ export class NaiwaRoom extends Room {
   // onDrop and onLeave for the client, which find no seat.
   onJoin(client, options, auth) {
     const ip = client.ref?.address ?? null;
-    if (this.config.banAddresses !== false && ip && this.bans.find({ ip })) throw new ServerError(ErrorCode.AUTH_FAILED, REFUSED.banned);
+    if (this.config.banAddresses !== false && ip && this.bans.find({ ip })) throw new ServerError(REFUSED_STATUS, REFUSED.banned);
     // Colours by join order: the lowest one nobody here has.
     const taken = new Set([...this.seats.values()].map((s) => s.colour));
     let colour = 0;
