@@ -48,7 +48,6 @@ const pkg = {
   description: own.description,
   license: own.license,
   keywords: ['naiwa', 'game server', 'colyseus', 'multiplayer'],
-  homepage: 'https://naiwashootout.laow.dev',
   type: 'module',
   bin: { 'naiwa-server': 'server/cli.js' },
   engines: own.engines,

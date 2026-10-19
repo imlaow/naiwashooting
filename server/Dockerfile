@@ -19,7 +19,6 @@ RUN node tools/pack-server.mjs \
 FROM node:${NODE}
 LABEL org.opencontainers.image.title="naiwa-server" \
       org.opencontainers.image.description="Self-hosted co-op and PvP server for 奶蛙射击 (Naiwa Shootout)" \
-      org.opencontainers.image.url="https://naiwashootout.laow.dev" \
       org.opencontainers.image.licenses="Apache-2.0"
 ENV NODE_ENV=production
 COPY --from=build /app /app
