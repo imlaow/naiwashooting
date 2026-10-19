@@ -680,17 +680,22 @@ test('a point-blank shot the browser predicted plays its hit once, though the se
     // Long enough for the prediction to take A's new spot and the timeline to draw B at its own.
     await sleep(600);
     ab.events.length = 0;
+    // The trigger is held until the server's shot comes back: a step that folds commands takes
+    // the trigger from the newest (server/room.js, fold), so a single fire command can be folded
+    // away, its shot predicted and never fired. Meanwhile the prediction may fire again.
     ab.cmd = { ...idleCommand(0), fire: true };
-    await until(() => ab.events.some((e) => e.type === 'shot'), 'the predicted shot');
-    ab.cmd = idleCommand(0);
     await until(() => ticks.length, 'the server\'s shot');
+    ab.cmd = idleCommand(0);
     await sleep(500);
     const [{ ev, born }] = ticks;
     assert.ok(ev.some((e) => e.type === 'bulletHit' && e.target === 'player'), 'the server hit B on the first step');
     assert.ok(!born.some((x) => unpackBullet(x).owner === A.id), 'so it never sent the bullet');
-    assert.equal(ab.events.filter((e) => e.type === 'shot').length, 1, 'one shot');
+    const { seq } = ev.find((e) => e.type === 'shot' && e.id === A.id);
+    const shots = ab.events.filter((e) => e.type === 'shot');
+    assert.ok(shots.every((e) => e.predicted), 'no shot played again');
+    assert.equal(shots.filter((e) => Math.abs(e.seq - seq) <= 2).length, 1, 'one predicted shot is the server\'s');
     const hits = ab.events.filter((e) => e.type === 'bulletHit');
-    assert.deepEqual(hits.map((e) => [e.target, !!e.predicted]), [['player', true]], 'the predicted hit, and only that');
+    assert.deepEqual(hits.map((e) => [e.target, !!e.predicted]), shots.map(() => ['player', true]), 'the predicted hits, and only those');
   } finally {
     ab.stop();
   }
