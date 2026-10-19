@@ -1344,8 +1344,9 @@ ssh -R. The ONLINE panel has no help text to link it from. The README links it.
   npx first asks `Ok to proceed? (y)`.
 - `ghcr.io/imlaow/naiwa-server:0.1.0` and `:latest`: one index with linux/arm64 and linux/amd64
   (plus the build's attestation), pushed with `docker buildx … --push`. A new ghcr package starts
-  private, and GitHub's API can't change a container package's visibility. So it has to be made
-  public by hand, under the package's settings ("Change visibility"). Checked with `docker pull`, the
+  private, and GitHub's API can't change a container package's visibility. So it was made public
+  by hand, under the package's settings ("Change visibility"). Checked: a `docker pull` with no
+  login, and bots against that image. Before that, with a login: `docker pull`, the
   guide's `docker run -dit …` and its Compose file word for word: bots, the console, and
   `172.17.0.1` through the port mapping.
 - Found by running the guide's commands against the published artifacts: `tmux new -s naiwa
