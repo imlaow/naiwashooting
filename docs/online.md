@@ -1362,8 +1362,13 @@ ssh -R. The ONLINE panel has no help text to link it from. The README links it.
   `172.17.0.1` through the port mapping.
 - Found by running the guide's commands against the published artifacts: `tmux new -s naiwa
   'npx …'` dies at once with an nvm node (tmux runs the command without the shell's PATH). The
-  guide now opens the session first. The README on npm is still the old text until the next
-  version.
+  guide now opens the session first.
+- **0.1.1** (2026-10-20): refusals sent as 403 rather than Cloudflare's 525 (see "Smaller fixes"),
+  the Worker's workers.dev address in the default `allowedOrigins`, the guide's fixes, no
+  homepage link or image url label. The tarball was tested as for 0.1.0 (co-op and PvP bots, the
+  console, a refusal answered 403). npm's shasum matches it. Checked from outside:
+  `npx naiwa-server@0.1.1` with an empty cache, and the image pulled with no login (both
+  platforms; `latest` moved to it), with bots playing against each.
 
 
 ## Networking with Colyseus
