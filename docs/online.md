@@ -1369,6 +1369,12 @@ ssh -R. The ONLINE panel has no help text to link it from. The README links it.
   console, a refusal answered 403). npm's shasum matches it. Checked from outside:
   `npx naiwa-server@0.1.1` with an empty cache, and the image pulled with no login (both
   platforms; `latest` moved to it), with bots playing against each.
+- **0.1.2** (2026-11-03, protocol 9): islands grew from 3200 to 4000 px (the factory stays 3200),
+  so wire positions cover up to 4256 px (0.07 px steps). The tarball was tested as before (co-op
+  bots; PvP bots with `pvp` set to the bots' 8 kills / 90 s, else they report "no round ended").
+  npm's shasum matches it; published with the browser confirmation npm now asks for. Checked from
+  outside: `npx --yes naiwa-server@0.1.2` with an empty cache, and the image (both platforms,
+  `latest` moved to it) pulled with no login and run, with bots against each.
 
 
 ## Networking with Colyseus
