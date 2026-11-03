@@ -1375,6 +1375,13 @@ ssh -R. The ONLINE panel has no help text to link it from. The README links it.
   npm's shasum matches it; published with the browser confirmation npm now asks for. Checked from
   outside: `npx --yes naiwa-server@0.1.2` with an empty cache, and the image (both platforms,
   `latest` moved to it) pulled with no login and run, with bots against each.
+- **0.1.3** (2026-11-03, protocol 10): the factory grew from 3200 to 4000 px too, with a third
+  belt, six silos, a cold store and a bigger yard, so a 0.1.2 server would build a different
+  factory. The tarball was tested in an empty directory with `maps` set to factory first: co-op
+  bots (wave 4, no errors) and PvP bots at 8 kills / 90 s (a round on the factory ended, then the
+  island). npm's shasum matches it. Checked from outside: `npx --yes naiwa-server@0.1.3` with an
+  empty cache, and the image (both platforms, `latest` moved to it) pulled with no login and run,
+  with co-op bots against each.
 
 
 ## Networking with Colyseus
