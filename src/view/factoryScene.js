@@ -3,7 +3,7 @@
 // in world.js. Its own seeded RNG only places decoration (cartons, lamp phases, the trees
 // outside, clouds, steam vents).
 import { Sprite, TilingSprite, Graphics } from 'pixi.js';
-import { WALL0, WALL1, WALL_T, GATE, CANAL, HALL, FACTORY_SIZE } from '../factory.js';
+import { WALL_T } from '../factory.js';
 import { factoryArt, building } from '../factoryArt.js';
 import { makeSprite } from './world.js';
 import { mulberry32 } from '../noise.js';
@@ -17,6 +17,7 @@ export class FactoryEnvironment {
     const { island: fac, art, layers } = game;
     this.fac = fac;
     this.art = art;
+    this.furnaces = [];
     this.fa = factoryArt();
     this.layout = layout;
     this.rand = mulberry32(fac.seed + 1234);
@@ -37,6 +38,7 @@ export class FactoryEnvironment {
   // ---------- Ground ----------
   buildGround(layers, tex) {
     const M = 1600;
+    const { size: FACTORY_SIZE, wall1: WALL1, gate: GATE } = this.fac;
     const grass = new TilingSprite({ texture: this.fa.grass, width: FACTORY_SIZE + M * 2, height: FACTORY_SIZE + M * 2 });
     grass.position.set(-M, -M);
     layers.ocean.addChild(grass);
@@ -56,6 +58,7 @@ export class FactoryEnvironment {
   // Concrete panels with a coping on top. The north wall and the side walls sit behind
   // everything; the south wall stands in front of whoever walks along it and fades for them.
   buildWalls(layer) {
+    const { wall0: WALL0, wall1: WALL1, gate: GATE } = this.fac;
     const len = WALL1 - WALL0;
     const face = (g, x, y, w) => {
       g.rect(x, y, w, WALL_H).fill(0x9c978c);
@@ -118,7 +121,7 @@ export class FactoryEnvironment {
         cartons.push({ s: c, u: x });
       }
       // Machines straddling this belt, by x: cartons inside one are hidden.
-      const machines = this.layout.objects.filter((o) => o.kind === 'machine' && o.foot.y < b.y && o.foot.y + o.foot.h > b.y + b.h).map((o) => o.x);
+      const machines = this.layout.objects.filter((o) => o.kind === 'machine' && o.foot.y < b.y && o.foot.y + o.foot.h > b.y + b.h && o.x > b.x && o.x < b.x + b.w).map((o) => o.x);
       this.belts.push({ b, s, cartons, machines });
     }
   }
@@ -167,7 +170,8 @@ export class FactoryEnvironment {
             // The furnace mouth glows and flickers.
             const fx = b.x + b.w / 2, fy = b.y + b.h - 20;
             this.addLight(fx, fy, 3.2, 0xff8a2a);
-            this.furnace = { x: fx, y: fy };
+            this.furnaces.push({ x: fx, y: fy });
+            this.furnace ??= this.furnaces[0];
           }
           continue;
         }
@@ -194,9 +198,10 @@ export class FactoryEnvironment {
   // ---------- Outside the fence ----------
   buildOutside() {
     const { art } = this;
+    const { size: FACTORY_SIZE, wall0: WALL0, wall1: WALL1, gate: GATE } = this.fac;
     const R = this.rand;
     const L = this.game.layers;
-    for (let i = 0; i < 88; i++) {
+    for (let i = 0, n = Math.round(88 * FACTORY_SIZE / 4000); i < n; i++) {
       // A belt of trees around the compound, kept off the road.
       const side = i % 4;
       const along = rnd(R, -300, FACTORY_SIZE + 300), out = rnd(R, 90, 520);
@@ -212,7 +217,7 @@ export class FactoryEnvironment {
       this.addObject(makeSprite(this.fa.cone), x, y);
     }
     this.clouds = [];
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0, n = Math.round(11 * (FACTORY_SIZE / 4000) ** 2); i < n; i++) {
       const s = makeSprite(art.cloud);
       s.position.set(rnd(R, 0, FACTORY_SIZE), rnd(R, 0, FACTORY_SIZE));
       s.scale.set(rnd(R, 1.8, 3.4), rnd(R, 1.5, 2.6));
@@ -225,27 +230,32 @@ export class FactoryEnvironment {
   // ---------- Ambient ----------
   buildAmbient() {
     const L = this.game.layers;
-    // The milk canal flows: a strip of the ocean swell texture between each pair of bridges.
+    // The milk canals flow: a strip of the ocean swell texture between each pair of bridges.
     this.flows = [];
-    const cuts = [CANAL.x, ...this.fac.bridges.flatMap((b) => [b.x, b.x + b.w]), CANAL.x + CANAL.w];
-    for (let i = 0; i < cuts.length; i += 2) {
-      const s = new TilingSprite({ texture: this.art.waves, width: cuts[i + 1] - cuts[i], height: CANAL.h - 16 });
-      s.position.set(cuts[i], CANAL.y + 8);
-      s.tileScale.set(1.2, 0.5);
-      s.tint = 0xd9cfb8;
-      s.alpha = 0.5;
-      L.foam.addChild(s);
-      this.flows.push(s);
+    for (const C of this.fac.canals) {
+      const bridges = this.fac.bridges.filter((b) => b.y <= C.y && b.y + b.h >= C.y + C.h).sort((a, b) => a.x - b.x);
+      const cuts = [C.x, ...bridges.flatMap((b) => [b.x, b.x + b.w]), C.x + C.w];
+      for (let i = 0; i < cuts.length; i += 2) {
+        const s = new TilingSprite({ texture: this.art.waves, width: cuts[i + 1] - cuts[i], height: C.h - 16 });
+        s.position.set(cuts[i], C.y + 8);
+        s.tileScale.set(1.2, 0.5);
+        s.tint = 0xd9cfb8;
+        s.alpha = 0.5;
+        L.foam.addChild(s);
+        this.flows.push(s);
+      }
     }
-    // Steam vents in the hall floor.
+    // Steam vents in the hall floors.
     const R = this.rand;
     this.vents = [];
-    for (let i = 0; i < 9; i++) {
-      const x = rnd(R, HALL.x + 80, HALL.x + HALL.w - 80), y = rnd(R, HALL.y + 100, HALL.y + HALL.h - 80);
-      if (!this.fac.isFree(x, y, 20)) continue;
-      this.vents.push({ x, y, t: rnd(R, 0, 6) });
+    for (const H of this.fac.halls) {
+      for (let i = 0, n = Math.max(3, Math.round((9 * H.w * H.h) / (2280 * 1440))); i < n; i++) {
+        const x = rnd(R, H.x + 80, H.x + H.w - 80), y = rnd(R, H.y + 100, H.y + H.h - 80);
+        if (!this.fac.isFree(x, y, 20)) continue;
+        this.vents.push({ x, y, t: rnd(R, 0, 6) });
+      }
     }
-    this.smokeT = 0;
+    this.smokeT = this.fac.chimneys.map(() => 0);
     this.sparkT = 1;
   }
 
@@ -296,14 +306,14 @@ export class FactoryEnvironment {
     }
 
     // Chimney smoke, furnace embers, steam and the odd welding spark from a machine.
-    const ch = this.fac.chimney;
-    this.smokeT -= dt;
-    if (this.smokeT <= 0 && inView(ch.x, ch.y - 420, 600)) {
-      this.smokeT = 0.12;
+    this.fac.chimneys.forEach((ch, i) => {
+      this.smokeT[i] -= dt;
+      if (this.smokeT[i] > 0 || !inView(ch.x, ch.y - 420, 600)) return;
+      this.smokeT[i] = 0.12;
       fx.spawn({ tex: this.art.soft, x: ch.x + rnd(Math.random, -12, 12), y: ch.y - 410, vx: rnd(Math.random, 10, 30), vy: rnd(Math.random, -60, -35), life: rnd(Math.random, 2.4, 3.6), s0: 0.6, s1: rnd(Math.random, 3, 4.5), a0: 0.45, a1: 0, tint: 0x6b6764, drag: 0.4 });
-    }
-    if (this.furnace && inView(this.furnace.x, this.furnace.y) && Math.random() < dt * 6) {
-      fx.flame(this.furnace.x + rnd(Math.random, -30, 30), this.furnace.y, 0.7);
+    });
+    for (const f of this.furnaces) {
+      if (inView(f.x, f.y) && Math.random() < dt * 6) fx.flame(f.x + rnd(Math.random, -30, 30), f.y, 0.7);
     }
     for (const v of this.vents) {
       v.t -= dt;
@@ -320,8 +330,8 @@ export class FactoryEnvironment {
     }
     for (const c of this.clouds) {
       c.x += 12 * dt; c.y += 4 * dt;
-      if (c.x > FACTORY_SIZE + 600) c.x = -600;
-      if (c.y > FACTORY_SIZE + 500) c.y = -500;
+      if (c.x > this.fac.size + 600) c.x = -600;
+      if (c.y > this.fac.size + 500) c.y = -500;
     }
   }
 }

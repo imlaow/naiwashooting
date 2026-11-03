@@ -1,9 +1,10 @@
 // The factory's layout, in the same shape as islandLayout. Factory.plan() (factory.js) already
 // places everything with its own seeded RNG; this adds the perimeter wall and gathers the
 // colliders in the order they go into the StaticWorld. FactoryEnvironment draws what it lists.
-import { WALL0, WALL1, WALL_T } from '../factory.js';
+import { WALL_T } from '../factory.js';
 
 export function factoryLayout(fac) {
+  const { wall0: WALL0, wall1: WALL1 } = fac;
   const len = WALL1 - WALL0;
   const colliders = [
     { kind: 'rect', x: WALL0, y: WALL0, w: len, h: WALL_T },

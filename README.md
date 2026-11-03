@@ -13,7 +13,9 @@ npm run build    # static build in dist/
 
 Pick a map on the title screen's **选择地图 / MAPS** dashboard. Maps are grouped by theme; the
 island theme has six hand-tuned islands plus a random card that rolls a fresh seed, and the
-factory theme has the **奶蛋加工厂 / Dairy Plant**. Each card shows a painted preview and that
+factory theme has four plants (**奶蛋加工厂 / Dairy Plant**, **冷链物流园 / Cold-Chain Depot**,
+**双子灌装厂 / Twin Bottling Halls**, **奶罐森林 / Tank Forest**) plus **随机厂区 / Random Plant**,
+a new compound from each seed. Each card shows a painted preview and that
 map's best score, best wave and run count (kept in the browser). `?map=island/twins` or
 `?map=factory/dairy` opens a map directly and `?seed=1234` plays a random island with that seed.
 
@@ -52,7 +54,7 @@ npm run test:server                # the room tests
 | `pvp` | `{ "killLimit": 25, "timeLimit": 600 }`: a PvP round ends when someone reaches killLimit kills (1–999) or after timeLimit seconds (30–3600) |
 | `maxPlayers` | Players at once (1–16, default 4) |
 | `password` | `""` for none |
-| `maps` | The rotation, e.g. `"island/cove"`, `"factory/dairy"`, `"island/random"` (a new island each time) |
+| `maps` | The rotation, e.g. `"island/cove"`, `"factory/dairy"`, `"island/random"` (a new island each time), `"factory/random"` (a new factory each time) |
 | `allowedOrigins` | Sites whose pages may join (the official domains and `http://localhost:5173` by default); `["*"]` for any |
 | `banAddresses` | `true` (default): a ban also refuses the player's address, not only their browser |
 | `trustProxy` | The tunnel or proxy in front of the server (`["127.0.0.1", "::1"]`: one on the same machine). Only from these is the forwarded `X-Forwarded-For` address believed. In Docker it is the network's gateway (`172.17.0.1`), behind a raw TCP tunnel `[]`: see `docs/hosting.md` |
@@ -94,7 +96,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 - Shooting a red barrel makes it explode, and nearby barrels go off too.
 - Shallow water slows you down. Kill enemies in quick succession to build a combo multiplier.
 - Every 5th kill, Naiwa stops and laughs his head off for 12 seconds. He can't move or shoot while laughing, but nothing can hurt him.
-- In the factory, the three conveyor belts in the production hall carry anyone standing on them (the middle one the other way, and cut in two around the company egg so you can cross), the milk canal is wadeable but slow except on the two bridges, and machines, silos, containers, lorries and the warehouse, cold store and boiler house are cover. The SMG is under the water tower, the shotgun outside the warehouse and the rifle in the far corner behind the tanks.
+- In the factories, conveyor belts carry anyone standing on them, milk canals are wadeable but slow except on the bridges, and machines, silos, containers, lorries and buildings are cover. The SMG is always under the water tower; the shotgun is usually outside a warehouse and the rifle in a far corner. In the Dairy Plant the three belts run back and forth (the middle one is cut in two around the company egg so you can cross); the Depot has no canal but a maze of containers; the Bottling Halls are two halls with a street between them; the Tank Forest is rows of silos with long sightlines.
 
 ## Code map
 
@@ -123,7 +125,8 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/online.js` | The ONLINE panel's address rules, recently joined servers, the player's name and the browser's id (which bans go by) |
 | `src/dashboard.js` | The map dashboard: a section per theme, preview cards, random-seed card |
 | `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting; `DEFAULT_SHAPE` lists the knobs a map can turn |
-| `src/factory.js` | The factory map's layout (4000 px: hall, belts, canal, tank farm, buildings, yard), its floor painting and minimap; same terrain interface as `Island` plus belt `drift` |
+| `src/factory.js` | A factory map built from blocks (hall with belts, silos, canal with bridges, buildings, containers, lorries), its floor painting and minimap; same terrain interface as `Island` plus belt `drift` |
+| `src/factoryPlans.js` | The factory maps as plans that place those blocks: dairy, depot, bottling, tanks, and `random`, which rolls a compound from the seed |
 | `src/factoryArt.js` | Painted factory textures (silos, water tower, chimney, machines, containers, lorry, buildings), built the first time a factory loads |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX); guns are painted at the sim's `GUN_SIZES` |
 | `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), builds recoloured rival skins and, online, the teammates' colours (`TEAM`) |

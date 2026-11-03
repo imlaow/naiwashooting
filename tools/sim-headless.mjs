@@ -4,6 +4,7 @@
 //
 //   node tools/sim-headless.mjs                 10 minutes of game time on every preset map
 //   node tools/sim-headless.mjs --minutes 2 --map island/cove --seed 7
+//   node tools/sim-headless.mjs --map factory/random --seed 7     a random map, built from the seed
 //   node tools/sim-headless.mjs --players 3     co-op with 3 bots (1–4)
 //   node tools/sim-headless.mjs --trace > a.txt  also prints the state once per game second, so
 //                                                two versions of the sim can be compared with diff
@@ -13,7 +14,7 @@
 // break; with 3 or more, one bot also leaves when wave 4 starts and a new one joins 10 s later.
 // Exits with code 1 on any error: an exception, a position that isn't a number, a player off
 // walkable ground, or a fight with no kill for STALL seconds.
-import { THEMES, makeChoice, buildMap } from '../src/sim/maps.js';
+import { THEMES, makeChoice, buildMap, RANDOM_ID } from '../src/sim/maps.js';
 import { Sim, STEP } from '../src/sim/sim.js';
 import { Bot } from '../src/sim/bot.js';
 import { mulberry32 } from '../src/noise.js';
@@ -143,7 +144,9 @@ function playMap(choice) {
 
 const maps = [];
 for (const th of THEMES) for (const v of th.variants) maps.push(makeChoice(th.id, v.id));
-const todo = ONLY ? maps.filter((c) => `${c.theme}/${c.id}` === ONLY) : maps;
+// A theme's random map (island/random, factory/random) is built from --seed.
+const [onlyTheme, onlyId] = (ONLY ?? '').split('/');
+const todo = !ONLY ? maps : onlyId === RANDOM_ID ? [makeChoice(onlyTheme, RANDOM_ID, SEED)] : maps.filter((c) => `${c.theme}/${c.id}` === ONLY);
 if (!todo.length) { console.error(`no preset map ${ONLY}`); process.exit(1); }
 
 console.log(`${MINUTES} min of game time per map, seed ${SEED}${PLAYERS > 1 ? `, ${PLAYERS} bots (co-op)` : ''}\n`);

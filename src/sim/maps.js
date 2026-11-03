@@ -39,11 +39,21 @@ export const THEMES = [
   },
   {
     id: 'factory',
+    // A card that rolls a fresh compound every time it is picked (factoryPlans.js random).
+    random: true,
+    // Each variant is a plan in factoryPlans.js; the seed only places the scattered crates and
+    // barrels (and the floor's wear).
     variants: [
       // The milk-and-egg plant: belts in the hall, a milk canal to wade, tanks and a loading yard.
-      { id: 'dairy', seed: 520, shape: {}, tags: ['large', 'belts'] },
+      { id: 'dairy', seed: 520, shape: { plan: 'dairy' }, tags: ['large', 'belts'] },
+      // No canal: cold stores, a sorting shed and a maze of containers.
+      { id: 'depot', seed: 3171, shape: { plan: 'depot' }, tags: ['small', 'containers'] },
+      // Two halls with a street between them and a canal along the north.
+      { id: 'bottling', seed: 8812, shape: { plan: 'bottling' }, tags: ['large', 'belts', 'water'] },
+      // Rows and rows of silos, long sightlines, a canal across the middle.
+      { id: 'tanks', seed: 1414, shape: { plan: 'tanks' }, tags: ['large', 'tanks'] },
     ],
-    world: (choice) => new Factory(choice.seed),
+    world: (choice) => new Factory(choice.seed, choice.shape.plan ?? 'random'),
     layout: factoryLayout,
   },
 ];
