@@ -1382,6 +1382,14 @@ ssh -R. The ONLINE panel has no help text to link it from. The README links it.
   island). npm's shasum matches it. Checked from outside: `npx --yes naiwa-server@0.1.3` with an
   empty cache, and the image (both platforms, `latest` moved to it) pulled with no login and run,
   with co-op bots against each.
+- **0.1.4** (2026-11-03, protocol 11): four more factory maps, `factory/depot`, `factory/bottling`,
+  `factory/tanks` and `factory/random` (a compound rolled from the seed, which the room sends
+  like a random island's). The factory is now built from plans (`src/factoryPlans.js`); the dairy
+  plant is unchanged. The tarball was tested in an empty directory: co-op bots on
+  `factory/random` and PvP bots at 8 kills / 90 s on `factory/depot` then `factory/random`.
+  npm's shasum matches it. Checked from outside: `npx --yes naiwa-server@0.1.4` with an empty
+  cache, and the image (both platforms, `latest` moved to it) pulled with no login and run, with
+  co-op bots against each.
 
 
 ## Networking with Colyseus
