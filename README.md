@@ -94,7 +94,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 - Shooting a red barrel makes it explode, and nearby barrels go off too.
 - Shallow water slows you down. Kill enemies in quick succession to build a combo multiplier.
 - Every 5th kill, Naiwa stops and laughs his head off for 12 seconds. He can't move or shoot while laughing, but nothing can hurt him.
-- In the factory, the two conveyor belts in the production hall carry anyone standing on them (in opposite directions), the milk canal is wadeable but slow except on the two bridges, and machines, silos, containers and the warehouse and boiler house are cover. The SMG is under the water tower, the shotgun outside the warehouse and the rifle in the far corner behind the tanks.
+- In the factory, the three conveyor belts in the production hall carry anyone standing on them (the middle one the other way, and cut in two around the company egg so you can cross), the milk canal is wadeable but slow except on the two bridges, and machines, silos, containers, lorries and the warehouse, cold store and boiler house are cover. The SMG is under the water tower, the shotgun outside the warehouse and the rifle in the far corner behind the tanks.
 
 ## Code map
 
@@ -123,7 +123,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/online.js` | The ONLINE panel's address rules, recently joined servers, the player's name and the browser's id (which bans go by) |
 | `src/dashboard.js` | The map dashboard: a section per theme, preview cards, random-seed card |
 | `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting; `DEFAULT_SHAPE` lists the knobs a map can turn |
-| `src/factory.js` | The factory map's layout (hall, belts, canal, tank farm, buildings, yard), its floor painting and minimap; same terrain interface as `Island` plus belt `drift` |
+| `src/factory.js` | The factory map's layout (4000 px: hall, belts, canal, tank farm, buildings, yard), its floor painting and minimap; same terrain interface as `Island` plus belt `drift` |
 | `src/factoryArt.js` | Painted factory textures (silos, water tower, chimney, machines, containers, lorry, buildings), built the first time a factory loads |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX); guns are painted at the sim's `GUN_SIZES` |
 | `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), builds recoloured rival skins and, online, the teammates' colours (`TEAM`) |

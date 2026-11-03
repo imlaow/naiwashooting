@@ -3,7 +3,7 @@
 // in world.js. Its own seeded RNG only places decoration (cartons, lamp phases, the trees
 // outside, clouds, steam vents).
 import { Sprite, TilingSprite, Graphics } from 'pixi.js';
-import { WALL0, WALL1, WALL_T, GATE, CANAL, FACTORY_SIZE } from '../factory.js';
+import { WALL0, WALL1, WALL_T, GATE, CANAL, HALL, FACTORY_SIZE } from '../factory.js';
 import { factoryArt, building } from '../factoryArt.js';
 import { makeSprite } from './world.js';
 import { mulberry32 } from '../noise.js';
@@ -140,7 +140,7 @@ export class FactoryEnvironment {
   }
 
   placeObjects() {
-    const { fac, fa } = this;
+    const { fa } = this;
     for (const o of this.layout.objects) {
       let s = null, opts = { fade: true };
       switch (o.kind) {
@@ -160,8 +160,8 @@ export class FactoryEnvironment {
         case 'pallet': s = makeSprite(fa.pallet); opts = {}; break;
         case 'forklift': s = makeSprite(fa.forklift); opts = {}; break;
         case 'warehouse': case 'boiler': {
-          const b = o.kind === 'warehouse' ? fac.warehouse : fac.boiler;
-          s = makeSprite(building(b.w, b.h, b.H, o.kind));
+          const { b } = o;
+          s = makeSprite(building(b.w, b.h, b.H, b.style));
           this.addObject(s, b.x, b.y + b.h, { fade: true, footH: 30 });
           if (o.kind === 'boiler') {
             // The furnace mouth glows and flickers.
@@ -196,7 +196,7 @@ export class FactoryEnvironment {
     const { art } = this;
     const R = this.rand;
     const L = this.game.layers;
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 88; i++) {
       // A belt of trees around the compound, kept off the road.
       const side = i % 4;
       const along = rnd(R, -300, FACTORY_SIZE + 300), out = rnd(R, 90, 520);
@@ -212,7 +212,7 @@ export class FactoryEnvironment {
       this.addObject(makeSprite(this.fa.cone), x, y);
     }
     this.clouds = [];
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 11; i++) {
       const s = makeSprite(art.cloud);
       s.position.set(rnd(R, 0, FACTORY_SIZE), rnd(R, 0, FACTORY_SIZE));
       s.scale.set(rnd(R, 1.8, 3.4), rnd(R, 1.5, 2.6));
@@ -240,8 +240,8 @@ export class FactoryEnvironment {
     // Steam vents in the hall floor.
     const R = this.rand;
     this.vents = [];
-    for (let i = 0; i < 6; i++) {
-      const x = rnd(R, 760, 2440), y = rnd(R, 1000, 1880);
+    for (let i = 0; i < 9; i++) {
+      const x = rnd(R, HALL.x + 80, HALL.x + HALL.w - 80), y = rnd(R, HALL.y + 100, HALL.y + HALL.h - 80);
       if (!this.fac.isFree(x, y, 20)) continue;
       this.vents.push({ x, y, t: rnd(R, 0, 6) });
     }

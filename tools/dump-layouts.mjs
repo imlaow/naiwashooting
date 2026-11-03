@@ -12,7 +12,7 @@
 // tools/layout-baseline.txt was recorded with --scene before the layout moved to src/sim (when the
 // scenes still registered colliders and props), so --check proves the layout functions build
 // exactly the maps the game always had. The islands' part was re-recorded (also with --scene)
-// when they grew from 3200 to 4000 px; the factory's is still the original.
+// when they grew from 3200 to 4000 px, and the factory's when it did too (and got more in it).
 import { register } from 'node:module';
 import { readFileSync } from 'node:fs';
 

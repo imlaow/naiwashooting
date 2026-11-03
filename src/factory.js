@@ -1,20 +1,23 @@
 // The milk-and-egg factory: a walled compound with a production hall full of conveyor belts,
-// a milk canal you have to wade across, a tank farm, a warehouse, a boiler house and a loading
-// yard by the gate. It has the same terrain interface as Island (see maps.js) plus `drift` for
+// a milk canal you have to wade across, a tank farm, a warehouse, a cold store, a boiler house
+// and a loading yard by the gate. It has the same terrain interface as Island (see maps.js) plus `drift` for
 // the belts. This file holds the layout and paints the floor; factoryScene.js builds the Pixi
 // scene from it.
 import { mulberry32, makeNoise, fbm, hash2 } from './noise.js';
 
-// Side of the map in px (islands are bigger: ISLAND_SIZE).
-export const FACTORY_SIZE = 3200;
+// Side of the map in px. It was 3200 until 2026-11, when it grew to match the islands
+// (ISLAND_SIZE) and got a third belt, more tanks, a cold store and a bigger yard.
+export const FACTORY_SIZE = 4000;
 
 // The perimeter wall's footprint runs along these lines; you can walk between IN0 and IN1.
 export const WALL0 = 208, WALL1 = FACTORY_SIZE - 208, WALL_T = 32;
 const IN0 = 262, IN1 = FACTORY_SIZE - 262;
 
-export const HALL = { x: 680, y: 900, w: 1840, h: 1060 };
-export const CANAL = { x: WALL0 + WALL_T, y: 2160, w: WALL1 - WALL0 - WALL_T * 2, h: 100 };
-export const GATE = { x: 1480, w: 240 };
+export const HALL = { x: 860, y: 1120, w: 2280, h: 1440 };
+export const CANAL = { x: WALL0 + WALL_T, y: 2760, w: WALL1 - WALL0 - WALL_T * 2, h: 100 };
+export const GATE = { x: FACTORY_SIZE / 2 - 120, w: 240 };
+// The tank farm's bunded slab.
+const FARM = { x0: 440, y0: 560, x1: 2060, y1: 940 };
 const BELT_SPEED = 110;
 
 const inRect = (x, y, r) => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
@@ -90,75 +93,90 @@ export class Factory {
     const H = HALL;
     this.spawn = { x: GATE.x + GATE.w / 2, y: WALL1 - 190 };
     this.village = { x: H.x + H.w / 2, y: H.y + H.h / 2 };
-    this.bridges = [{ x: 740, w: 150 }, { x: 2310, w: 150 }].map((b) => ({ x: b.x, y: CANAL.y - 12, w: b.w, h: CANAL.h + 24 }));
+    this.bridges = [{ x: 920, w: 150 }, { x: 2930, w: 150 }].map((b) => ({ x: b.x, y: CANAL.y - 12, w: b.w, h: CANAL.h + 24 }));
 
-    // Production hall: two belts running opposite ways, machines straddling them, steel columns.
+    // Production hall: three belts, the middle one running the other way and cut in two around
+    // the company egg so you can walk across. Machines straddle them; steel columns hold it up.
+    const full = { x: H.x + 170, w: H.w - 340 }, gap = 260, cx = H.x + H.w / 2;
+    const midY = H.y + H.h / 2 - 28;
     this.belts = [
-      { x: H.x + 170, y: H.y + 290, w: H.w - 340, h: 56, dir: 1 },
-      { x: H.x + 170, y: H.y + 700, w: H.w - 340, h: 56, dir: -1 },
+      { x: full.x, y: H.y + 260, w: full.w, h: 56, dir: 1 },
+      { x: full.x, y: midY, w: cx - gap - full.x, h: 56, dir: -1 },
+      { x: cx + gap, y: midY, w: full.x + full.w - cx - gap, h: 56, dir: -1 },
+      { x: full.x, y: H.y + H.h - 316, w: full.w, h: 56, dir: 1 },
     ];
-    const beltA = this.belts[0], beltB = this.belts[1];
-    for (const [belt, xs] of [[beltA, [0.2, 0.52, 0.84]], [beltB, [0.36, 0.68]]]) {
+    const [beltA, beltB0, beltB1, beltC] = this.belts;
+    for (const [belt, xs] of [[beltA, [0.2, 0.52, 0.84]], [beltB0, [0.5]], [beltB1, [0.5]], [beltC, [0.3, 0.7]]]) {
       xs.forEach((f, i) => {
         const x = belt.x + belt.w * f, y = belt.y + belt.h + 4;
-        this.add('machine', x, y, this.rect(x - 78, y - 100, 156, 100), { variant: i % 2 });
+        this.add('machine', x, y, this.rect(x - 78, y - 100, 156, 100), { variant: (i + (belt === beltB1 ? 1 : 0)) % 2 });
       });
     }
-    for (let i = 0; i <= 5; i++) {
-      const x = H.x + (H.w / 5) * i;
+    for (let i = 0; i <= 6; i++) {
+      const x = H.x + (H.w / 6) * i;
       this.add('pillar', x, H.y, this.circle(x, H.y - 4, 17));
       this.add('pillar', x, H.y + H.h, this.circle(x, H.y + H.h - 4, 17));
     }
-    for (const fx of [0.3, 0.7]) {
-      const x = H.x + H.w * fx, y = H.y + H.h * 0.5 + 10;
-      this.add('pillar', x, y, this.circle(x, y - 4, 17));
+    // Two rows of columns in the lanes between the belts.
+    for (const y of [H.y + 490, H.y + H.h - 520]) {
+      for (const fx of [0.3, 0.7]) {
+        const x = H.x + H.w * fx;
+        this.add('pillar', x, y, this.circle(x, y - 4, 17));
+      }
     }
-    // Egg-carton pallets by the belt ends.
-    for (const [x, y] of [[H.x + 90, beltA.y + 30], [H.x + H.w - 90, beltA.y + 30], [H.x + 90, beltB.y + 30], [H.x + H.w - 90, beltB.y + 30], [H.x + 380, H.y + 560], [H.x + H.w - 380, H.y + 470]]) {
+    // Egg-carton pallets by the belt ends and in the lanes.
+    const ends = [beltA, beltB0, beltC].flatMap((b) => [[H.x + 90, b.y + 30], [H.x + H.w - 90, b.y + 30]]);
+    for (const [x, y] of [...ends, [H.x + 380, H.y + 500], [H.x + H.w - 380, H.y + 460], [H.x + H.w - 420, H.y + H.h - 500]]) {
       this.add('pallet', x, y, this.circle(x, y - 14, 30));
     }
-    this.add('forklift', H.x + H.w * 0.5 + 40, H.y + 150, this.rect(H.x + H.w * 0.5 + 4, H.y + 112, 74, 40));
+    for (const [x, y] of [[H.x + H.w * 0.5 + 40, H.y + 150], [H.x + H.w * 0.18, H.y + H.h - 500]]) {
+      this.add('forklift', x, y, this.rect(x - 36, y - 38, 74, 40));
+    }
 
     // Tank farm along the north wall, a water tower (the lookout) and the chimney.
     this.tanks = [];
-    [560, 820, 1080, 1340].forEach((x, i) => {
-      const y = 700 + (i % 2) * 40;
-      this.add('silo', x, y, this.rect(x - 76, y - 64, 152, 60), { variant: i });
+    for (let i = 0; i < 6; i++) {
+      const x = FARM.x0 + 160 + i * 260, y = 760 + (i % 2) * 40;
+      this.add('silo', x, y, this.rect(x - 76, y - 64, 152, 60), { variant: i % 4 });
       this.tanks.push({ x, y: y - 40 });
-    });
-    const L = { x: 2030, y: 640 };
+    }
+    const L = { x: 2440, y: 720 };
     this.add('tower', L.x, L.y, this.rect(L.x - 58, L.y - 48, 116, 42));
     this.lookout = { x: L.x, y: L.y, h: 1 };
     this.weaponSpots.push({ x: L.x, y: L.y + 44, kind: 'smg' });
-    this.chimney = { x: 2560, y: 560 };
+    this.chimney = { x: 3180, y: 640 };
     this.add('chimney', this.chimney.x, this.chimney.y, this.circle(this.chimney.x, this.chimney.y - 30, 44));
 
-    // Warehouse (west) and boiler house (east): solid blocks you fight around.
-    this.warehouse = { x: 330, y: 1060, w: 300, h: 420, H: 150 };
-    this.add('warehouse', 0, 0, this.rect(this.warehouse.x, this.warehouse.y, this.warehouse.w, this.warehouse.h));
+    // Warehouse (west), boiler house (east) and the cold store in the north-east corner: solid
+    // blocks you fight around.
+    this.warehouse = { x: 380, y: 1250, w: 300, h: 420, H: 150, style: 'warehouse' };
+    this.boiler = { x: 3270, y: 1340, w: 300, h: 300, H: 130, style: 'boiler' };
+    this.coldStore = { x: 3340, y: 420, w: 300, h: 240, H: 130, style: 'warehouse' };
+    this.buildings = [this.warehouse, this.boiler, this.coldStore];
+    for (const b of this.buildings) this.add(b.style, 0, 0, this.rect(b.x, b.y, b.w, b.h), { b });
     this.weaponSpots.push({ x: this.warehouse.x + this.warehouse.w / 2, y: this.warehouse.y + this.warehouse.h + 50, kind: 'shotgun' });
-    this.boiler = { x: 2610, y: 1120, w: 300, h: 300, H: 130 };
-    this.add('boiler', 0, 0, this.rect(this.boiler.x, this.boiler.y, this.boiler.w, this.boiler.h));
     // The rifle waits in the far corner behind the tanks.
-    this.weaponSpots.push({ x: 360, y: 380, kind: 'rifle' });
+    this.weaponSpots.push({ x: 390, y: 400, kind: 'rifle' });
 
-    // Loading yard: containers, a lorry, stacked pallets.
-    const containers = [[470, 2440, 0], [470, 2600, 1], [2700, 2470, 2], [1060, 2830, 3]];
+    // Loading yard: containers, lorries, stacked pallets; a couple of containers up the sides.
+    const containers = [[500, 3060, 0], [500, 3230, 1], [3480, 3090, 2], [3480, 3260, 1], [1300, 3480, 3], [2700, 3560, 0], [530, 2060, 2], [3450, 2120, 3]];
     for (const [x, y, c] of containers) this.add('container', x, y, this.rect(x - 122, y - 58, 244, 58), { variant: c });
-    this.add('truck', 2240, 2700, this.rect(2240 - 150, 2700 - 62, 300, 62));
-    this.add('truck', 860, 2560, this.rect(860 - 150, 2560 - 62, 300, 62), { flip: true });
-    for (const [x, y] of [[1980, 2420], [2060, 2440], [1240, 2440], [2560, 2860]]) this.add('pallet', x, y, this.circle(x, y - 14, 30));
+    this.add('truck', 2800, 3330, this.rect(2800 - 150, 3330 - 62, 300, 62));
+    this.add('truck', 1060, 3160, this.rect(1060 - 150, 3160 - 62, 300, 62), { flip: true });
+    this.add('truck', 3300, 3640, this.rect(3300 - 150, 3640 - 62, 300, 62), { flip: true });
+    for (const [x, y] of [[2420, 3000], [2500, 3020], [1560, 3020], [3100, 3480], [880, 3560], [450, 2320], [3540, 2380]]) this.add('pallet', x, y, this.circle(x, y - 14, 30));
     // Between the canal and the hall.
-    for (const [x, y] of [[1180, 2060], [2020, 2070]]) this.add('pallet', x, y, this.circle(x, y - 14, 30));
+    for (const [x, y] of [[1460, 2660], [2540, 2670]]) this.add('pallet', x, y, this.circle(x, y - 14, 30));
 
     // Crates and red barrels: a few on purpose, the rest scattered.
     const fixed = [
       ['barrel', this.boiler.x - 50, this.boiler.y + 140], ['barrel', this.boiler.x - 40, this.boiler.y + 200], ['barrel', this.boiler.x + 60, this.boiler.y + this.boiler.h + 60],
       ['crate', this.spawn.x - 150, this.spawn.y - 60], ['crate', this.spawn.x + 160, this.spawn.y - 40],
-      ['barrel', 1600, 2400], ['crate', 1500, 1440], ['crate', 1700, 1440], ['barrel', this.chimney.x - 110, this.chimney.y + 40],
+      ['barrel', 2000, 3010], ['crate', 1860, 1610], ['crate', 2140, 1610], ['barrel', this.chimney.x - 110, this.chimney.y + 40],
+      ['crate', this.coldStore.x + 60, this.coldStore.y + this.coldStore.h + 60], ['crate', this.coldStore.x + 120, this.coldStore.y + this.coldStore.h + 70],
     ];
     for (const p of fixed) if (this.isFree(p[1], p[2], 22)) this.props.push(p);
-    for (let i = 0, n = 0; i < 600 && n < 30; i++) {
+    for (let i = 0, n = 0; i < 1000 && n < 50; i++) {
       const x = IN0 + R() * (IN1 - IN0), y = IN0 + R() * (IN1 - IN0);
       if (!this.isFree(x, y, 24)) continue;
       this.props.push([R() < 0.62 ? 'crate' : 'barrel', x, y]);
@@ -186,13 +204,13 @@ export class Factory {
       ctx.beginPath(); ctx.moveTo(v, inner); ctx.lineTo(v, WALL1); ctx.moveTo(inner, v); ctx.lineTo(WALL1, v); ctx.stroke();
     }
     // Weathering: damp patches, cracks, oil.
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 118; i++) {
       const x = R(inner, inner + span), y = R(inner, inner + span), r = R(40, 160);
       ctx.fillStyle = radialFill(ctx, x, y, r, rand() < 0.5 ? 'rgba(90,84,74,0.16)' : 'rgba(255,250,235,0.12)');
       ctx.beginPath(); ctx.ellipse(x, y, r, r * R(0.5, 0.9), R(0, 3), 0, Math.PI * 2); ctx.fill();
     }
     ctx.strokeStyle = 'rgba(60,54,46,0.35)'; ctx.lineWidth = 1.2;
-    for (let i = 0; i < 90; i++) {
+    for (let i = 0; i < 152; i++) {
       let x = R(inner, inner + span), y = R(inner, inner + span);
       ctx.beginPath(); ctx.moveTo(x, y);
       for (let k = 0; k < 6; k++) { x += R(-22, 22); y += R(-22, 22); ctx.lineTo(x, y); }
@@ -203,19 +221,19 @@ export class Factory {
     this.paintHall(ctx, R);
     this.paintCanal(ctx, R);
     this.paintYard(ctx, R);
-    for (const b of [this.warehouse, this.boiler]) {
+    for (const b of this.buildings) {
       // Apron in front of each building.
       ctx.fillStyle = 'rgba(60,56,50,0.18)';
       ctx.fillRect(b.x - 30, b.y + b.h, b.w + 60, 90);
       hazard(ctx, b.x - 30, b.y + b.h + 84, b.w + 60, 10);
     }
-    for (let i = 0; i < 46; i++) {
+    for (let i = 0; i < 78; i++) {
       const x = R(inner + 40, inner + span - 40), y = R(inner + 40, inner + span - 40);
       if (inRect(x, y, CANAL)) continue;
       oilStain(ctx, x, y, R(14, 46), rand);
     }
     // Drain grates and manholes.
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < 37; i++) {
       const x = R(inner + 60, inner + span - 60), y = R(inner + 60, inner + span - 60);
       if (inRect(x, y, CANAL) || !this.isFree(x, y, 10)) continue;
       if (rand() < 0.5) {
@@ -233,7 +251,7 @@ export class Factory {
 
   paintTankFarm(ctx, R) {
     // A bunded slab with a low curb under the silos, and pipes running down to the hall.
-    const x0 = 400, y0 = 520, x1 = 1500, y1 = 860;
+    const { x0, y0, x1, y1 } = FARM;
     ctx.fillStyle = 'rgba(120,128,132,0.35)';
     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
     ctx.strokeStyle = '#d8d4c8'; ctx.lineWidth = 8;
@@ -243,10 +261,12 @@ export class Factory {
     for (const t of this.tanks) {
       ctx.fillStyle = 'rgba(255,255,255,0.35)';
       ctx.beginPath(); ctx.ellipse(t.x + 30, t.y + 60, 34, 12, 0, 0, Math.PI * 2); ctx.fill();
-      pipe(ctx, [[t.x + 50, t.y + 40], [t.x + 50, 900], [t.x + 50, HALL.y + 60]], 14, '#9aa6ad');
+      pipe(ctx, [[t.x + 50, t.y + 40], [t.x + 50, y1 + 40], [t.x + 50, HALL.y + 60]], 14, '#9aa6ad');
     }
-    pipe(ctx, [[x1 - 20, 640], [1900, 640], [1900, HALL.y + 60]], 12, '#b8c4c8');
-    pipe(ctx, [[2560, 640], [2560, 980], [HALL.x + HALL.w - 40, 980]], 16, '#a15c38');
+    pipe(ctx, [[x1 - 20, 720], [2300, 720], [2300, HALL.y + 60]], 12, '#b8c4c8');
+    const ch = this.chimney, cs = this.coldStore;
+    pipe(ctx, [[ch.x, ch.y], [ch.x, HALL.y + 80], [HALL.x + HALL.w - 40, HALL.y + 80]], 16, '#a15c38');
+    pipe(ctx, [[cs.x + 40, cs.y + cs.h], [cs.x + 40, HALL.y + 40], [HALL.x + HALL.w - 20, HALL.y + 40]], 12, '#b8c4c8');
   }
 
   paintHall(ctx, R) {
@@ -353,12 +373,12 @@ export class Factory {
     ctx.fillStyle = '#f2c230';
     ctx.fillRect(gx - 40, wy - 8, gw + 80, 8);
     ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 4;
-    for (const [x0, y0, n] of [[340, 2340, 6], [2470, 2340, 5]]) {
+    for (const [x0, y0, n] of [[380, 2940, 6], [3080, 2940, 6]]) {
       for (let i = 0; i <= n; i++) { ctx.beginPath(); ctx.moveTo(x0 + i * 90, y0); ctx.lineTo(x0 + i * 90, y0 + 120); ctx.stroke(); }
     }
     ctx.strokeStyle = 'rgba(40,36,32,0.22)'; ctx.lineWidth = 12;
-    for (let i = 0; i < 7; i++) {
-      const x0 = gx + R(30, gw - 30), x1 = R(500, 2700), y1 = R(2380, 2800);
+    for (let i = 0; i < 9; i++) {
+      const x0 = gx + R(30, gw - 30), x1 = R(600, 3400), y1 = R(2980, 3500);
       for (const o of [-16, 16]) {
         ctx.beginPath(); ctx.moveTo(x0 + o, wy); ctx.bezierCurveTo(x0 + o, wy - 260, x1 + o, y1 + 200, x1 + o, y1); ctx.stroke();
       }

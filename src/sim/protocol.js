@@ -22,7 +22,7 @@
 // join, which a ban goes by.
 import { WEAPON_ORDER } from './entities.js';
 
-export const PROTOCOL = 9;
+export const PROTOCOL = 10;
 
 // Close codes the room puts a player out with (server/console.js kick and ban): the browser
 // says why, and doesn't try to reconnect (the SDK only does after 1001, 1005, 1006 and 4010).
