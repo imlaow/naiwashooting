@@ -112,7 +112,7 @@ async function boot() {
   let built = null;
 
   // Paints and uploads the terrain for a map, behind the loading screen. The height field is
-  // cheap and cached by maps.js; the 3200² terrain canvas is the slow part, so it is only
+  // cheap and cached by maps.js; the 4000² terrain canvas is the slow part, so it is only
   // rebuilt when the map actually changes, and the previous one is freed first.
   const prepare = async (choice) => {
     if (built && built.key === choiceKey(choice)) return;

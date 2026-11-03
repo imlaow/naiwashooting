@@ -3,12 +3,14 @@
 // yard by the gate. It has the same terrain interface as Island (see maps.js) plus `drift` for
 // the belts. This file holds the layout and paints the floor; factoryScene.js builds the Pixi
 // scene from it.
-import { WORLD } from './island.js';
 import { mulberry32, makeNoise, fbm, hash2 } from './noise.js';
 
+// Side of the map in px (islands are bigger: ISLAND_SIZE).
+export const FACTORY_SIZE = 3200;
+
 // The perimeter wall's footprint runs along these lines; you can walk between IN0 and IN1.
-export const WALL0 = 208, WALL1 = WORLD - 208, WALL_T = 32;
-const IN0 = 262, IN1 = WORLD - 262;
+export const WALL0 = 208, WALL1 = FACTORY_SIZE - 208, WALL_T = 32;
+const IN0 = 262, IN1 = FACTORY_SIZE - 262;
 
 export const HALL = { x: 680, y: 900, w: 1840, h: 1060 };
 export const CANAL = { x: WALL0 + WALL_T, y: 2160, w: WALL1 - WALL0 - WALL_T * 2, h: 100 };
@@ -20,6 +22,7 @@ const inRect = (x, y, r) => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h
 export class Factory {
   constructor(seed) {
     this.seed = seed;
+    this.size = FACTORY_SIZE;
     this.firstWaveKey = 'game.firstWaveFactory';
     this.rand = mulberry32(seed);
     // Everything solid: { kind, x, y, foot } where (x, y) is where the sprite stands and
@@ -165,7 +168,7 @@ export class Factory {
 
   // ---------- Painting ----------
   paintTerrain(scale = 1) {
-    const S = Math.round(WORLD * scale);
+    const S = Math.round(FACTORY_SIZE * scale);
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = S;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -366,10 +369,10 @@ export class Factory {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = size;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const k = size / WORLD;
+    const k = size / FACTORY_SIZE;
     ctx.scale(k, k);
-    ctx.fillStyle = '#3f6b3a'; ctx.fillRect(0, 0, WORLD, WORLD);
-    ctx.fillStyle = '#4a4e52'; ctx.fillRect(GATE.x, WALL1, GATE.w, WORLD - WALL1);
+    ctx.fillStyle = '#3f6b3a'; ctx.fillRect(0, 0, FACTORY_SIZE, FACTORY_SIZE);
+    ctx.fillStyle = '#4a4e52'; ctx.fillRect(GATE.x, WALL1, GATE.w, FACTORY_SIZE - WALL1);
     ctx.fillStyle = '#b4b0a6'; ctx.fillRect(WALL0, WALL0, WALL1 - WALL0, WALL1 - WALL0);
     ctx.strokeStyle = '#55524c'; ctx.lineWidth = WALL_T * 1.5;
     ctx.strokeRect(WALL0 + WALL_T / 2, WALL0 + WALL_T / 2, WALL1 - WALL0 - WALL_T, WALL1 - WALL0 - WALL_T);

@@ -455,7 +455,7 @@ Found in stage 2:
   max HP, walk flag, lean speed, spawn fade), pickups (kind, gun, position, `fading` for a dropped
   gun's last 4 s), living props (by the id the sim gave them, 1–n in layout order; only HP), and the
   room's `phase` / `phaseT` / `run` / `map` plus the sim's `state`, `stateT`, wave, score, kills,
-  queued enemies and King Naiwa's id. Positions are 16-bit (0.06 px), timers 8 or 16 bits and sent
+  queued enemies and King Naiwa's id. Positions are 16-bit (0.07 px), timers 8 or 16 bits and sent
   clamped at 0, so timers that only count down stop changing. Off the schema because the client
   works them out: an enemy's walk phase (`NetEnemy.animT` runs locally), a pickup's bob, the player's
   max HP and radius. The state is written from the sim in `onBeforePatch` (20 times a second), not

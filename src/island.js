@@ -2,11 +2,16 @@
 // painted terrain / foam / minimap canvases.
 import { mulberry32, makeNoise, fbm, hash2, clamp, lerp, smoothstep } from './noise.js';
 
-export const WORLD = 3200;
+// Side of an island map in px (the factory has its own size). Islands were 3200 px until
+// 2026-11; the terrain is generated in coordinates relative to the map, so a bigger map is the
+// same island scaled up, with SCALE² as much vegetation, props and decals.
+export const ISLAND_SIZE = 4000;
+const SCALE = ISLAND_SIZE / 3200;
+const AREA = SCALE * SCALE;
 const GRID = 8;
-const GW = WORLD / GRID + 1;
+const GW = ISLAND_SIZE / GRID + 1;
 const PGRID = 4;
-const PW = WORLD / PGRID + 1;
+const PW = ISLAND_SIZE / PGRID + 1;
 
 // Height thresholds
 export const H_DEEP = -0.17;
@@ -31,6 +36,8 @@ export const DEFAULT_SHAPE = {
 export class Island {
   constructor(seed, shape = {}) {
     this.seed = seed;
+    this.size = ISLAND_SIZE;
+    this.scale = SCALE;
     this.shape = { ...DEFAULT_SHAPE, ...shape };
     this.rand = mulberry32(seed);
     this.height = new Float32Array(GW * GW);
@@ -45,28 +52,30 @@ export class Island {
     const n1 = makeNoise(this.seed + 1), n2 = makeNoise(this.seed + 2), n3 = makeNoise(this.seed + 3);
     const { size, rough, warp, hill, hillX, hillY, wet, strait, straitAngle } = this.shape;
     const sa = Math.cos(straitAngle), sb = Math.sin(straitAngle);
-    const c = WORLD / 2;
+    const c = ISLAND_SIZE / 2, k = SCALE;
+    // The strait keeps its width in px, so it stays as easy to wade across.
+    const straitW = 0.012 / (k * k);
     for (let gy = 0; gy < GW; gy++) {
       for (let gx = 0; gx < GW; gx++) {
         const x = gx * GRID, y = gy * GRID;
         const dx = (x - c) / c, dy = (y - c) / c;
-        const wx = dx + (fbm(n2, x / 700, y / 700, 3) - 0.5) * warp;
-        const wy = dy + (fbm(n2, x / 700 + 40, y / 700 + 40, 3) - 0.5) * warp;
+        const wx = dx + (fbm(n2, x / (700 * k), y / (700 * k), 3) - 0.5) * warp;
+        const wy = dy + (fbm(n2, x / (700 * k) + 40, y / (700 * k) + 40, 3) - 0.5) * warp;
         const d2 = wx * wx + wy * wy;
-        let h = size - 1.15 * d2 + (fbm(n1, x / 520, y / 520, 5) - 0.5) * rough;
+        let h = size - 1.15 * d2 + (fbm(n1, x / (520 * k), y / (520 * k), 5) - 0.5) * rough;
         // A hill (north-west of centre by default) for a rocky lookout.
         const hx = dx - hillX, hy = dy - hillY;
         h += hill * Math.exp(-(hx * hx + hy * hy) / 0.03);
         if (strait > 0) {
           // A wobbly channel through the middle, shallow enough to wade in most places.
           const along = wx * sa + wy * sb;
-          h -= strait * Math.exp(-(along * along) / 0.012);
+          h -= strait * Math.exp(-(along * along) / straitW);
         }
         const r = Math.sqrt(dx * dx + dy * dy);
         if (r > 0.78) h -= (r - 0.78) * 3;
         const i = gy * GW + gx;
         this.height[i] = h;
-        this.moist[i] = clamp(fbm(n3, x / 420, y / 420, 4) + wet, 0, 1);
+        this.moist[i] = clamp(fbm(n3, x / (420 * k), y / (420 * k), 4) + wet, 0, 1);
       }
     }
   }
@@ -89,7 +98,7 @@ export class Island {
   }
 
   isWalkable(x, y) {
-    if (x < 40 || y < 40 || x > WORLD - 40 || y > WORLD - 40) return false;
+    if (x < 40 || y < 40 || x > ISLAND_SIZE - 40 || y > ISLAND_SIZE - 40) return false;
     return this.heightAt(x, y) > H_WADE || this.inDock(x, y);
   }
 
@@ -116,12 +125,12 @@ export class Island {
   // ---------- Layout ----------
   planLayout() {
     const rand = this.rand;
-    const c = WORLD / 2;
+    const c = ISLAND_SIZE / 2;
     // Village: flat grassy spot near the centre.
     let best = null, bestScore = Infinity;
     for (let i = 0; i < 600; i++) {
-      const a = rand() * Math.PI * 2, r = rand() * 420;
-      const x = c + Math.cos(a) * r + 80, y = c + Math.sin(a) * r + 120;
+      const a = rand() * Math.PI * 2, r = rand() * 420 * SCALE;
+      const x = c + Math.cos(a) * r + 80 * SCALE, y = c + Math.sin(a) * r + 120 * SCALE;
       const h = this.heightAt(x, y);
       if (h < 0.2 || h > 0.45) continue;
       const slope = Math.abs(this.heightAt(x + 60, y) - this.heightAt(x - 60, y)) +
@@ -133,10 +142,10 @@ export class Island {
 
     // Dock: march south from the village to the shoreline.
     let sx = this.village.x, sy = this.village.y;
-    while (sy < WORLD - 200 && this.heightAt(sx, sy) > -0.005) sy += 4;
+    while (sy < ISLAND_SIZE - 200 && this.heightAt(sx, sy) > -0.005) sy += 4;
     const shoreY = sy;
     let ey = shoreY;
-    while (ey < WORLD - 120 && this.heightAt(sx, ey) > H_DEEP - 0.06) ey += 4;
+    while (ey < ISLAND_SIZE - 120 && this.heightAt(sx, ey) > H_DEEP - 0.06) ey += 4;
     const dockLen = clamp(ey - shoreY + 60, 200, 320);
     this.shore = { x: sx, y: shoreY };
     this.dock = { x: sx - 34, y: shoreY - 70, w: 68, h: dockLen + 70 };
@@ -159,7 +168,7 @@ export class Island {
       // Trails out to two more beaches.
       const a = (k === 0 ? Math.PI : 0) + (rand() - 0.5) * 0.6;
       let x = this.village.x, y = this.village.y;
-      while (this.heightAt(x, y) > 0.06 && x > 100 && x < WORLD - 100) {
+      while (this.heightAt(x, y) > 0.06 && x > 100 && x < ISLAND_SIZE - 100) {
         x += Math.cos(a) * 8; y += Math.sin(a) * 8;
       }
       this.addPath(this.village.x, this.village.y, x, y, 18);
@@ -196,14 +205,14 @@ export class Island {
 
   // ---------- Painting ----------
   paintTerrain(scale = 1) {
-    const S = Math.round(WORLD * scale);
+    const S = Math.round(ISLAND_SIZE * scale);
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = S;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.createImageData(S, S);
     const px = img.data;
     const detailNoise = makeNoise(this.seed + 9);
-    const DG = 4, DW = WORLD / DG + 1;
+    const DG = 4, DW = ISLAND_SIZE / DG + 1;
     const detail = new Float32Array(DW * DW);
     for (let gy = 0; gy < DW; gy++) for (let gx = 0; gx < DW; gx++) {
       detail[gy * DW + gx] = fbm(detailNoise, gx * DG / 70, gy * DG / 70, 3);
@@ -287,8 +296,8 @@ export class Island {
     const R = (a, b) => a + rand() * (b - a);
 
     // Grass blades and clover
-    for (let i = 0; i < 26000; i++) {
-      const x = R(0, WORLD), y = R(0, WORLD);
+    for (let i = 0; i < 26000 * AREA; i++) {
+      const x = R(0, ISLAND_SIZE), y = R(0, ISLAND_SIZE);
       const h = this.heightAt(x, y);
       if (h < H_GRASS + 0.01 || h > H_ROCK || this.pathAt(x, y) > 0.3) continue;
       const m = this.moistAt(x, y);
@@ -306,8 +315,8 @@ export class Island {
     }
     // Flowers
     const petals = ['#ff6b8b', '#ffd23f', '#ffffff', '#c084fc', '#ff8c42', '#7dd3fc'];
-    for (let i = 0; i < 1600; i++) {
-      const x = R(0, WORLD), y = R(0, WORLD);
+    for (let i = 0; i < 1600 * AREA; i++) {
+      const x = R(0, ISLAND_SIZE), y = R(0, ISLAND_SIZE);
       const h = this.heightAt(x, y);
       if (h < H_GRASS + 0.03 || h > H_ROCK - 0.05 || this.pathAt(x, y) > 0.2) continue;
       const col = petals[(rand() * petals.length) | 0];
@@ -326,8 +335,8 @@ export class Island {
       }
     }
     // Pebbles on paths and beaches
-    for (let i = 0; i < 5000; i++) {
-      const x = R(0, WORLD), y = R(0, WORLD);
+    for (let i = 0; i < 5000 * AREA; i++) {
+      const x = R(0, ISLAND_SIZE), y = R(0, ISLAND_SIZE);
       const h = this.heightAt(x, y);
       const onPath = this.pathAt(x, y) > 0.5;
       if (!(onPath || (h > 0 && h < H_GRASS - 0.02 && rand() < 0.35))) continue;
@@ -341,8 +350,8 @@ export class Island {
       ctx.beginPath(); ctx.ellipse(x - s * 0.3, y - s * 0.25, s * 0.4, s * 0.25, 0, 0, Math.PI * 2); ctx.fill();
     }
     // Shells and starfish on the sand
-    for (let i = 0; i < 4000; i++) {
-      const x = R(0, WORLD), y = R(0, WORLD);
+    for (let i = 0; i < 4000 * AREA; i++) {
+      const x = R(0, ISLAND_SIZE), y = R(0, ISLAND_SIZE);
       const h = this.heightAt(x, y);
       if (h < 0.003 || h > 0.08) continue;
       if (rand() < 0.75) continue;
@@ -350,8 +359,8 @@ export class Island {
       else drawShell(ctx, x, y, R(3.5, 6), R(0, 6), rand() < 0.5 ? '#fde2e4' : '#f9d5a7');
     }
     // Seaweed in the shallows
-    for (let i = 0; i < 2600; i++) {
-      const x = R(0, WORLD), y = R(0, WORLD);
+    for (let i = 0; i < 2600 * AREA; i++) {
+      const x = R(0, ISLAND_SIZE), y = R(0, ISLAND_SIZE);
       const h = this.heightAt(x, y);
       if (h > -0.03 || h < H_DEEP + 0.02 || rand() < 0.5) continue;
       ctx.strokeStyle = `rgba(30,${110 + (rand() * 40 | 0)},70,0.5)`;
@@ -450,7 +459,7 @@ export class Island {
 
   // Two foam bands, shown with alternating alpha to make waves roll in.
   paintFoam(scale, offset) {
-    const S = Math.round(WORLD * scale);
+    const S = Math.round(ISLAND_SIZE * scale);
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = S;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -479,7 +488,7 @@ export class Island {
     canvas.width = canvas.height = size;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const img = ctx.createImageData(size, size);
-    const k = WORLD / size;
+    const k = ISLAND_SIZE / size;
     for (let y = 0, p = 0; y < size; y++) for (let x = 0; x < size; x++, p += 4) {
       const wx = x * k, wy = y * k;
       const h = this.heightAt(wx, wy);

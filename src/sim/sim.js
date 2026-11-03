@@ -41,7 +41,6 @@
 // frame that drew the bullet where it is ({ x, y }, or null: not there then, e.g. before a
 // respawn). The server sets `sim.seen` (server/room.js); without it, or a command without
 // `seen`, bullets test current positions.
-import { WORLD } from '../island.js';
 import { StaticWorld } from './physics.js';
 import { Player, Enemy, WEAPON_ORDER, REVIVE_RANGE, REVIVE_SECONDS, BLEED_SECONDS, moveBody } from './entities.js';
 
@@ -292,7 +291,7 @@ export class Sim {
     const isl = this.island, up = [...this.players.values()].filter((p) => p.up);
     let best = null, bd = -1;
     for (let i = 0, found = 0; i < 400 && found < 24; i++) {
-      const x = rnd(40, WORLD - 40), y = rnd(40, WORLD - 40);
+      const x = rnd(40, this.island.size - 40), y = rnd(40, this.island.size - 40);
       if (!this.openSpot(x, y) || isl.isWading(x, y)) continue;
       found++;
       let d = Infinity;
@@ -534,7 +533,7 @@ export class Sim {
     // Last resort (players boxed into a corner of the island): anywhere walkable
     // that isn't right on top of one of them, so the queue can't stall.
     for (let i = 0; i < 200; i++) {
-      const x = rnd(40, WORLD - 40), y = rnd(40, WORLD - 40);
+      const x = rnd(40, this.island.size - 40), y = rnd(40, this.island.size - 40);
       if (Math.hypot(x - P.x, y - P.y) < 300 || !far(x, y, 300)) continue;
       if (!this.openSpot(x, y)) continue;
       return { x, y };

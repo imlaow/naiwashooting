@@ -3,8 +3,7 @@
 // in world.js. Its own seeded RNG only places decoration (cartons, lamp phases, the trees
 // outside, clouds, steam vents).
 import { Sprite, TilingSprite, Graphics } from 'pixi.js';
-import { WORLD } from '../island.js';
-import { WALL0, WALL1, WALL_T, GATE, CANAL } from '../factory.js';
+import { WALL0, WALL1, WALL_T, GATE, CANAL, FACTORY_SIZE } from '../factory.js';
 import { factoryArt, building } from '../factoryArt.js';
 import { makeSprite } from './world.js';
 import { mulberry32 } from '../noise.js';
@@ -38,7 +37,7 @@ export class FactoryEnvironment {
   // ---------- Ground ----------
   buildGround(layers, tex) {
     const M = 1600;
-    const grass = new TilingSprite({ texture: this.fa.grass, width: WORLD + M * 2, height: WORLD + M * 2 });
+    const grass = new TilingSprite({ texture: this.fa.grass, width: FACTORY_SIZE + M * 2, height: FACTORY_SIZE + M * 2 });
     grass.position.set(-M, -M);
     layers.ocean.addChild(grass);
     // The access road out of the gate.
@@ -46,10 +45,10 @@ export class FactoryEnvironment {
       .rect(GATE.x - 40, WALL1 - 10, GATE.w + 80, M + 400).fill(0x4a4e52)
       .rect(GATE.x - 46, WALL1 - 10, 6, M + 400).fill(0xd6d3cb)
       .rect(GATE.x + GATE.w + 40, WALL1 - 10, 6, M + 400).fill(0xd6d3cb);
-    for (let y = WALL1 + 80; y < WORLD + M; y += 120) road.rect(GATE.x + GATE.w / 2 - 4, y, 8, 60).fill(0xf2c230);
+    for (let y = WALL1 + 80; y < FACTORY_SIZE + M; y += 120) road.rect(GATE.x + GATE.w / 2 - 4, y, 8, 60).fill(0xf2c230);
     layers.ocean.addChild(road);
     const terrain = new Sprite(tex.terrain);
-    terrain.width = terrain.height = WORLD;
+    terrain.width = terrain.height = FACTORY_SIZE;
     layers.terrain.addChild(terrain);
   }
 
@@ -200,7 +199,7 @@ export class FactoryEnvironment {
     for (let i = 0; i < 70; i++) {
       // A belt of trees around the compound, kept off the road.
       const side = i % 4;
-      const along = rnd(R, -300, WORLD + 300), out = rnd(R, 90, 520);
+      const along = rnd(R, -300, FACTORY_SIZE + 300), out = rnd(R, 90, 520);
       const x = side === 0 ? along : side === 1 ? along : side === 2 ? WALL0 - out : WALL1 + out;
       const y = side === 0 ? WALL0 - out - 60 : side === 1 ? WALL1 + out : along;
       if (side === 1 && x > GATE.x - 160 && x < GATE.x + GATE.w + 160) continue;
@@ -215,7 +214,7 @@ export class FactoryEnvironment {
     this.clouds = [];
     for (let i = 0; i < 7; i++) {
       const s = makeSprite(art.cloud);
-      s.position.set(rnd(R, 0, WORLD), rnd(R, 0, WORLD));
+      s.position.set(rnd(R, 0, FACTORY_SIZE), rnd(R, 0, FACTORY_SIZE));
       s.scale.set(rnd(R, 1.8, 3.4), rnd(R, 1.5, 2.6));
       s.alpha = 0.14;
       L.air.addChild(s);
@@ -321,8 +320,8 @@ export class FactoryEnvironment {
     }
     for (const c of this.clouds) {
       c.x += 12 * dt; c.y += 4 * dt;
-      if (c.x > WORLD + 600) c.x = -600;
-      if (c.y > WORLD + 500) c.y = -500;
+      if (c.x > FACTORY_SIZE + 600) c.x = -600;
+      if (c.y > FACTORY_SIZE + 500) c.y = -500;
     }
   }
 }

@@ -9,7 +9,6 @@
 // player from it) and turns the events the server broadcasts into the same effects. There is no
 // pause (Esc and P call onMenu), and Tab held asks for the scoreboard (`scores`).
 import { Container, Sprite } from 'pixi.js';
-import { WORLD } from '../island.js';
 import { mulberry32 } from '../noise.js';
 import { Sim, STEP } from '../sim/sim.js';
 import { Bot } from '../sim/bot.js';
@@ -513,8 +512,8 @@ export class Game {
     const k = 1 - Math.exp(-rawDt * 6);
     this.cam.x += (P.x + lx - this.cam.x) * k;
     this.cam.y += (P.y - 40 + ly - this.cam.y) * k;
-    this.cam.x = Math.max(0, Math.min(WORLD, this.cam.x));
-    this.cam.y = Math.max(0, Math.min(WORLD, this.cam.y));
+    this.cam.x = Math.max(0, Math.min(this.island.size, this.cam.x));
+    this.cam.y = Math.max(0, Math.min(this.island.size, this.cam.y));
     this.shakeAmt *= Math.exp(-rawDt * 9);
     const sw = this.app.screen.width, sh = this.app.screen.height;
     const shx = (Math.random() - 0.5) * this.shakeAmt, shy = (Math.random() - 0.5) * this.shakeAmt;

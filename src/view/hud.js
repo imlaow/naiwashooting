@@ -2,7 +2,6 @@
 // at the screen's edge towards teammates out of sight, who is being watched while out, and the
 // round trip to the server.
 import { Container, Graphics, Sprite, Text } from 'pixi.js';
-import { WORLD } from '../island.js';
 import { WEAPONS, WEAPON_ORDER } from '../sim/entities.js';
 import { t } from '../i18n.js';
 import { teamColour } from '../skins.js';
@@ -322,7 +321,7 @@ export class Hud {
     }
 
     // Minimap
-    const k = this.miniSize / WORLD;
+    const k = this.miniSize / g.island.size;
     const d = this.miniDots.clear();
     for (const p of S.pickups) d.circle(p.x * k, p.y * k, 2.5).fill(p.kind === 'weapon' ? 0x7dd3fc : p.kind === 'health' ? 0xff5a7a : 0xffd23f);
     for (const e of S.enemies) {

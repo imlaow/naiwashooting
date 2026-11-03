@@ -1,6 +1,6 @@
 // Builds the island scene: water, terrain, props, vegetation and ambient life.
 import { Container, Sprite, TilingSprite, Graphics, Texture, CanvasSource } from 'pixi.js';
-import { WORLD, H_DEEP } from '../island.js';
+import { H_DEEP } from '../island.js';
 import { ROCK_SIZES } from '../sim/layoutIsland.js';
 
 export function makeSprite(tex) {
@@ -16,7 +16,7 @@ function canvasTexture(canvas, resolution = 1) {
 // Paints the big terrain/foam canvases. Heavy (runs once per map). Maps without a coastline
 // (the factory) have no foam.
 export function buildTerrainTextures(island, maxTextureSize) {
-  const scale = maxTextureSize >= WORLD ? 1 : 0.5;
+  const scale = maxTextureSize >= island.size ? 1 : 0.5;
   const tex = {
     terrain: canvasTexture(island.paintTerrain(scale), scale),
     minimap: canvasTexture(island.paintMinimap(180)),
@@ -34,6 +34,7 @@ export class Environment {
   constructor(game, terrainTex, layout) {
     this.game = game;
     const { island, art, layers } = game;
+    const WORLD = island.size;
     this.island = island;
     this.art = art;
     this.layout = layout;
@@ -59,6 +60,7 @@ export class Environment {
 
   // ---------- Water ----------
   buildWater(layer, tex) {
+    const WORLD = this.island.size;
     const M = 1600;
     const base = new Graphics().rect(-M, -M, WORLD + M * 2, WORLD + M * 2).fill(0x1a6f9c);
     layer.addChild(base);
@@ -276,8 +278,8 @@ export class Environment {
     }
     for (const c of this.clouds) {
       c.x += 14 * dt; c.y += 5 * dt;
-      if (c.x > WORLD + 600) c.x = -600;
-      if (c.y > WORLD + 500) c.y = -500;
+      if (c.x > this.island.size + 600) c.x = -600;
+      if (c.y > this.island.size + 500) c.y = -500;
     }
     for (const g of this.gulls) {
       g.a += g.w * dt;

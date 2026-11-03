@@ -9,7 +9,7 @@
 // Change anything here and bump PROTOCOL in src/sim/protocol.js.
 import { schema, t } from '@colyseus/schema';
 
-const pos = () => t.quantized({ min: -256, max: 3456 }); // the map is 3200 px; 0.06 px steps
+const pos = () => t.quantized({ min: -256, max: 4256 }); // maps are up to 4000 px (ISLAND_SIZE); 0.07 px steps
 const timer = (max, bits = 8) => t.quantized({ min: 0, max, bits });
 const vel = () => t.quantized({ min: -1000, max: 1000, bits: 16 }); // 0.03 px/s steps
 

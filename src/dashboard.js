@@ -1,6 +1,5 @@
 // The map dashboard: one section per theme, a card per map with a painted preview and that
 // map's records, and the random card that rerolls its seed.
-import { WORLD } from './island.js';
 import { THEMES, RANDOM_ID, makeChoice, mapKey, choiceKey, worldFor, thumbnailFor, readStats, writeSelected } from './maps.js';
 import { t } from './i18n.js';
 
@@ -154,8 +153,8 @@ export class Dashboard {
     for (const [cls, p] of [['spawn', world.spawn], ['village', world.village], ['lookout', world.lookout]]) {
       if (!p) continue;
       const pin = el('span', `pin ${cls}`);
-      pin.style.left = `${(p.x / WORLD) * 100}%`;
-      pin.style.top = `${(p.y / WORLD) * 100}%`;
+      pin.style.left = `${(p.x / world.size) * 100}%`;
+      pin.style.top = `${(p.y / world.size) * 100}%`;
       entry.thumb.append(pin);
     }
   }

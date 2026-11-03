@@ -233,7 +233,7 @@ export class NetSim {
       },
       // The server's state after the acknowledged command. Where it is what the copy had then,
       // as far as the wire's rounding can tell, the copy's own exact numbers stay: restarting
-      // from rounded ones (0.06 px) can land a hair inside a wall, and the step would then refuse
+      // from rounded ones (0.07 px) can land a hair inside a wall, and the step would then refuse
       // to move (moveBody), a real misprediction made by the wire.
       adopt: (w) => {
         const st = this.mine;
