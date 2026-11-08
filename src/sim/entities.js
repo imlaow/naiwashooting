@@ -278,12 +278,24 @@ export class Player {
 
 // ---------------- Enemies ----------------
 
+// kb: how much of a hit's knockback it takes; drop: the chance it leaves a weapon; bar / shadow:
+// its health bar's width and its shadow's scale. The later soldiers (wave they first come in):
+//   punk    (4) runs in close and fires SMG bursts of `burst` shots `burstGap` s apart
+//   sniper  (6) stands still to aim for `aimTime` s (a laser shows where, locked for the last
+//               AIM_LOCK s), then one fast rifle shot
+//   elite   (8) a tough gentleman with a wide shotgun; every `ringEvery`th volley also throws
+//               a ring of `ring` orbs
 export const ENEMY_TYPES = {
   egg: { hp: 36, speed: 150, r: 16, bite: 12, score: 50, color: 0xe0a030 },
   gunner: { hp: 60, speed: 100, r: 17, skin: 'gunner', gun: 'pistol', rate: 1.25, bulletSpeed: 430, dmg: 9, pellets: 1, spread: 0.06, range: [230, 400], score: 100, scale: 0.38, gunH: 36, color: 0xff6b8a },
-  heavy: { hp: 160, speed: 70, r: 21, skin: 'heavy', gun: 'shotgun', rate: 1.9, bulletSpeed: 360, dmg: 8, pellets: 5, spread: 0.42, range: [120, 250], score: 220, scale: 0.48, gunH: 44, color: 0xa78bfa },
-  boss: { hp: 1600, speed: 90, r: 32, skin: 'boss', gun: 'smg', gunScale: 1.5, rate: 0.1, bulletSpeed: 400, dmg: 8, pellets: 1, spread: 0.12, range: [200, 420], score: 2500, scale: 0.78, gunH: 60, color: 0x9ca3af },
+  heavy: { hp: 160, speed: 70, r: 21, skin: 'heavy', gun: 'shotgun', rate: 1.9, bulletSpeed: 360, dmg: 8, pellets: 5, spread: 0.42, range: [120, 250], score: 220, scale: 0.48, gunH: 44, color: 0xa78bfa, kb: 0.5, drop: 0.25, bar: 54, shadow: 1 },
+  punk: { hp: 110, speed: 160, r: 17, skin: 'punk', gun: 'smg', rate: 1.5, burst: 4, burstGap: 0.08, bulletSpeed: 470, dmg: 6, pellets: 1, spread: 0.1, range: [110, 240], score: 180, scale: 0.4, gunH: 32, color: 0xff4fd8, kb: 0.8, drop: 0.1 },
+  sniper: { hp: 90, speed: 80, r: 17, skin: 'sniper', gun: 'rifle', rate: 3.2, aimTime: 1, bulletSpeed: 1100, dmg: 24, pellets: 1, spread: 0, range: [460, 680], score: 260, scale: 0.42, gunH: 34, color: 0x0ea5e9, drop: 0.15 },
+  elite: { hp: 420, speed: 75, r: 22, skin: 'elite', gun: 'shotgun', gunScale: 1.15, rate: 1.7, bulletSpeed: 380, dmg: 9, pellets: 7, spread: 0.5, range: [140, 280], ringEvery: 3, ring: 10, score: 450, scale: 0.5, gunH: 42, color: 0xe11d48, kb: 0.3, drop: 0.4, bar: 60, shadow: 1.1 },
+  boss: { hp: 1600, speed: 90, r: 32, skin: 'boss', gun: 'smg', gunScale: 1.5, rate: 0.1, bulletSpeed: 400, dmg: 8, pellets: 1, spread: 0.12, range: [200, 420], score: 2500, scale: 0.78, gunH: 60, color: 0x9ca3af, kb: 0.15, shadow: 1.6 },
 };
+// A sniper's aim stops following its target this long before the shot.
+export const AIM_LOCK = 0.3;
 
 export class Enemy {
   // hpMul: co-op makes King Naiwa tougher.
@@ -303,6 +315,7 @@ export class Enemy {
     this.animT = Math.random() * 4; this.moving = false;
     this.spawnT = 0.7; this.dead = false;
     this.phase = 'chase'; this.phaseT = 3; this.sweep = 0;
+    this.aimT = 0; this.burstN = 0; this.burstT = 0; this.volleys = 0;
   }
 
   // The nearest player it can go for (up and not laughing), preferring one in sight. With
@@ -347,6 +360,7 @@ export class Enemy {
       if (!(this.wanderT > 0)) { this.wanderT = 1.2 + Math.random() * 1.8; this.wanderA = Math.random() * Math.PI * 2; }
       wx = Math.cos(this.wanderA); wy = Math.sin(this.wanderA); speed *= 0.35;
       this.aim = this.wanderA;
+      this.aimT = 0; this.burstN = 0;
     } else if (this.type === 'egg') {
       const wob = Math.sin(sim.time * 7 + this.animT) * 0.7;
       wx = tx - ty * wob; wy = ty + tx * wob;
@@ -357,7 +371,7 @@ export class Enemy {
         this.kx -= tx * 220; this.ky -= ty * 220;
       }
     } else {
-      this.aim = Math.atan2(P.y - this.y, P.x - this.x);
+      if (!(this.aimT > 0 && this.aimT <= AIM_LOCK)) this.aim = Math.atan2(P.y - this.y, P.x - this.x);
       this.strafeT -= dt;
       if (this.strafeT <= 0) { this.strafe *= -1; this.strafeT = 1.2 + Math.random() * 2; }
       if (this.type === 'boss') {
@@ -368,9 +382,31 @@ export class Enemy {
         else if (dist < T.range[0]) { wx = -tx - ty * this.strafe * 0.6; wy = -ty + tx * this.strafe * 0.6; }
         else { wx = -ty * this.strafe + tx * 0.15; wy = tx * this.strafe + ty * 0.15; speed *= 0.7; }
         this.cd -= dt;
-        if (this.cd <= 0 && this.los && dist < T.range[1] + 150 && !P.dead) {
-          this.fire(T.pellets, T.spread, T.bulletSpeed, T.dmg);
-          this.cd = T.rate * (0.8 + Math.random() * 0.45);
+        const canFire = this.los && dist < T.range[1] + 150 && !P.dead;
+        if (this.aimT > 0) {
+          // A sniper taking aim: stands still; the shot goes where the aim locked.
+          speed = 0;
+          this.aimT -= dt;
+          if (this.aimT <= 0) {
+            this.fire(T.pellets, T.spread, T.bulletSpeed, T.dmg, false, true);
+            this.cd = T.rate * (0.8 + Math.random() * 0.45);
+          }
+        } else if (this.burstN > 0) {
+          this.burstT -= dt;
+          if (this.burstT <= 0) {
+            this.burstN--; this.burstT = T.burstGap;
+            if (canFire) this.fire(T.pellets, T.spread, T.bulletSpeed, T.dmg);
+          }
+        } else if (this.cd <= 0 && canFire) {
+          if (T.aimTime) {
+            this.aimT = T.aimTime;
+            sim.emit({ type: 'aim', id: this.id, t: T.aimTime, x: this.x, y: this.y });
+          } else {
+            this.fire(T.pellets, T.spread, T.bulletSpeed, T.dmg);
+            if (T.burst) { this.burstN = T.burst - 1; this.burstT = T.burstGap; }
+            if (T.ring && ++this.volleys % T.ringEvery === 0) this.throwRing(T.ring, 0.4);
+            this.cd = T.rate * (0.8 + Math.random() * 0.45);
+          }
         }
       }
     }
@@ -449,13 +485,7 @@ export class Enemy {
     } else if (this.phase === 'ring') {
       move[2] = 0;
       if (this.cd <= 0) {
-        const n = enraged ? 22 : 16;
-        const off = this.ringN * 0.5;
-        for (let i = 0; i < n; i++) {
-          const a = (i / n) * Math.PI * 2 + off;
-          sim.fireBullet({ x: this.x + Math.cos(a) * 30, y: this.y + Math.sin(a) * 30, ang: a, speed: 260, dmg: 10, life: 3, team: 'enemy', orb: true, tint: 0xc084fc, scale: 1.3, h: 40 });
-        }
-        sim.emit({ type: 'ring', id: this.id, x: this.x, y: this.y });
+        this.throwRing(enraged ? 22 : 16, this.ringN * 0.5);
         this.ringN++;
         this.cd = 0.5;
       }
@@ -472,16 +502,27 @@ export class Enemy {
     return move;
   }
 
-  fire(pellets, spread, speed, dmg, orb = false) {
+  // An orb ring of n from where it stands, turned by `off`.
+  throwRing(n, off) {
+    const sim = this.sim, boss = this.type === 'boss';
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + off;
+      sim.fireBullet({ x: this.x + Math.cos(a) * 30, y: this.y + Math.sin(a) * 30, ang: a, speed: boss ? 260 : 240, dmg: boss ? 10 : 8, life: 3, team: 'enemy', orb: true, tint: 0xc084fc, scale: boss ? 1.3 : 1.1, h: boss ? 40 : this.T.gunH });
+    }
+    sim.emit({ type: 'ring', id: this.id, x: this.x, y: this.y, boss });
+  }
+
+  // locked: straight along this.aim (a sniper's shot, where its laser showed).
+  fire(pellets, spread, speed, dmg, orb = false, locked = false) {
     const sim = this.sim, P = this.target, T = this.T;
     const dist = Math.hypot(P.x - this.x, P.y - this.y);
     const lead = (dist / speed) * 0.45;
     const ax = P.x + P.vx * lead, ay = P.y + P.vy * lead;
-    const base = this.type === 'boss' && this.phase === 'spray' ? this.aim : Math.atan2(ay - this.y, ax - this.x);
+    const base = locked || this.type === 'boss' && this.phase === 'spray' ? this.aim : Math.atan2(ay - this.y, ax - this.x);
     this.aim = base;
     const len = T.gun ? muzzleReach(T.gun, T.gunScale) : 12;
     const mx = this.x + Math.cos(base) * len, my = this.y + Math.sin(base) * len;
-    const isOrb = orb || this.type === 'heavy';
+    const isOrb = orb || this.type === 'heavy' || this.type === 'elite';
     const h = T.gunH;
     for (let i = 0; i < pellets; i++) {
       const a = base + (pellets > 1 ? (i / (pellets - 1) - 0.5) * spread * 2 : 0) + (Math.random() - 0.5) * spread * (pellets > 1 ? 0.3 : 2);
@@ -497,7 +538,7 @@ export class Enemy {
   hit(dmg, ang, knock, by = null) {
     if (this.dead) return;
     this.hp -= dmg;
-    const kb = this.type === 'boss' ? 0.15 : this.type === 'heavy' ? 0.5 : 1;
+    const kb = this.T.kb ?? 1;
     this.kx += Math.cos(ang) * knock * kb; this.ky += Math.sin(ang) * knock * kb;
     this.sim.emit({ type: 'hit', id: this.id, x: this.x, y: this.y, dmg, h: this.height(), by });
     if (this.hp <= 0) { this.dead = true; this.sim.onEnemyKilled(this, by); }

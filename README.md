@@ -91,7 +91,8 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 ## Gameplay
 
 - You start on the beach by the dock. Waves of rivals land on the shores: yellow eggs that waddle up and bump into you, long-eared bunny gunners, and purple shotgun heavies.
-- Every 5th wave, **King Naiwa** shows up. He sprays bullets, fires rings of orbs, and summons eggs.
+- Later waves bring better soldiers: **punks** (from wave 4) rush in with SMG bursts, **detective snipers** (from wave 6) stop and aim a red laser at you before one hard rifle shot (the aim locks just before it fires, so step aside), and **gentleman elites** (from wave 8) are tough, take little knockback, fire wide shotgun orbs and every third volley a ring of them.
+- Every 5th wave, **King Naiwa** shows up, crowned and showing off his belly. He sprays bullets, fires rings of orbs, and summons eggs.
 - Weapons are hidden around the island: a shotgun by a village hut, an SMG at the hilltop lookout tower, and a rifle on a remote beach. Enemies and crates also drop weapons, ammo and medkits.
 - Shooting a red barrel makes it explode, and nearby barrels go off too.
 - Shallow water slows you down. Kill enemies in quick succession to build a combo multiplier.
@@ -129,7 +130,7 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/factoryPlans.js` | The factory maps as plans that place those blocks: dairy, depot, bottling, tanks, and `random`, which rolls a compound from the seed |
 | `src/factoryArt.js` | Painted factory textures (silos, water tower, chimney, machines, containers, lorry, buildings), built the first time a factory loads |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX); guns are painted at the sim's `GUN_SIZES` |
-| `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), builds recoloured rival skins and, online, the teammates' colours (`TEAM`) |
+| `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), King Naiwa's and the later soldiers' poses (`boss.png`, `punk.png`, `sniper.png`, `elite.png`), builds the recoloured heavy and, online, the teammates' colours (`TEAM`) |
 | `src/view/game.js` | The game in the browser: runs the sim's steps for each frame (online: sends the command each step and draws the room's state through `NetSim`, no pause), turns input into the local player's commands (touch auto-aim included) and events into particles, sounds, banners and shake (shake, toasts and the laugh sound only for the local player); sprites for players, props, pickups and bullets; camera, pause, title-screen demo, `?debug&bots=N` |
 | `src/view/entities.js` | `PlayerView` / `EnemyView`: sprites, walk cycle, recoil, hit flash, footsteps, dash ghosts, downed look and revive ring, crown, health bars; online a player's colour and name tag |
 | `src/view/world.js` | Draws the island from its layout: water, vegetation, ambient life |
@@ -151,3 +152,14 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `tools/build-laugh-sheets.mjs` | Packs `laugh-frames/` into the 15 fps hero-sized sprite sheets in `public/assets/laugh/` |
 | `tools/realesrgan-kaggle/` | Kaggle GPU job: Real-ESRGAN 2× (x4plus / animevideov3) of the frames plus BiRefNet masks of the result (`kaggle kernels push -p tools/realesrgan-kaggle`) |
 | `tools/birefnet-kaggle/` | Kaggle GPU job that runs BiRefNet on the frames and outputs `masks_general.zip` / `masks_matting.zip` (`kaggle kernels push -p tools/birefnet-kaggle`) |
+
+## Credits
+
+King Naiwa and the later soldiers come from the
+[Nailong-Studio/wallpaper](https://github.com/Nailong-Studio/wallpaper) collection, trimmed and
+scaled to the hero frames' 660 px:
+
+| File | Source | License |
+| --- | --- | --- |
+| `public/assets/boss.png` | `emotes/奶蛙-姿态-露肚.png`, which the collection calls an official preview pose (`mf-pose-belly`) | None stated: its record gives no license, and the collection notes the official site (milkyfrog.com) reserves all rights |
+| `public/assets/punk.png`, `sniper.png`, `elite.png` | `poses/奶蛙-姿势-朋克头 / 侦探 / 绅士.webp` from [66970010-boop/frog-miner](https://github.com/66970010-boop/frog-miner) | MIT, Copyright (c) 2026 66970010-boop |

@@ -10,6 +10,10 @@ const FRAME_OPTS = { resolution: 3, autoGenerateMipmaps: true };
 const EGG_URL = `${import.meta.env.BASE_URL}assets/egg.png`;
 // The gunner's single pose, cut out the same way; 660px tall like the hero frames.
 const GUNNER_URL = `${import.meta.env.BASE_URL}assets/gunner.png`;
+// Single poses for King Naiwa and the later soldiers, trimmed to 660px tall (sources and
+// licenses in README "Credits").
+const POSES = ['boss', 'punk', 'sniper', 'elite'];
+const POSE_URLS = POSES.map((k) => `${import.meta.env.BASE_URL}assets/${k}.png`);
 
 // Online players' colours by join order (the room state's `colour`, wrapping): the skin, plus the
 // colour of their name tag, minimap dot, edge arrow and scoreboard row. 0 is Naiwa as he is;
@@ -25,11 +29,14 @@ export const TEAM = [
 export const teamColour = (c) => TEAM[(c ?? 0) % TEAM.length];
 
 export async function loadSkins() {
-  const [egg, gunner, ...textures] = await Promise.all([
+  const [egg, gunner, ...rest] = await Promise.all([
     Assets.load({ src: EGG_URL, data: { resolution: 5, autoGenerateMipmaps: true } }),
     Assets.load({ src: GUNNER_URL, data: FRAME_OPTS }),
+    ...POSE_URLS.map((src) => Assets.load({ src, data: FRAME_OPTS })),
     ...FRAME_URLS.map((src) => Assets.load({ src, data: FRAME_OPTS })),
   ]);
+  const poses = rest.slice(0, POSES.length), textures = rest.slice(POSES.length);
+  const still = (t) => [t, t, t, t];
   const images = textures.map((t) => t.source.resource);
   const headX = images.map(findHeadX);
   const team = [textures];
@@ -42,11 +49,13 @@ export async function loadSkins() {
     hero: textures,
     headX,
     egg,
-    // One still pose; the walk cycle is just the bob and lean in Enemy.sync.
-    gunner: [gunner, gunner, gunner, gunner],
-    // Hue-shifted rivals. Yellow (~50deg) rotated to the target hue.
+    // One still pose each; the walk cycle is just the bob and lean in Enemy.sync.
+    gunner: still(gunner),
+    ...Object.fromEntries(POSES.map((k, i) => [k, still(poses[i])])),
+    // Where King Naiwa's crown sits across his texture (0–1).
+    bossHeadX: findHeadX(poses[0].source.resource),
+    // A hue-shifted rival. Yellow (~50deg) rotated to the target hue.
     heavy: images.map((img) => recolor(img, { hue: 215, sat: 0.9, light: 0.85 })),
-    boss: images.map((img) => recolor(img, { hue: 160, sat: 0.35, light: 0.55 })),
   };
 }
 

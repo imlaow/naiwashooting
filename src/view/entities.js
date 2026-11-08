@@ -5,7 +5,7 @@ import { Container, Sprite, Graphics, Text } from 'pixi.js';
 import { makeSprite } from './world.js';
 import { FONT } from './hud.js';
 import { TEAM, teamColour } from '../skins.js';
-import { GUN_H, REVIVE_RANGE, REVIVE_SECONDS, BLEED_SECONDS } from '../sim/entities.js';
+import { GUN_H, AIM_LOCK, REVIVE_RANGE, REVIVE_SECONDS, BLEED_SECONDS } from '../sim/entities.js';
 import { sfx } from '../audio.js';
 import { laugh } from '../laugh.js';
 
@@ -220,9 +220,16 @@ export class EnemyView {
     this.hpBar = new Graphics();
     this.hpBar.visible = false;
     this.root.addChild(this.hpBar);
+    // A sniper's laser while it takes aim (the 'aim' event sets aimT).
+    if (T.aimTime) {
+      this.aimT = 0;
+      this.laser = new Graphics();
+      this.laser.visible = false;
+      this.root.addChild(this.laser);
+    }
     game.layers.objects.addChild(this.root);
     this.shadow = makeSprite(game.art.shadow);
-    const ss = type === 'boss' ? 1.6 : type === 'heavy' ? 1 : 0.8;
+    const ss = T.shadow ?? 0.8;
     this.shadow.scale.set(ss, ss);
     game.layers.shadows.addChild(this.shadow);
     this.sync(1);
@@ -233,6 +240,7 @@ export class EnemyView {
 
   tick(dt) {
     if (!this.e.dead) this.flash -= dt;
+    if (this.laser) this.aimT -= dt;
   }
 
   // A killed enemy stays in its last pose until the sim drops it.
@@ -267,8 +275,21 @@ export class EnemyView {
       const behind = sin < -0.35;
       if (behind !== this.gunBehind) { this.gunBehind = behind; this.root.setChildIndex(this.gun, behind ? 0 : 1); }
       if (this.crown) {
-        const hx = (game.skins.headX[frame] - 0.5) * this.body.texture.width * sc * facing;
+        const hx = (game.skins.bossHeadX - 0.5) * this.body.texture.width * sc * facing;
         this.crown.position.set(hx, -this.body.texture.height * sc * 0.97 + bob + 6);
+      }
+      if (this.laser) {
+        // Thin and faint while it follows, then bright once the aim locks (AIM_LOCK).
+        const on = this.aimT > 0;
+        this.laser.visible = on;
+        if (on) {
+          const locked = this.aimT <= AIM_LOCK, L = 900;
+          const x0 = this.gun.x + cos * 40, y0 = this.gun.y + sin * 40;
+          const x1 = x0 + cos * L, y1 = y0 + sin * L;
+          this.laser.clear()
+            .moveTo(x0, y0).lineTo(x1, y1).stroke({ width: locked ? 9 : 6, color: 0xff2d2d, alpha: locked ? 0.35 : 0.15 })
+            .moveTo(x0, y0).lineTo(x1, y1).stroke({ width: locked ? 3 : 2, color: 0xff4d4d, alpha: locked ? 1 : 0.6 + 0.25 * Math.sin(this.aimT * 30) });
+        }
       }
     }
     this.body.tint = this.flash > 0 ? 0xff4d4d : 0xffffff;
@@ -280,7 +301,7 @@ export class EnemyView {
     }
     // Health bar
     if (e.type !== 'boss' && this.hpBarT > 0) {
-      const w = e.type === 'heavy' ? 54 : 40, y = -e.height() - 12;
+      const w = T.bar ?? 40, y = -e.height() - 12;
       this.hpBar.visible = true;
       this.hpBar.clear()
         .roundRect(-w / 2 - 2, y - 2, w + 4, 9, 3).fill({ color: 0x000000, alpha: 0.6 })

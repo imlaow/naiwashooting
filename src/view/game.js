@@ -175,9 +175,15 @@ export class Game {
         sfx.play('enemyShot', this.volumeAt(e.ex, e.ey));
         break;
       case 'ring':
-        sfx.play('shotgun', 0.6);
-        this.shake(4);
+        if (e.boss) { sfx.play('shotgun', 0.6); this.shake(4); }
+        else sfx.play('shotgun', 0.6 * this.volumeAt(e.x, e.y));
         break;
+      case 'aim': {
+        const v = this.enemyViews.get(e.id);
+        if (v?.laser) v.aimT = e.t;
+        sfx.play('aim', this.volumeAt(e.x, e.y));
+        break;
+      }
       case 'hit': {
         const v = this.enemyViews.get(e.id);
         if (v) { v.flash = 0.08; v.hpBarT = 2.5; }

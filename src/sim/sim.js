@@ -568,14 +568,24 @@ export class Sim {
     let eggs = Math.min(3 + n * 2, 18);
     let gunners = Math.min(n, 10);
     let heavies = Math.min(Math.floor((n - 1) / 2), 6);
-    if (boss) { eggs = Math.floor(eggs / 2); gunners = Math.floor(gunners / 2); heavies = Math.floor(heavies / 2); }
+    // The later soldiers: punks from wave 4, snipers from 6, elites from 8.
+    let punks = n >= 4 ? Math.min(Math.floor((n - 2) / 2), 6) : 0;
+    let snipers = n >= 6 ? Math.min(Math.floor((n - 3) / 3), 4) : 0;
+    let elites = n >= 8 ? Math.min(Math.floor((n - 5) / 3), 3) : 0;
+    const halve = (k) => { eggs = Math.floor(eggs * k); gunners = Math.floor(gunners * k); heavies = Math.floor(heavies * k); punks = Math.floor(punks * k); snipers = Math.floor(snipers * k); elites = Math.floor(elites * k); };
+    if (boss) halve(0.5);
     // Co-op: half as many again per extra player, and room for 4 more on the map at once.
     const extra = Math.max(0, this.players.size - 1);
-    if (extra) { const k = 1 + 0.5 * extra; eggs = Math.round(eggs * k); gunners = Math.round(gunners * k); heavies = Math.round(heavies * k); }
+    if (extra) {
+      const k = 1 + 0.5 * extra, r = (v) => Math.round(v * k);
+      eggs = r(eggs); gunners = r(gunners); heavies = r(heavies); punks = r(punks); snipers = r(snipers); elites = r(elites);
+    }
     const q = [];
+    const later = (type, count) => { for (let i = 0; i < count; i++) q.splice(Math.floor(q.length * 0.4 + Math.random() * q.length * 0.6), 0, type); };
     for (let i = 0; i < eggs; i++) q.push('egg');
     for (let i = 0; i < gunners; i++) q.splice(Math.floor(Math.random() * (q.length + 1)), 0, 'gunner');
-    for (let i = 0; i < heavies; i++) q.splice(Math.floor(q.length * 0.4 + Math.random() * q.length * 0.6), 0, 'heavy');
+    for (let i = 0; i < punks; i++) q.splice(Math.floor(Math.random() * (q.length + 1)), 0, 'punk');
+    later('heavy', heavies); later('sniper', snipers); later('elite', elites);
     if (boss) q.splice(Math.min(3, q.length), 0, 'boss');
     this.queue = q;
     this.maxAlive = Math.min(6 + n * 2, 20) + 4 * extra;
@@ -656,7 +666,7 @@ export class Sim {
       const healChance = P && P.hp < 40 ? 0.2 : 0.09;
       if (r < healChance) this.spawnPickup('health', e.x, e.y);
       else if (r < healChance + 0.1 && P && Object.keys(P.arsenal).length > 1) this.spawnPickup('ammo', e.x, e.y);
-      else if (Math.random() < (e.type === 'heavy' ? 0.25 : 0.04)) this.dropWeapon(e.x, e.y, P);
+      else if (Math.random() < (e.T.drop ?? 0.04)) this.dropWeapon(e.x, e.y, P);
     }
     this.after(0, () => {
       const i = this.enemies.indexOf(e);
