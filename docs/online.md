@@ -1390,6 +1390,16 @@ ssh -R. The ONLINE panel has no help text to link it from. The README links it.
   npm's shasum matches it. Checked from outside: `npx --yes naiwa-server@0.1.4` with an empty
   cache, and the image (both platforms, `latest` moved to it) pulled with no login and run, with
   co-op bots against each.
+- **0.1.5** (2026-11-08, protocol 12): a new King Naiwa sprite and three later soldiers: punks
+  (wave 4+, SMG bursts), snipers (wave 6+, a laser aim event `aim` then one rifle shot) and
+  elites (wave 8+, wide orb shotgun and an orb ring every third volley). Enemy types travel as the
+  existing `EnemyState.type` string, so the state is unchanged; the sim's waves and the new
+  `aim` event are why the protocol moved. The tarball was tested in an empty directory: co-op
+  bots (wave 5) and PvP bots at 8 kills / 90 s, plus `bot-clients --wave 8` from the repo for
+  the snipers and elites online. npm's shasum matches it (`022e520f`). Checked from outside:
+  `npx --yes naiwa-server@0.1.5` with an empty cache (its tarball 404ed for a few minutes after
+  the registry listed it), and the image (both platforms, `latest` moved to it) pulled and run, with co-op
+  bots against it.
 
 
 ## Networking with Colyseus
