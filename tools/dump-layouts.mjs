@@ -84,6 +84,17 @@ function islandArt() {
   return new Proxy(known, { get: (t, k) => (k in t ? t[k] : (t[k] = tok(String(k)))) });
 }
 
+// The skins as named tokens with the frames' logical sizes (the dream scene sizes its statues by
+// them).
+function skinTokens() {
+  const frames = (name) => [0, 1, 2, 3].map((i) => ({ name: `${name}.${i}`, width: 120, height: 220 }));
+  const still = (name) => Array(4).fill({ name, width: 150, height: 220 });
+  return {
+    hero: frames('hero'), heavy: frames('heavy'), team: (c) => frames(`team${c}`), egg: { name: 'egg', width: 40, height: 46 },
+    ...Object.fromEntries(['gunner', 'boss', 'punk', 'sniper', 'elite'].map((k) => [k, still(k)])),
+  };
+}
+
 // Builds a map's Sim, recording the colliders it registers, and draws its scene against a fake
 // Game.
 async function viaScene(choice) {
@@ -102,7 +113,7 @@ async function viaScene(choice) {
   const props = sim.props.map(({ kind, x, y }) => ({ kind, x, y }));
   const weaponSpots = sim.pickups.filter((p) => p.kind === 'weapon').map((p) => ({ kind: p.weapon, x: p.x, y: p.y }));
   const layers = new Proxy({}, { get: (t, k) => t[k] ?? (t[k] = new Container()) });
-  const game = { island, art: islandArt(), layers, fx: {} };
+  const game = { island, art: islandArt(), skins: skinTokens(), layers, fx: {} };
   const env = new theme.scene(game, { terrain: { name: 'terrain' } }, layout);
   return { colliders, props, weaponSpots, occupied: layout.occupied, env, layers };
 }
@@ -153,7 +164,7 @@ function drawLines({ env, layers }) {
     const kids = layers[name].children;
     out.push(`layer ${name} ${kids.length}`, ...kids.map(nodeLine));
   }
-  for (const key of ['cullables', 'tall', 'fading', 'swayers', 'emitters', 'lights', 'lamps', 'gulls', 'butterflies', 'vents', 'clouds', 'flows']) {
+  for (const key of ['cullables', 'tall', 'fading', 'swayers', 'emitters', 'lights', 'lamps', 'gulls', 'butterflies', 'vents', 'clouds', 'flows', 'statues', 'laughers']) {
     if (!Array.isArray(env[key])) continue;
     out.push(`${key} ${env[key].length}`, ...env[key].map((e) => (e.position ? nodeLine(e) : flat(e))));
   }

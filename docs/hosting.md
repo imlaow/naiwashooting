@@ -90,7 +90,7 @@ volumes:
 | `pvp` | `{ "killLimit": 25, "timeLimit": 600 }`：有人达到 killLimit 击杀（1–999）或过了 timeLimit 秒（30–3600）时一局结束 |
 | `maxPlayers` | 同时最多几人（1–16，默认 4） |
 | `password` | 密码，`""` 表示不要密码 |
-| `maps` | 地图轮换，例如 `"island/cove"`、`"island/twins"`、`"factory/dairy"`、`"factory/depot"`、`"island/random"`（每次一个新岛）、`"factory/random"`（每次一座新工厂） |
+| `maps` | 地图轮换，例如 `"island/cove"`、`"island/twins"`、`"factory/dairy"`、`"factory/depot"`、`"island/random"`（每次一个新岛）、`"factory/random"`（每次一座新工厂）、`"dream/king"`（整张地图是一只巨大的奶蛙王）、`"dream/random"`（同一只奶蛙王，雕像每次换位置） |
 | `allowedOrigins` | 哪些网站的页面可以加入（默认是官网的几个域名和 `http://localhost:5173`），`["*"]` 表示任何网站 |
 | `banAddresses` | `true`（默认）：封禁时也封玩家的 IP 地址，而不只是他的浏览器 |
 | `trustProxy` | 你的隧道或反向代理的地址。只有从这些地址来的连接，才相信它们转发的 `X-Forwarded-For`（见下文） |
@@ -379,7 +379,7 @@ Any key left out takes its default.
 | `pvp` | `{ "killLimit": 25, "timeLimit": 600 }`: a round ends when someone reaches killLimit kills (1–999) or after timeLimit seconds (30–3600) |
 | `maxPlayers` | Players at once (1–16, default 4) |
 | `password` | `""` for none |
-| `maps` | The rotation, e.g. `"island/cove"`, `"island/twins"`, `"factory/dairy"`, `"factory/depot"`, `"island/random"` (a new island each time), `"factory/random"` (a new factory each time) |
+| `maps` | The rotation, e.g. `"island/cove"`, `"island/twins"`, `"factory/dairy"`, `"factory/depot"`, `"island/random"` (a new island each time), `"factory/random"` (a new factory each time), `"dream/king"` (the whole map is one giant King Naiwa), `"dream/random"` (him again, with the statues somewhere else each time) |
 | `allowedOrigins` | Sites whose pages may join (the official domains and `http://localhost:5173` by default); `["*"]` for any |
 | `banAddresses` | `true` (default): a ban also refuses the player's address, not only their browser |
 | `trustProxy` | Your tunnel's or reverse proxy's address. Only connections from these have their forwarded `X-Forwarded-For` believed (see below) |

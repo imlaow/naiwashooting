@@ -12,8 +12,10 @@
 // in i18n.js.
 import { Island } from '../island.js';
 import { Factory } from '../factory.js';
+import { Dream } from '../dream.js';
 import { islandLayout } from './layoutIsland.js';
 import { factoryLayout } from './layoutFactory.js';
+import { dreamLayout } from './layoutDream.js';
 
 export const THEMES = [
   {
@@ -55,6 +57,16 @@ export const THEMES = [
     ],
     world: (choice) => new Factory(choice.seed, choice.shape.plan ?? 'random'),
     layout: factoryLayout,
+  },
+  {
+    id: 'dream',
+    // The ground is always King Naiwa (dream.js); the random card scatters other statues on him.
+    random: true,
+    variants: [
+      { id: 'king', seed: 6174, shape: {}, tags: ['weird', 'large'] },
+    ],
+    world: (choice) => new Dream(choice.seed),
+    layout: dreamLayout,
   },
 ];
 

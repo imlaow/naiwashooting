@@ -30,6 +30,30 @@ See `README.md` for running the game, controls and the code map.
      ghcr.io/imlaow/naiwa-server:<version> -t ghcr.io/imlaow/naiwa-server:latest --push .` from
      the repo root, in the background (needs `docker login ghcr.io` with a `write:packages` token).
   5. From outside: `npx naiwa-server@<version>` in an empty directory, and `docker pull` plus run.
+     The registry can list a new version a few minutes before its tarball downloads (404).
+  6. Update our own server (below).
+- npm publishing needs the owner: `npm login`, and `npm publish` asks for a browser one-time
+  confirmation, so they run `! cd build/naiwa-server && npm publish` themselves.
+
+## Our game server (GCP)
+
+- VM `free-vm`, project `myvm-487623`, zone `us-east1-b` (e2-micro, x86_64, public IP
+  35.211.252.199), gcloud account `laow0v0@gmail.com`. Reach it with
+  `gcloud compute ssh free-vm --project myvm-487623 --zone us-east1-b --quiet --command '…'`.
+- It runs a global npm install (`npm install -g naiwa-server`, Node from nvm,
+  `~/.nvm/versions/node/v26.13.0`) as systemd `naiwa.service`, which starts it in tmux session
+  `naiwa` (the owner's console: `tmux attach -t naiwa`; send a command with
+  `tmux send-keys -t naiwa "players" Enter` and read it with `tmux capture-pane -p -t naiwa`).
+  Config and bans are in `/home/ubuntu/naiwa/` (`server.json`, `bans.json`).
+- It doesn't update itself. After publishing a version: check `players` in the console, then
+  `. ~/.nvm/nvm.sh && npm install -g naiwa-server@<version> && sudo systemctl restart naiwa`, and
+  confirm the tmux pane prints the new version and protocol. The unit's `ExecStart` names the
+  node path, so a new Node version from nvm needs the unit edited too.
+- Port 7777 is not open to the internet (the firewall allows only 22, 3389 and ICMP) and there is
+  no tunnel or proxy on it, so players can't reach it yet. Test it through an SSH forward:
+  `gcloud compute ssh … -- -N -L 7797:localhost:7777`, then
+  `node tools/bot-clients.mjs --server ws://127.0.0.1:7797 --minutes 1`.
+- Updated to 0.1.5 on 2026-11-08 (from 0.1.4); bots through the forward: no errors.
 
 ## Online play
 
@@ -51,7 +75,12 @@ tunnel `[]`).
 All game logic is in `src/sim/` (no Pixi, DOM, audio or HUD imports); `src/view/` draws it. After
 touching `src/sim/`, run `node tools/sim-headless.mjs` and `node tools/sim-headless.mjs --players 4`
 (both must end with "no errors"), `node tools/sim-rules.mjs` ("all rules hold") and
-`node tools/dump-layouts.mjs --check`.
+`node tools/dump-layouts.mjs --check`. A new map makes `--check` differ at the baseline's end:
+regenerate it (`node tools/dump-layouts.mjs > tools/layout-baseline.txt`) and confirm with
+`git diff` that lines were only added. After touching the dream maps (`src/dream.js`,
+`src/sim/layoutDream.js`), also run `node tools/check-dream.mjs --seeds 500` ("all good"); their
+ground's edge is `src/dreamMask.js`, baked from `public/assets/boss.png` by
+`node tools/bake-dream-mask.mjs` (rebake and bump `PROTOCOL` if that image changes).
 
 After touching `server/`, `src/net/`, `src/sim/protocol.js` or anything the room state carries,
 run `npm run test:server` (all pass; `server/test/console.test.js` starts real servers on port

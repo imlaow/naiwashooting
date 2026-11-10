@@ -7,6 +7,7 @@
 import { THEMES as SIM_THEMES, makeChoice, mapKey, choiceKey } from './sim/maps.js';
 import { Environment } from './view/world.js';
 import { FactoryEnvironment } from './view/factoryScene.js';
+import { DreamEnvironment } from './view/dreamScene.js';
 
 export { RANDOM_ID, randomSeed, makeChoice, mapKey, choiceKey } from './sim/maps.js';
 
@@ -20,6 +21,11 @@ const VIEWS = {
     scene: FactoryEnvironment,
     thumbnail: (world, size) => world.paintMinimap(size),
     loading: ['loading.factory', 'loading.factoryPaint'],
+  },
+  dream: {
+    scene: DreamEnvironment,
+    thumbnail: (world, size) => world.paintMinimap(size),
+    loading: ['loading.dream', 'loading.dreamPaint'],
   },
 };
 

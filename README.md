@@ -15,7 +15,9 @@ Pick a map on the title screen's **选择地图 / MAPS** dashboard. Maps are gro
 island theme has six hand-tuned islands plus a random card that rolls a fresh seed, and the
 factory theme has four plants (**奶蛋加工厂 / Dairy Plant**, **冷链物流园 / Cold-Chain Depot**,
 **双子灌装厂 / Twin Bottling Halls**, **奶罐森林 / Tank Forest**) plus **随机厂区 / Random Plant**,
-a new compound from each seed. Each card shows a painted preview and that
+a new compound from each seed. The **怪梦 / Fever Dream** theme has **奶蛙王本体 / King Naiwa Himself**,
+where the ground is King Naiwa's own picture, and **另一场怪梦 / Another Dream**, the same with its
+statues scattered by the seed. Each card shows a painted preview and that
 map's best score, best wave and run count (kept in the browser). `?map=island/twins` or
 `?map=factory/dairy` opens a map directly and `?seed=1234` plays a random island with that seed.
 
@@ -54,7 +56,7 @@ npm run test:server                # the room tests
 | `pvp` | `{ "killLimit": 25, "timeLimit": 600 }`: a PvP round ends when someone reaches killLimit kills (1–999) or after timeLimit seconds (30–3600) |
 | `maxPlayers` | Players at once (1–16, default 4) |
 | `password` | `""` for none |
-| `maps` | The rotation, e.g. `"island/cove"`, `"factory/dairy"`, `"island/random"` (a new island each time), `"factory/random"` (a new factory each time) |
+| `maps` | The rotation, e.g. `"island/cove"`, `"factory/dairy"`, `"island/random"` (a new island each time), `"factory/random"` (a new factory each time), `"dream/king"` and `"dream/random"` (King Naiwa as the ground) |
 | `allowedOrigins` | Sites whose pages may join (the official domains and `http://localhost:5173` by default); `["*"]` for any |
 | `banAddresses` | `true` (default): a ban also refuses the player's address, not only their browser |
 | `trustProxy` | The tunnel or proxy in front of the server (`["127.0.0.1", "::1"]`: one on the same machine). Only from these is the forwarded `X-Forwarded-For` address believed. In Docker it is the network's gateway (`172.17.0.1`), behind a raw TCP tunnel `[]`: see `docs/hosting.md` |
@@ -99,6 +101,8 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 - Every 5th kill, Naiwa stops and laughs his head off for 12 seconds. He can't move or shoot while laughing, but nothing can hurt him.
 - In the factories, conveyor belts carry anyone standing on them, milk canals are wadeable but slow except on the bridges, and machines, silos, containers, lorries and buildings are cover. The SMG is always under the water tower; the shotgun is usually outside a warehouse and the rifle in a far corner. In the Dairy Plant the three belts run back and forth (the middle one is cut in two around the company egg so you can cross); the Depot has no canal but a maze of containers; the Bottling Halls are two halls with a street between them; the Tank Forest is rows of silos with long sightlines.
 
+- In the Fever Dream the whole map is King Naiwa lying flat, 5.5 times life size, in a purple void full of tumbling Naiwas: you start on his belly button inside a ring of eggs, his eyes follow you and blink, his tongue is sticky (it slows you like milk) and the only way from one foot to the other is through the puddle of milk he stands in. Everything standing on him is a Naiwa too: statues in every colour (some on their heads, some marching on the spot), two giants who never stop laughing, and a totem of three of him on his forehead with the SMG. The shotgun is on his right foot and the rifle in his left hand.
+
 ## Code map
 
 | File | Purpose |
@@ -128,6 +132,10 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/island.js` | Height map, coastline, village/dock/path layout, terrain painting; `DEFAULT_SHAPE` lists the knobs a map can turn |
 | `src/factory.js` | A factory map built from blocks (hall with belts, silos, canal with bridges, buildings, containers, lorries), its floor painting and minimap; same terrain interface as `Island` plus belt `drift` |
 | `src/factoryPlans.js` | The factory maps as plans that place those blocks: dairy, depot, bottling, tanks, and `random`, which rolls a compound from the seed |
+| `src/dream.js` | The dream maps' terrain: King Naiwa's picture as the ground (`boss.png` at 5.5×), walkable where its alpha says, the milk puddle and the sticky tongue; paints the ground and the minimap from the picture |
+| `src/dreamMask.js` | Generated: that picture's alpha at 1/5 size, so a server knows where the ground ends without the PNG |
+| `src/sim/layoutDream.js` | Dream layout: the totem, the ring of eggs, the landmark statues and what the seed scatters, as circle colliders |
+| `src/view/dreamScene.js` | Draws a dream map: the void with its drifting Naiwas, his eyes, the statues, the laughing giants |
 | `src/factoryArt.js` | Painted factory textures (silos, water tower, chimney, machines, containers, lorry, buildings), built the first time a factory loads |
 | `src/art.js` | All procedural textures (palms, huts, rocks, gulls, guns, FX); guns are painted at the sim's `GUN_SIZES` |
 | `src/skins.js` | Loads hero frames, the egg and bunny-gunner cut-outs (`public/assets/egg.png`, `gunner.png`), King Naiwa's and the later soldiers' poses (`boss.png`, `punk.png`, `sniper.png`, `elite.png`), builds the recoloured heavy and, online, the teammates' colours (`TEAM`) |
@@ -141,6 +149,8 @@ The UI defaults to Chinese. Use the 中文 / EN toggle on the title screen (reme
 | `src/laugh.js` | Laugh sound for the 5th-kill laugh; the animation follows its playback position (the sim times the laugh itself) |
 | `src/audio.js` | WebAudio-synthesised sound effects |
 | `tools/dump-layouts.mjs` | Dumps every preset map's colliders, props and weapon spots; `--check` compares them with `tools/layout-baseline.txt` (run it after touching layout code) |
+| `tools/bake-dream-mask.mjs` | Bakes `public/assets/boss.png`'s alpha into `src/dreamMask.js` (`--info` prints where his eyes, tongue and belly are) |
+| `tools/check-dream.mjs` | Checks the dream layouts (the preset and `--seeds N` random ones): solids on him and apart, every weapon, both feet and the milk reachable from the spawn |
 | `tools/sim-headless.mjs` | Plays 10 minutes of every preset map in plain Node with scripted bots and reports waves, kills, deaths and errors; `--players 2`–`4` plays co-op with bots joining and leaving mid-run (kills per bot, downs, revives, respawns); `--trace` prints the state every game second for diffing two versions (run it after touching `src/sim`) |
 | `tools/pack-server.mjs` | Builds the npm package in `build/`: the server and the `src/` files it imports, copied at the same paths, an `npm-shrinkwrap.json` from the server's lock, and a check that nothing else goes in |
 | `tools/bot-clients.mjs` | Starts a server (or joins one already running, `--server wss://…`) and plays it with 2–8 bot clients over real WebSockets (`sim/bot.js` through `NetSim`); reports waves, kills per client, errors and the server's tick time, memory, CPU and bytes per client. `--rtt/--jitter/--loss` for a bad network, `--wave 8` to start runs at a busy wave (`tools/server-tweaks.mjs`), `--pvp` for bots shooting each other |

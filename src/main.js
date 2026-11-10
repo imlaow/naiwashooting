@@ -1,6 +1,7 @@
 import { Application } from 'pixi.js';
 import { buildArt } from './art.js';
 import { loadSkins, loadLaugh } from './skins.js';
+import { setDreamPicture } from './dream.js';
 import { buildTerrainTextures } from './view/world.js';
 import { Input } from './input.js';
 import { Game } from './view/game.js';
@@ -94,6 +95,8 @@ async function boot() {
   const fonts = document.fonts ? Promise.all([document.fonts.load('32px "Lilita One"'), document.fonts.load('32px "ZCOOL KuaiLe"', CJK_TEXT)]) : null;
   await Promise.race([fonts, new Promise((r) => setTimeout(r, 2500))]).catch(() => {});
   const skins = await loadSkins();
+  // The dream maps' ground is King Naiwa's picture.
+  setDreamPicture(skins.boss[0].source.resource);
   // The laugh animation isn't needed until the 5th kill; fetch it in the background.
   skins.laugh = null;
   loadLaugh().then((l) => { skins.laugh = l; }).catch((err) => console.error('laugh frames', err));

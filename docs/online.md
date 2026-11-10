@@ -1400,6 +1400,13 @@ ssh -R. The ONLINE panel has no help text to link it from. The README links it.
   `npx --yes naiwa-server@0.1.5` with an empty cache (its tarball 404ed for a few minutes after
   the registry listed it), and the image (both platforms, `latest` moved to it) pulled and run, with co-op
   bots against it.
+- **0.1.6** (2026-11-10, protocol 13): a third theme, `dream`: `dream/king` and `dream/random`.
+  The ground is King Naiwa's picture (`src/dream.js`); a server knows where it ends from the
+  picture's alpha baked into `src/dreamMask.js`, so the package still carries no images. The
+  milk puddle and the tongue use the existing wading rule, and the state is unchanged: the new
+  maps are why the protocol moved. The tarball was tested in an empty directory with `maps` set
+  to the two dream maps: co-op bots, no errors; PvP bots on `dream/king` from the repo (22 kills,
+  a round ended). Not published yet when this was written: `npm publish` needs the owner.
 
 
 ## Networking with Colyseus
