@@ -1406,7 +1406,8 @@ ssh -R. The ONLINE panel has no help text to link it from. The README links it.
   milk puddle and the tongue use the existing wading rule, and the state is unchanged: the new
   maps are why the protocol moved. The tarball was tested in an empty directory with `maps` set
   to the two dream maps: co-op bots, no errors; PvP bots on `dream/king` from the repo (22 kills,
-  a round ended). Not published yet when this was written: `npm publish` needs the owner.
+  a round ended). npm's shasum matches it (`40234b1f`). The image (both platforms, `latest` moved
+  to it) was pulled and run, with co-op bots against it.
 
 
 ## Networking with Colyseus

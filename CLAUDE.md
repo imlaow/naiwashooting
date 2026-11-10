@@ -53,7 +53,8 @@ See `README.md` for running the game, controls and the code map.
   no tunnel or proxy on it, so players can't reach it yet. Test it through an SSH forward:
   `gcloud compute ssh … -- -N -L 7797:localhost:7777`, then
   `node tools/bot-clients.mjs --server ws://127.0.0.1:7797 --minutes 1`.
-- Updated to 0.1.5 on 2026-11-08 (from 0.1.4); bots through the forward: no errors.
+- Updated to 0.1.6 on 2026-11-10 (from 0.1.5); bots through the forward on `dream/king`: no
+  errors. Its rotation (`server.json`) doesn't list the dream maps.
 
 ## Online play
 
